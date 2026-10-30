@@ -23,7 +23,11 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "link", usage: "pchart link PLAN FROM TO", about: "Let TO wait on FROM." },
     Command { name: "unlink", usage: "pchart unlink PLAN FROM TO", about: "TO no longer waits on FROM." },
     Command { name: "apply", usage: "pchart apply PLAN EDITS.json", about: "Apply a JSON list of edits, all of them or none. \"-\" reads the list from stdin." },
-    Command { name: "export", usage: "pchart export PLAN [--svg FILE] [--png FILE] [--pdf FILE] [--size WxH]", about: "The roadmap as pictures and PDF." },
+    Command {
+        name: "export",
+        usage: "pchart export PLAN [--view roadmap|milestones] [--svg FILE] [--png FILE] [--pdf FILE] [--level overview|standard|full] [--size WxH] [--md FILE [--audience management|agents]]",
+        about: "A view as pictures and PDF: the roadmap at a detail level, or the milestone chart as a 16:9 page. --md writes the plan as Markdown with the milestone chart as SVG next to it.",
+    },
     Command { name: "bench", usage: "pchart bench PLAN --frames N --out FILE", about: "Inside a terminal: change an item N times and time every step." },
     Command { name: "help", usage: "pchart help [--json]", about: "This help; with --json for programs." },
 ];

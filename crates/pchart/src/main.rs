@@ -10,7 +10,7 @@ use pchart_core::analysis::Severity;
 use pchart_core::edit::{Edit, Fix};
 use pchart_core::model::{Item, parse_workdays};
 use pchart_core::{Calendar, Holidays, Plan, Schedule, analyse, text};
-use pchart_draw::{Output, Palette, Settings};
+use pchart_draw::{Audience, Level, Output, Palette, Settings};
 use serde_json::json;
 
 use crate::cli::Args;
@@ -137,7 +137,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
     let known: &[&str] = match args.command {
         "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who"],
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
-        "export" => &["--svg", "--png", "--pdf", "--size"],
+        "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--md", "--audience"],
         "bench" => &["--frames", "--out"],
         _ => &[],
     };
@@ -448,23 +448,60 @@ fn print_schedule(plan: &Plan, schedule: &Schedule, json: bool) {
 }
 
 fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
-    let (width, height) = match args.option("--size") {
-        Some(size) => size.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or_else(|| Failure::usage(format!("\"{size}\" is not a size like 1220x756"), args))?,
-        None => (1220.0, 756.0),
+    if ["--svg", "--png", "--pdf", "--md"].iter().all(|option| args.option(option).is_none()) {
+        return Err(Failure::usage("export needs at least one of --svg, --png, --pdf and --md", args));
+    }
+    let audience = match args.option("--audience").unwrap_or("management") {
+        "management" => Audience::Management,
+        "agents" => Audience::Agents,
+        other => return Err(Failure::usage(format!("\"{other}\" is not an audience for Markdown; use management or agents"), args)),
     };
-    let settings = Settings { width, height, unit: 1.0, today: ctx.today, selected: None, palette: Palette::labra() };
-    let svg = pchart_draw::roadmap(&ctx.plan, &ctx.schedule, &ctx.calendars, &settings).svg();
-    let output = Output::default();
-    let tree = output.tree(&svg).map_err(Failure::file)?;
-    let write = |path: &str, bytes: &[u8]| std::fs::write(path, bytes).map_err(|err| Failure::file(format!("{path}: {err}")));
-    if let Some(path) = args.option("--svg") {
-        write(path, svg.as_bytes())?;
+    let scene = match args.option("--view").unwrap_or("roadmap") {
+        "roadmap" => {
+            let size = match args.option("--size") {
+                Some(size) => Some(size.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or_else(|| Failure::usage(format!("\"{size}\" is not a size like 1220x756"), args))?),
+                None => None,
+            };
+            let level = match args.option("--level").unwrap_or("full") {
+                "overview" => Level::Overview,
+                "standard" => Level::Standard,
+                "full" => Level::Full,
+                other => return Err(Failure::usage(format!("\"{other}\" is not a detail level; use overview, standard or full"), args)),
+            };
+            let mut settings = Settings { width: size.map_or(1220.0, |(width, _)| width), height: 0.0, unit: 1.0, today: ctx.today, selected: None, level, palette: Palette::labra() };
+            settings.height = size.map_or_else(|| pchart_draw::natural_height(&ctx.plan, &ctx.schedule, &settings), |(_, height)| height);
+            pchart_draw::roadmap(&ctx.plan, &ctx.schedule, &ctx.calendars, &settings)
+        }
+        "milestones" => {
+            if let Some(option) = ["--size", "--level"].into_iter().find(|option| args.option(option).is_some()) {
+                return Err(Failure::usage(format!("{option} is for the roadmap; the milestone chart is a 16:9 page"), args));
+            }
+            pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today)
+        }
+        other => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap or milestones"), args)),
+    };
+    let svg = scene.svg();
+    let write = |path: &Path, bytes: &[u8]| std::fs::write(path, bytes).map_err(|err| Failure::file(format!("{}: {err}", path.display())));
+    if args.option("--svg").is_some() || args.option("--png").is_some() || args.option("--pdf").is_some() {
+        let output = Output::default();
+        let tree = output.tree(&svg).map_err(Failure::file)?;
+        if let Some(path) = args.option("--svg") {
+            write(Path::new(path), svg.as_bytes())?;
+        }
+        if let Some(path) = args.option("--png") {
+            write(Path::new(path), &output.png(&tree, 1.0).map_err(Failure::file)?)?;
+        }
+        if let Some(path) = args.option("--pdf") {
+            write(Path::new(path), &output.pdf(&tree).map_err(Failure::file)?)?;
+        }
     }
-    if let Some(path) = args.option("--png") {
-        write(path, &output.png(&tree, 1.0).map_err(Failure::file)?)?;
-    }
-    if let Some(path) = args.option("--pdf") {
-        write(path, &output.pdf(&tree).map_err(Failure::file)?)?;
+    if let Some(path) = args.option("--md") {
+        let stem = ctx.path.file_stem().map_or("plan".into(), |stem| stem.to_string_lossy());
+        let picture = format!("{stem}-milestones.svg");
+        write(&Path::new(path).with_file_name(&picture), pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today).svg().as_bytes())?;
+        let analysis = analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today);
+        let source = ctx.path.file_name().map_or("plan".into(), |name| name.to_string_lossy());
+        write(Path::new(path), pchart_draw::markdown(&ctx.plan, &ctx.schedule, &analysis, &source, ctx.today, &picture, audience).as_bytes())?;
     }
     Ok(())
 }

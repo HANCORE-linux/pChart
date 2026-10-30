@@ -1,0 +1,126 @@
+format = 1
+name = "Crowded"
+
+[[phases]]
+name = "Discovery and research"
+until = "research-done"
+
+[[phases]]
+name = "Build"
+until = "release"
+
+[[lanes]]
+id = "team"
+name = "Platform team with a long name"
+place = "DE-BY"
+city = "München"
+
+[[lanes]]
+id = "ops"
+name = "Ops"
+place = "US-CA"
+city = "San Francisco"
+
+[[lanes]]
+id = "legal"
+name = "Legal"
+place = "FR"
+city = "Paris"
+
+[[items]]
+id = "interviews"
+lane = "team"
+name = "Customer interviews in three countries"
+duration = "3wd"
+
+[[items]]
+id = "survey"
+lane = "team"
+name = "Survey"
+duration = "2wd"
+after = ["interviews"]
+
+[[items]]
+id = "synthesis"
+lane = "team"
+name = "Synthesis workshop"
+duration = "1wd"
+after = ["survey"]
+
+[[items]]
+id = "research-done"
+lane = "team"
+name = "Research done"
+milestone = true
+after = ["synthesis"]
+
+[[items]]
+id = "kickoff"
+lane = "team"
+name = "Kick-off"
+milestone = true
+after = ["research-done"]
+
+[[items]]
+id = "build-a"
+lane = "team"
+name = "Build the first part of the platform"
+duration = "4wd"
+after = ["kickoff"]
+
+[[items]]
+id = "build-b"
+lane = "team"
+name = "Second part"
+duration = "2wd"
+after = ["build-a"]
+
+[[items]]
+id = "infra"
+lane = "ops"
+name = "Infrastructure"
+duration = "3wd"
+after = ["research-done"]
+
+[[items]]
+id = "monitoring"
+lane = "ops"
+name = "Monitoring and alerting setup"
+duration = "2wd"
+after = ["infra"]
+
+[[items]]
+id = "contract"
+lane = "legal"
+name = "Contract review"
+duration = "5wd"
+no_later_than = 2026-12-04
+
+[[items]]
+id = "privacy"
+lane = "legal"
+name = "Privacy impact assessment"
+duration = "3wd"
+after = ["contract"]
+
+[[items]]
+id = "signed"
+lane = "legal"
+name = "Signed"
+milestone = true
+after = ["privacy"]
+
+[[items]]
+id = "approved"
+lane = "legal"
+name = "Approved by the board"
+milestone = true
+after = ["signed"]
+
+[[items]]
+id = "release"
+lane = "team"
+name = "Release"
+milestone = true
+after = ["build-b", "monitoring", "approved"]
+on = 2026-12-18

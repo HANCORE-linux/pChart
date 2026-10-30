@@ -1,7 +1,7 @@
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg::{self, Tree};
 
-use crate::style::{BOLD, FONT, REGULAR};
+use crate::style::{BOLD, FONT, REGULAR, SANS_BOLD, SANS_REGULAR};
 
 /// Turns scene SVG into pictures and files, with the bundled fonts only, so every machine draws the same.
 pub struct Output {
@@ -14,6 +14,8 @@ impl Default for Output {
         let fonts = options.fontdb_mut();
         fonts.load_font_data(REGULAR.to_vec());
         fonts.load_font_data(BOLD.to_vec());
+        fonts.load_font_data(SANS_REGULAR.to_vec());
+        fonts.load_font_data(SANS_BOLD.to_vec());
         Output { options }
     }
 }

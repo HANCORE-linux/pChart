@@ -1258,6 +1258,7 @@ dependencies = [
  "krilla-svg",
  "pchart-core",
  "resvg",
+ "ttf-parser",
 ]
 
 [[package]]

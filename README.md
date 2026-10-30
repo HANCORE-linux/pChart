@@ -17,7 +17,8 @@ cargo build --release
 ./target/release/pchart samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart situation samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart schedule samples/customer-portal.pchart --today 2026-10-29
-./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --png roadmap.png --pdf roadmap.pdf
+./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --level standard --png roadmap.png --pdf roadmap.pdf
+./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view milestones --pdf milestones.pdf --md ROADMAP.md
 ```
 
 ↑↓ selects an item, ←→ makes it shorter or longer, q quits.
@@ -28,4 +29,4 @@ kitty, Ghostty and foot. Terminals without kitty graphics or sixel pictures are 
 
 ## License
 
-MIT. Bundled fonts: JetBrains Mono under the SIL Open Font License (`crates/pchart-draw/assets/OFL-JetBrainsMono.txt`). Holiday data comes from [python-holidays](https://github.com/vacanza/holidays) (MIT); see [data/README.md](data/README.md).
+MIT. Bundled fonts under the SIL Open Font License: JetBrains Mono (`crates/pchart-draw/assets/OFL-JetBrainsMono.txt`) and Noto Sans (`crates/pchart-draw/assets/OFL-NotoSans.txt`). Holiday data comes from [python-holidays](https://github.com/vacanza/holidays) (MIT); see [data/README.md](data/README.md).

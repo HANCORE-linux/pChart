@@ -14,6 +14,8 @@ pub enum Fill {
     Color(Color),
     Hatch,
     HatchAlert,
+    /// Thin diagonal lines over the background: time an item has to spare.
+    Spare,
     None,
 }
 
@@ -55,6 +57,7 @@ pub struct Scene {
     pub background: Color,
     pub hatch: (Color, Color),
     pub hatch_alert: (Color, Color),
+    pub spare: Color,
     pub font: &'static str,
     pub marks: Vec<Mark>,
 }
@@ -84,6 +87,11 @@ impl Scene {
         out.push_str("<defs>");
         pattern(&mut out, "hatch", 4.0, self.hatch, 1.6);
         pattern(&mut out, "alert", 5.0, self.hatch_alert, 2.0);
+        let _ = write!(
+            out,
+            r#"<pattern id="spare" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="{}" stroke-width="1.4" opacity="0.55"/></pattern>"#,
+            self.spare.hex()
+        );
         out.push_str("</defs>");
         for mark in &self.marks {
             write_mark(&mut out, mark);
@@ -126,6 +134,7 @@ fn fill(fill: Fill) -> String {
         Fill::Color(color) => color.hex(),
         Fill::Hatch => "url(#hatch)".into(),
         Fill::HatchAlert => "url(#alert)".into(),
+        Fill::Spare => "url(#spare)".into(),
         Fill::None => "none".into(),
     }
 }
@@ -198,7 +207,7 @@ mod tests {
 
     fn scene() -> Scene {
         let ink = Color(1, 2, 3);
-        Scene { width: 100.0, height: 50.0, background: ink, hatch: (ink, ink), hatch_alert: (ink, ink), font: "JetBrains Mono", marks: Vec::new() }
+        Scene { width: 100.0, height: 50.0, background: ink, hatch: (ink, ink), hatch_alert: (ink, ink), spare: ink, font: "JetBrains Mono", marks: Vec::new() }
     }
 
     #[test]

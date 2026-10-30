@@ -1,11 +1,22 @@
 use std::collections::HashSet;
 
 use jiff::civil::{Date, Weekday};
+use pchart_core::analysis::Check;
 use pchart_core::calendar::{Calendar, next, previous};
-use pchart_core::{Plan, Schedule};
+use pchart_core::{Plan, Schedule, analyse};
 
-use crate::scene::{Anchor, Color, Fill, Scene, Shape, Stroke};
+use crate::scene::{Anchor, Color, Fill, Mark, Scene, Shape, Stroke};
 use crate::style::{ADVANCE, FONT, Palette};
+
+/// How much a roadmap shows. Overview folds each lane into one bar; Full adds dependencies, holidays,
+/// free slack, the date of every milestone and the place of every lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Level {
+    Overview,
+    Standard,
+    #[default]
+    Full,
+}
 
 /// What a roadmap picture shows and at which size. `unit` is one pixel of a 21 px tall cell.
 #[derive(Debug, Clone, Copy)]
@@ -15,17 +26,34 @@ pub struct Settings {
     pub unit: f32,
     pub today: Date,
     pub selected: Option<usize>,
+    pub level: Level,
     pub palette: Palette,
+}
+
+/// Height of a lane with one row of bars, as in the approved design.
+const LANE: f32 = 92.0;
+/// Each further row of bars in a lane adds this share of a lane.
+const ROW: f32 = 0.6;
+
+/// Left, top, right and bottom of something drawn, to keep names off it.
+type Area = [f32; 4];
+
+fn hits(a: &Area, b: &Area) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
 }
 
 struct Grid {
     start: Date,
+    end: Date,
+    top: f32,
     x0: f32,
     x1: f32,
     px: f32,
-    rows_y: f32,
-    lane_h: f32,
+    /// The top of each lane, and the bottom of the last one.
+    tops: Vec<f32>,
+    /// From the top of a lane to the middle of its first row of bars, and from row to row.
     bar: f32,
+    pitch: f32,
 }
 
 impl Grid {
@@ -34,17 +62,145 @@ impl Grid {
     }
 
     fn lane_y(&self, lane: usize) -> f32 {
-        self.rows_y + lane as f32 * self.lane_h
+        self.tops[lane]
+    }
+
+    fn lane_h(&self, lane: usize) -> f32 {
+        self.tops[lane + 1] - self.tops[lane]
+    }
+
+    fn bottom(&self) -> f32 {
+        self.tops[self.tops.len() - 1]
     }
 }
 
-/// The swimlane roadmap at the Full detail level.
+/// One roadmap being drawn: the plan, its schedule and where things go.
+struct Chart<'a> {
+    plan: &'a Plan,
+    schedule: &'a Schedule,
+    lanes: Vec<usize>,
+    /// The row of bars an item sits in within its lane, so items at the same time do not cover each other.
+    rows: Vec<usize>,
+    chain: HashSet<usize>,
+    g: Grid,
+    p: Palette,
+    u: f32,
+    width: f32,
+    selected: Option<usize>,
+    level: Level,
+}
+
+impl Chart<'_> {
+    /// Left end, right end and middle height of an item; both ends are the same for a milestone.
+    fn bar(&self, index: usize) -> (f32, f32, f32) {
+        let y = self.g.lane_y(self.lanes[index]) + self.g.bar + self.rows[index] as f32 * self.g.pitch;
+        if self.plan.items[index].milestone {
+            let x = self.milestone_x(index);
+            return (x, x, y);
+        }
+        let span = self.schedule.slots[index].planned;
+        (self.g.x(span.start), self.g.x(span.finish) + self.g.px, y)
+    }
+
+    /// Calculated milestones sit at the end of their day, fixed ones in its middle.
+    fn milestone_x(&self, index: usize) -> f32 {
+        let x = self.g.x(self.schedule.slots[index].planned.finish);
+        if self.plan.items[index].on.is_some() { x + self.g.px / 2.0 } else { x + self.g.px }
+    }
+
+    /// What the bar or diamond of an item covers, with the pin of a fixed date.
+    fn area(&self, index: usize) -> Vec<Area> {
+        let u = self.u;
+        let (x0, x1, y) = self.bar(index);
+        if !self.plan.items[index].milestone {
+            return vec![[x0, y - 7.0 * u, x1, y + 7.0 * u]];
+        }
+        let mut out = vec![[x0 - 8.0 * u, y - 8.0 * u, x0 + 8.0 * u, y + 8.0 * u]];
+        if self.plan.items[index].on.is_some() {
+            out.push([x0 - 4.0 * u, y - 27.0 * u, x0 + 4.0 * u, y - 8.0 * u]);
+        }
+        out
+    }
+
+    fn late(&self, index: usize) -> bool {
+        self.schedule.slots[index].spare < 0
+    }
+
+    fn ink(&self, index: usize) -> Color {
+        if self.late(index) {
+            self.p.alert
+        } else if self.selected == Some(index) || self.chain.contains(&index) {
+            self.p.bright
+        } else {
+            self.p.dim
+        }
+    }
+
+    fn rule(&self, color: Color, width: f32) -> Stroke {
+        Stroke { color, width: width * self.u, dash: None }
+    }
+
+    fn text_width(&self, text: &str, size: f32) -> f32 {
+        text.chars().count() as f32 * size * self.u * ADVANCE
+    }
+
+    /// The first of `places` where a name fits inside its lane without touching anything in `taken`, and
+    /// the area it then takes, with room to keep the next name apart.
+    fn place(&self, lane: usize, text: &str, size: f32, places: &[(f32, f32, Anchor)], taken: &[Area]) -> Option<(f32, f32, Anchor, Area)> {
+        let (u, w) = (self.u, self.text_width(text, size));
+        let (top, bottom) = (self.g.lane_y(lane) + u, self.g.lane_y(lane) + self.g.lane_h(lane) - u);
+        places.iter().find_map(|&(x, y, anchor)| {
+            let left = match anchor {
+                Anchor::Start => x,
+                Anchor::Middle => x - w / 2.0,
+                Anchor::End => x - w,
+            };
+            let area = [left, y - 0.78 * size * u, left + w, y + 0.24 * size * u];
+            let inside = area[0] >= self.g.x0 && area[2] <= self.width - 2.0 * u && area[1] >= top && area[3] <= bottom;
+            (inside && !taken.iter().any(|other| hits(&area, other))).then_some((x, y, anchor, [area[0] - 6.0 * u, area[1], area[2] + 6.0 * u, area[3]]))
+        })
+    }
+}
+
+/// The swimlane roadmap at the detail level of `settings`.
 pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings) -> Scene {
     let (p, u, today) = (settings.palette, settings.unit, settings.today);
-    let mut s = Scene { width: settings.width, height: settings.height, background: p.page, hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), font: FONT, marks: Vec::new() };
-    let lanes: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect();
-    let chain: HashSet<usize> = schedule.chain.iter().copied().collect();
+    let mut s = Scene { width: settings.width, height: settings.height, background: p.page, hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
+    let c = chart(plan, schedule, settings, Some(settings.height));
 
+    frame(&mut s, &c, calendars);
+    if let Some(target) = schedule.target {
+        let xt = c.g.x(schedule.slots[target].planned.finish);
+        s.add(Shape::Line { x1: xt, y1: c.g.lane_y(0) + 2.0 * u, x2: xt, y2: c.g.bottom(), stroke: Stroke { color: p.bright, width: u, dash: Some((4.0 * u, 4.0 * u)) } });
+    }
+    if c.level == Level::Overview {
+        folded(&mut s, &c);
+    } else {
+        let mut taken: Vec<Area> = (0..plan.items.len()).flat_map(|index| c.area(index)).collect();
+        if c.level == Level::Full {
+            arrows(&mut s, &c);
+            free_slack(&mut s, &c, &mut taken);
+        }
+        bars(&mut s, &c);
+        buffers(&mut s, &c, &analyse(plan, calendars, schedule, today).checks, &mut taken);
+        labels(&mut s, &c, &mut taken);
+    }
+
+    let xt = c.g.x(today);
+    s.add(Shape::Line { x1: xt, y1: c.g.top + 42.0 * u, x2: xt, y2: c.g.bottom(), stroke: c.rule(p.ink, 1.5) });
+    s.add(Shape::Text { x: xt - 5.0 * u, y: c.g.top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
+    s
+}
+
+/// The height at which every lane of the roadmap gets the room of the approved design.
+pub fn natural_height(plan: &Plan, schedule: &Schedule, settings: &Settings) -> f32 {
+    chart(plan, schedule, settings, None).g.bottom() + 22.0 * settings.unit
+}
+
+/// Lays the roadmap out: the days it shows, a row for every item, and lanes that share `height`, or
+/// get their natural room without one.
+fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height: Option<f32>) -> Chart<'a> {
+    let (u, today) = (settings.unit, settings.today);
     let first = schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(today).min(today);
     let last = schedule.slots.iter().map(|slot| slot.planned.finish.max(slot.latest.finish)).max().unwrap_or(today);
     let mut start = first;
@@ -53,32 +209,94 @@ pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], setting
     }
     let end = (0..20).fold(last, |day, _| next(day));
     let top = 26.0 * u;
-    let rows_y = top + 64.0 * u;
-    let lane_h = ((settings.height - rows_y - 22.0 * u) / plan.lanes.len().max(1) as f32).max(24.0 * u);
-    let x0 = 220.0 * u;
-    let x1 = settings.width - 8.0 * u;
+    let (x0, x1) = (220.0 * u, settings.width - 8.0 * u);
     let px = (x1 - x0) / (days(start, end) + 1) as f32;
-    let g = Grid { start, x0, x1, px, rows_y, lane_h, bar: (40.0 * u).min(lane_h * 0.45) };
-    let bottom = g.lane_y(plan.lanes.len());
-    let rule = |color: Color, width: f32| Stroke { color, width, dash: None };
+    let mut c = Chart {
+        plan,
+        schedule,
+        lanes: plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect(),
+        rows: vec![0; plan.items.len()],
+        chain: schedule.chain.iter().copied().collect(),
+        g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u },
+        p: settings.palette,
+        u,
+        width: settings.width,
+        selected: settings.selected,
+        level: settings.level,
+    };
+    if c.level != Level::Overview {
+        c.rows = rows(&c);
+    }
+    let weights: Vec<f32> = (0..plan.lanes.len())
+        .map(|lane| {
+            let rows = (0..plan.items.len()).filter(|&index| c.lanes[index] == lane).map(|index| c.rows[index] + 1).max().unwrap_or(1);
+            1.0 + ROW * (rows - 1) as f32
+        })
+        .collect();
+    let rows_y = top + 64.0 * u;
+    let lane = match height {
+        Some(height) => ((height - rows_y - 22.0 * u) / weights.iter().sum::<f32>().max(1.0)).max(24.0 * u),
+        None => LANE * u,
+    };
+    c.g.tops = std::iter::once(rows_y).chain(weights.iter().scan(rows_y, |y, weight| {
+        *y += lane * weight;
+        Some(*y)
+    })).collect();
+    c.g.bar = (40.0 * u).min(lane * 0.45);
+    c.g.pitch = lane * ROW;
+    c
+}
+
+/// Rows within each lane, first come first served: an item goes into the first row where it covers
+/// nothing. A milestone may sit at the end or start of a bar, but not inside it or on another milestone.
+fn rows(c: &Chart) -> Vec<usize> {
+    let u = c.u;
+    let reach = |index: usize| {
+        let (x0, x1, _) = c.bar(index);
+        if c.plan.items[index].milestone { (x0 - 8.0 * u, x1 + 8.0 * u) } else { (x0, x1) }
+    };
+    let clash = |a: usize, b: usize| {
+        let (ma, mb) = (c.plan.items[a].milestone, c.plan.items[b].milestone);
+        let ((a0, a1), (b0, b1)) = (reach(a), reach(b));
+        match (ma, mb) {
+            (false, false) | (true, true) => a0 < b1 - 0.5 && b0 < a1 - 0.5,
+            (true, false) => (a0 + a1) / 2.0 > b0 + 0.5 && (a0 + a1) / 2.0 < b1 - 0.5,
+            (false, true) => (b0 + b1) / 2.0 > a0 + 0.5 && (b0 + b1) / 2.0 < a1 - 0.5,
+        }
+    };
+    let mut order: Vec<usize> = (0..c.plan.items.len()).collect();
+    order.sort_by(|&a, &b| reach(a).0.total_cmp(&reach(b).0));
+    let mut rows = vec![0; c.plan.items.len()];
+    let mut placed: Vec<usize> = Vec::new();
+    for index in order {
+        rows[index] = (0..).find(|&row| !placed.iter().any(|&other| c.lanes[other] == c.lanes[index] && rows[other] == row && clash(index, other))).unwrap_or(0);
+        placed.push(index);
+    }
+    rows
+}
+
+/// Months and weeks, phases, lanes, and in Full the holidays of each lane.
+fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
+    let (g, p, u) = (&c.g, c.p, c.u);
+    let (top, end, bottom) = (g.top, g.end, g.bottom());
     let text = |x: f32, y: f32, text: String, size: f32, color: Color| Shape::Text { x, y, text, size: size * u, color, bold: false, anchor: Anchor::Start };
 
-    let mut month = start.first_of_month();
+    let mut month = g.start.first_of_month();
     let mut labelled = false;
     while month <= end {
         let following = next(month.last_of_month());
-        let xa = g.x(month.max(start));
-        if month >= start {
-            s.add(Shape::Line { x1: xa, y1: top, x2: xa, y2: bottom, stroke: rule(p.rule, 1.0) });
+        let xa = g.x(month.max(g.start));
+        if month >= g.start {
+            s.add(Shape::Line { x1: xa, y1: top, x2: xa, y2: bottom, stroke: c.rule(p.rule, 1.0 / u) });
         }
         let label = if !labelled || month.month() == 1 { month.strftime("%b %Y").to_string() } else { month.strftime("%b").to_string() };
-        if g.x(following.min(end)) - xa > (label.chars().count() as f32 * 14.5 * ADVANCE + 12.0) * u {
+        if g.x(following.min(end)) - xa > c.text_width(&label, 14.5) + 12.0 * u {
             s.add(text(xa + 6.0 * u, top + 14.0 * u, label, 14.5, p.ink));
             labelled = true;
         }
         month = following;
     }
-    let mut monday = start;
+    let mut monday = g.start;
     let mut first_week = true;
     while monday <= end {
         let week = format!("{}{:02}", if first_week { "W" } else { "" }, monday.iso_week_date().week());
@@ -86,156 +304,227 @@ pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], setting
         first_week = false;
         monday = (0..7).fold(monday, |day, _| next(day));
     }
-    s.add(Shape::Line { x1: x0, y1: top + 40.0 * u, x2: x1, y2: top + 40.0 * u, stroke: rule(p.rule, 1.0) });
+    s.add(Shape::Line { x1: g.x0, y1: top + 40.0 * u, x2: g.x1, y2: top + 40.0 * u, stroke: c.rule(p.rule, 1.0 / u) });
 
-    for (name, from, to) in schedule.phases(plan) {
-        chevron(&mut s, &p, u, g.x(from), g.x(to) + px, top + 44.0 * u, 18.0 * u, &name);
+    for (name, from, to) in c.schedule.phases(c.plan) {
+        chevron(s, &p, u, g.x(from), g.x(to) + g.px, top + 44.0 * u, 18.0 * u, &name);
     }
     s.add(text(12.0 * u, top + 58.0 * u, "Phases".into(), 14.0, p.muted));
 
-    for (index, lane) in plan.lanes.iter().enumerate() {
+    let room = g.x0 - 24.0 * u;
+    for (index, lane) in c.plan.lanes.iter().enumerate() {
         let y = g.lane_y(index);
-        s.add(Shape::Line { x1: 6.0 * u, y1: y, x2: x1, y2: y, stroke: rule(p.rule, 1.0) });
-        s.add(text(12.0 * u, y + 31.0 * u, lane.name.clone(), 16.6, p.ink));
-        if lane_h >= 60.0 * u {
+        if c.level == Level::Full {
+            for (day, _) in calendars[index].holidays(g.start, end) {
+                if !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday) {
+                    s.add(Shape::Rect { x: g.x(day), y: y + 8.0 * u, w: g.px, h: g.lane_h(index) - 16.0 * u, radius: 0.0, fill: Fill::Hatch, stroke: None });
+                }
+            }
+        }
+        s.add(Shape::Line { x1: 6.0 * u, y1: y, x2: g.x1, y2: y, stroke: c.rule(p.rule, 1.0 / u) });
+        s.add(text(12.0 * u, y + 31.0 * u, fit(&lane.name, 16.6 * u, room), 16.6, p.ink));
+        if c.level == Level::Full && g.lane_h(index) >= 60.0 * u {
             let place = [lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-            s.add(text(12.0 * u, y + 52.0 * u, place, 14.0, p.muted));
+            s.add(text(12.0 * u, y + 52.0 * u, fit(&place, 14.0 * u, room), 14.0, p.muted));
         }
-        for (day, _) in calendars[index].holidays(start, end) {
-            if !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday) {
-                s.add(Shape::Rect { x: g.x(day), y: y + 8.0 * u, w: px, h: lane_h - 16.0 * u, radius: 0.0, fill: Fill::Hatch, stroke: None });
+    }
+}
+
+/// Who waits on whom, as arrows from the end of an item to the start of the next.
+fn arrows(s: &mut Scene, c: &Chart) {
+    let u = c.u;
+    for (index, item) in c.plan.items.iter().enumerate() {
+        for pred in item.after.iter().filter_map(|id| c.plan.item(id)) {
+            let (ax0, ax1, ay) = c.bar(pred);
+            let (bx0, _, by) = c.bar(index);
+            let from_milestone = c.plan.items[pred].milestone;
+            let x1 = ax1 + if from_milestone { 7.0 * u } else { 0.0 };
+            let x2 = bx0 - if item.milestone { 7.0 * u } else { 0.0 };
+            let (color, opacity) = if c.chain.contains(&pred) && c.chain.contains(&index) { (c.p.dim, 0.9) } else { (c.p.muted, 0.7) };
+            let stroke = Some(c.rule(color, 1.2));
+            let line = |points: Vec<(f32, f32)>| Mark { shape: Shape::Path { points, closed: false, fill: Fill::None, stroke }, opacity, item: None };
+            if (ay - by).abs() < 1.0 {
+                s.marks.push(line(vec![(x1, ay), (x2 - u, by)]));
+                continue;
             }
-        }
-    }
-
-    if let Some(target) = schedule.target {
-        let xt = g.x(schedule.slots[target].planned.finish) + px / 2.0;
-        s.add(Shape::Line { x1: xt, y1: rows_y + 2.0 * u, x2: xt, y2: bottom, stroke: Stroke { color: p.bright, width: 1.0, dash: Some((4.0 * u, 4.0 * u)) } });
-    }
-
-    let ends = |index: usize| {
-        let slot = &schedule.slots[index].planned;
-        (g.x(slot.start), g.x(slot.finish) + px, g.lane_y(lanes[index]) + g.bar)
-    };
-    let point = |index: usize| milestone_x(plan, schedule, &g, index);
-    for (index, item) in plan.items.iter().enumerate() {
-        for pred in item.after.iter().filter_map(|id| plan.item(id)) {
-            let (_, ax1, ay) = ends(pred);
-            let (bx0, _, by) = ends(index);
-            let from = if plan.items[pred].milestone { point(pred) + 7.0 * u } else { ax1 };
-            let to = if item.milestone { point(index) - 7.0 * u } else { bx0 };
-            let deciding = chain.contains(&pred) && chain.contains(&index);
-            let (color, opacity) = if deciding { (p.dim, 0.9) } else { (p.muted, 0.7) };
-            let stroke = Some(Stroke { color, width: 1.2 * u, dash: None });
-            let points = if (ay - by).abs() < 1.0 {
-                vec![(from, ay), (to - u, by)]
+            if from_milestone {
+                let y1 = ay + if by > ay { 7.0 * u } else { -7.0 * u };
+                s.marks.push(line(vec![(ax0, y1), (ax0, by), (x2 - u, by)]));
             } else {
-                let xm = from + ((to - from) / 2.0).clamp(3.0 * u, 6.0 * u);
-                vec![(from, ay), (xm, ay), (xm, by), (to - u, by)]
-            };
-            s.marks.push(crate::scene::Mark { shape: Shape::Path { points, closed: false, fill: Fill::None, stroke }, opacity, item: None });
-            let head = vec![(to, by), (to - 5.0 * u, by - 3.0 * u), (to - 5.0 * u, by + 3.0 * u)];
-            s.marks.push(crate::scene::Mark { shape: Shape::Path { points: head, closed: true, fill: Fill::Color(color), stroke: None }, opacity, item: None });
-        }
-    }
-
-    for (index, item) in plan.items.iter().enumerate() {
-        let slot = &schedule.slots[index];
-        let (bx0, bx1, y) = ends(index);
-        let late = slot.slack < 0;
-        if item.milestone {
-            let x = point(index);
-            if item.on.is_some() {
-                diamond(&mut s, index, x, y, 8.0 * u, Fill::Color(p.bright), None);
-                s.add_for(index, 1.0, Shape::Line { x1: x, y1: y - 10.0 * u, x2: x, y2: y - 20.0 * u, stroke: rule(p.bright, 1.6 * u) });
-                s.add_for(index, 1.0, Shape::Circle { x, y: y - 23.0 * u, r: 4.0 * u, fill: p.bright });
-            } else if late {
-                diamond(&mut s, index, x, y, 7.0 * u, Fill::Color(p.alert), None);
-            } else if chain.contains(&index) {
-                diamond(&mut s, index, x, y, 7.0 * u, Fill::Color(p.ink), None);
-            } else {
-                diamond(&mut s, index, x, y, 7.0 * u, Fill::Color(p.page), Some(rule(p.dim, 1.5 * u)));
+                let xm = x1 + ((x2 - x1) / 2.0).clamp(3.0 * u, 6.0 * u);
+                s.marks.push(line(vec![(x1, ay), (xm, ay), (xm, by), (x2 - u, by)]));
             }
+            let head = vec![(x2, by), (x2 - 5.0 * u, by - 3.0 * u), (x2 - 5.0 * u, by + 3.0 * u)];
+            s.marks.push(Mark { shape: Shape::Path { points: head, closed: true, fill: Fill::Color(color), stroke: None }, opacity, item: None });
+        }
+    }
+}
+
+/// How far each bar can slip before it pushes a successor, hatched behind its end.
+fn free_slack(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
+    let u = c.u;
+    for (index, item) in c.plan.items.iter().enumerate() {
+        let slot = &c.schedule.slots[index];
+        if item.milestone || c.chain.contains(&index) {
             continue;
         }
-        let free = free_until(plan, schedule, index);
-        if !chain.contains(&index) && free > slot.planned.finish {
-            let xs = g.x(next(slot.planned.finish));
-            let xe = g.x(free) + px;
-            s.add_for(index, 0.7, Shape::Rect { x: xs, y: y - 5.0 * u, w: xe - xs, h: 10.0 * u, radius: 0.0, fill: Fill::Hatch, stroke: None });
+        let free = free_until(c.plan, c.schedule, index);
+        if free > slot.planned.finish {
+            let (_, x1, y) = c.bar(index);
+            let xe = c.g.x(free) + c.g.px;
+            s.add_for(index, 1.0, Shape::Rect { x: x1, y: y - 7.0 * u, w: xe - x1, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Spare, stroke: Some(c.rule(c.p.muted, 1.0)) });
+            taken.push([x1, y - 7.0 * u, xe, y + 7.0 * u]);
         }
-        let (color, opacity) = if late {
+    }
+}
+
+fn bars(s: &mut Scene, c: &Chart) {
+    let u = c.u;
+    for (index, item) in c.plan.items.iter().enumerate() {
+        if item.milestone {
+            milestone(s, c, index);
+            continue;
+        }
+        let (x0, x1, y) = c.bar(index);
+        let (color, opacity) = if c.late(index) {
+            (c.p.alert, 0.92)
+        } else if c.chain.contains(&index) {
+            (c.p.ink, 0.95)
+        } else {
+            (c.p.dim, 0.5)
+        };
+        s.add_for(index, opacity, Shape::Rect { x: x0 + u, y: y - 7.0 * u, w: x1 - x0 - 2.5 * u, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Color(color), stroke: None });
+        if c.selected == Some(index) {
+            corners(s, c, x0, x1, y, 11.0 * u);
+        }
+    }
+}
+
+fn milestone(s: &mut Scene, c: &Chart, index: usize) {
+    let (p, u) = (c.p, c.u);
+    let (x, _, y) = c.bar(index);
+    if c.plan.items[index].on.is_some() {
+        diamond(s, index, x, y, 8.0 * u, Fill::Color(if c.late(index) { p.alert } else { p.bright }), None);
+        s.add_for(index, 1.0, Shape::Line { x1: x, y1: y - 10.0 * u, x2: x, y2: y - 20.0 * u, stroke: c.rule(p.bright, 1.6) });
+        s.add_for(index, 1.0, Shape::Circle { x, y: y - 23.0 * u, r: 4.0 * u, fill: p.bright });
+    } else if c.late(index) {
+        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.alert), None);
+    } else if c.chain.contains(&index) {
+        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.ink), None);
+    } else {
+        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.page), Some(c.rule(p.dim, 1.5)));
+    }
+}
+
+/// Names from left to right: a bar's name above it, else below it, else ending at its end; a
+/// milestone's name to its right, else above or below to its left. A name that fits nowhere is left
+/// out; the selection panel shows it.
+fn labels(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
+    let u = c.u;
+    let size = 13.5;
+    let mut order: Vec<usize> = (0..c.plan.items.len()).collect();
+    order.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
+    for index in order {
+        let item = &c.plan.items[index];
+        let (x0, x1, y) = c.bar(index);
+        let (text, places) = if item.milestone {
+            let day = c.schedule.slots[index].planned.finish;
+            let text = if item.on.is_some() || c.level == Level::Full { format!("{}  {}", item.name, day.strftime("%d %b")) } else { item.name.clone() };
+            (text, [(x0 + 12.0 * u, y + 5.0 * u, Anchor::Start), (x0 - 12.0 * u, y - 12.0 * u, Anchor::End), (x0 - 12.0 * u, y + 24.0 * u, Anchor::End), (x0 + 12.0 * u, y + 24.0 * u, Anchor::Start)])
+        } else {
+            (item.name.clone(), [(x0, y - 13.0 * u, Anchor::Start), (x0, y + 24.0 * u, Anchor::Start), (x1, y - 13.0 * u, Anchor::End), (x1, y + 24.0 * u, Anchor::End)])
+        };
+        if let Some((x, y, anchor, area)) = c.place(c.lanes[index], &text, size, &places, taken) {
+            taken.push(area);
+            s.add_for(index, 1.0, Shape::Text { x, y, text, size: size * u, color: c.ink(index), bold: c.selected == Some(index), anchor });
+        }
+    }
+}
+
+/// The "no buffer" warning, drawn as a bracket from the last item before a fixed date to that date.
+fn buffers(s: &mut Scene, c: &Chart, checks: &[Check], taken: &mut Vec<Area>) {
+    let u = c.u;
+    for check in checks {
+        let Check::NoBuffer { before, target } = *check else { continue };
+        let (bx0, bx1, _) = c.bar(before);
+        let xa = if c.plan.items[before].milestone { bx0 } else { bx1 };
+        let (xl, _, y) = c.bar(target);
+        let y = y + 26.0 * u;
+        s.add(Shape::Path { points: vec![(xa, y - 5.0 * u), (xa, y), (xl, y), (xl, y - 5.0 * u)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.warn, 1.6)) });
+        let text = if c.level == Level::Full { "▲ 0 wd buffer" } else { "▲ no buffer" };
+        taken.push([xa.min(xl) - u, y - 6.0 * u, xl + 10.0 * u + c.text_width(text, 13.5), y + 9.0 * u]);
+        s.add(Shape::Text { x: xl + 10.0 * u, y: y + 5.0 * u, text: text.into(), size: 13.5 * u, color: c.p.warn, bold: true, anchor: Anchor::Start });
+    }
+}
+
+/// Overview: each lane as one bar from its first to its last item, with its milestones.
+fn folded(s: &mut Scene, c: &Chart) {
+    let (p, u) = (c.p, c.u);
+    let size = 14.5;
+    let selected_lane = c.selected.map(|index| c.lanes[index]);
+    let mut taken: Vec<Area> = Vec::new();
+    let mut ends = vec![None; c.plan.lanes.len()];
+    for (lane, end) in ends.iter_mut().enumerate() {
+        let tasks: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.lanes[index] == lane && !c.plan.items[index].milestone).collect();
+        let Some(&first) = tasks.first() else { continue };
+        let y = c.g.lane_y(lane) + c.g.bar;
+        let x0 = tasks.iter().map(|&index| c.bar(index).0).fold(f32::MAX, f32::min);
+        let x1 = tasks.iter().map(|&index| c.bar(index).1).fold(f32::MIN, f32::max);
+        *end = Some(x1);
+        let (color, opacity) = if tasks.iter().any(|&index| c.late(index)) {
             (p.alert, 0.92)
-        } else if chain.contains(&index) {
+        } else if tasks.iter().any(|index| c.chain.contains(index)) {
             (p.ink, 0.95)
         } else {
             (p.dim, 0.5)
         };
-        s.add_for(index, opacity, Shape::Rect { x: bx0, y: y - 7.0 * u, w: bx1 - bx0, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Color(color), stroke: None });
-        if settings.selected == Some(index) {
-            let k = 6.0 * u;
-            for (cx, cy, dx, dy) in [(bx0 - 4.0 * u, y - 11.0 * u, 1.0, 1.0), (bx1 + 4.0 * u, y - 11.0 * u, -1.0, 1.0), (bx0 - 4.0 * u, y + 11.0 * u, 1.0, -1.0), (bx1 + 4.0 * u, y + 11.0 * u, -1.0, -1.0)] {
-                s.add(Shape::Path { points: vec![(cx + dx * k, cy), (cx, cy), (cx, cy + dy * k)], closed: false, fill: Fill::None, stroke: Some(rule(p.bright, 1.6 * u)) });
-            }
+        s.add_for(first, opacity, Shape::Rect { x: x0, y: y - 10.0 * u, w: x1 - x0, h: 20.0 * u, radius: 4.0 * u, fill: Fill::Color(color), stroke: None });
+        taken.push([x0, y - 10.0 * u, x1, y + 10.0 * u]);
+        if selected_lane == Some(lane) {
+            corners(s, c, x0, x1, y, 14.0 * u);
         }
+        let count = if tasks.len() == 1 { "1 item".to_string() } else { format!("{} items", tasks.len()) };
+        taken.push([x0, y - 27.0 * u, x0 + c.text_width(&count, 12.5), y - 14.0 * u]);
+        s.add(Shape::Text { x: x0, y: y - 17.0 * u, text: count, size: 12.5 * u, color: p.muted, bold: false, anchor: Anchor::Start });
     }
-
-    labels(&mut s, plan, schedule, &g, &lanes, &chain, settings);
-
-    let xt = g.x(today);
-    s.add(Shape::Line { x1: xt, y1: top + 42.0 * u, x2: xt, y2: bottom, stroke: rule(p.ink, 1.5 * u) });
-    s.add(Shape::Text { x: xt - 5.0 * u, y: top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
-    s
-}
-
-fn labels(s: &mut Scene, plan: &Plan, schedule: &Schedule, g: &Grid, lanes: &[usize], chain: &HashSet<usize>, settings: &Settings) {
-    let (p, u) = (settings.palette, settings.unit);
-    let size = 13.5 * u;
-    let width = |text: &str| text.chars().count() as f32 * size * ADVANCE;
-    let mut order: Vec<usize> = (0..plan.items.len()).collect();
-    order.sort_by_key(|&index| schedule.slots[index].planned.start);
-    let mut above_end = vec![f32::MIN; plan.lanes.len()];
-    let mut right_end = vec![f32::MIN; plan.lanes.len()];
-    for (position, &index) in order.iter().enumerate() {
-        let item = &plan.items[index];
-        let slot = &schedule.slots[index];
-        let lane = lanes[index];
-        let x0 = g.x(slot.planned.start);
-        let y = g.lane_y(lane) + g.bar;
-        let selected = settings.selected == Some(index);
-        let color = if slot.slack < 0 {
-            p.alert
-        } else if selected || chain.contains(&index) {
-            p.bright
-        } else {
-            p.dim
+    let mut milestones: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.plan.items[index].milestone).collect();
+    milestones.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
+    taken.extend(milestones.iter().flat_map(|&index| c.area(index)));
+    for index in milestones {
+        milestone(s, c, index);
+        let item = &c.plan.items[index];
+        let (x, _, y) = c.bar(index);
+        let text = match item.on {
+            Some(day) => format!("{}  {}", item.name, day.strftime("%d %b")),
+            None => item.name.clone(),
         };
-        if item.milestone {
-            let x = milestone_x(plan, schedule, g, index);
-            let label = format!("{}  {}", item.name, slot.planned.finish.strftime("%d %b"));
-            let next_in_lane = order[position + 1..].iter().find(|&&other| lanes[other] == lane).map(|&other| g.x(schedule.slots[other].planned.start));
-            let room = next_in_lane.unwrap_or(g.x1).min(g.x1);
-            if x + 12.0 * u + width(&label) <= room {
-                s.add_for(index, 1.0, Shape::Text { x: x + 12.0 * u, y: y + 5.0 * u, text: label, size, color, bold: selected, anchor: Anchor::Start });
-                right_end[lane] = x + 12.0 * u + width(&item.name);
-            } else {
-                s.add_for(index, 1.0, Shape::Text { x: x - 12.0 * u, y: y - 12.0 * u, text: label, size, color, bold: selected, anchor: Anchor::End });
-            }
-            continue;
+        let (right, left_above, left_below) = ((x + 14.0 * u, y + 5.0 * u, Anchor::Start), (x - 14.0 * u, y - 14.0 * u, Anchor::End), (x - 14.0 * u, y + 26.0 * u, Anchor::End));
+        let near_end = ends[c.lanes[index]].is_some_and(|end: f32| (x - end).abs() < 12.0 * u);
+        let places = if near_end { [left_above, right, left_below] } else { [right, left_above, left_below] };
+        if let Some((x, y, anchor, area)) = c.place(c.lanes[index], &text, size, &places, &taken) {
+            taken.push(area);
+            let color = if c.late(index) { p.alert } else if c.chain.contains(&index) { p.bright } else { p.dim };
+            s.add_for(index, 1.0, Shape::Text { x, y, text, size: size * u, color, bold: false, anchor });
         }
-        let below = x0 < above_end[lane] + 8.0 * u || x0 < right_end[lane] + 8.0 * u;
-        let label_y = if below { y + 24.0 * u } else { y - 13.0 * u };
-        if !below {
-            above_end[lane] = x0 + width(&item.name);
-        }
-        s.add_for(index, 1.0, Shape::Text { x: x0, y: label_y, text: item.name.clone(), size, color, bold: selected, anchor: Anchor::Start });
     }
 }
 
-/// Calculated milestones sit at the end of their day, fixed ones in its middle.
-fn milestone_x(plan: &Plan, schedule: &Schedule, g: &Grid, index: usize) -> f32 {
-    let x = g.x(schedule.slots[index].planned.finish);
-    if plan.items[index].on.is_some() { x + g.px / 2.0 } else { x + g.px }
+fn corners(s: &mut Scene, c: &Chart, x0: f32, x1: f32, y: f32, h: f32) {
+    let (u, k) = (c.u, 6.0 * c.u);
+    for (cx, cy, dx, dy) in [(x0 - 4.0 * u, y - h, 1.0, 1.0), (x1 + 4.0 * u, y - h, -1.0, 1.0), (x0 - 4.0 * u, y + h, 1.0, -1.0), (x1 + 4.0 * u, y + h, -1.0, -1.0)] {
+        s.add(Shape::Path { points: vec![(cx + dx * k, cy), (cx, cy), (cx, cy + dy * k)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.bright, 1.6)) });
+    }
+}
+
+/// `text` cut to `room` pixels at `size`, ending in "…" when it was cut.
+fn fit(text: &str, size: f32, room: f32) -> String {
+    let fits = |count: usize| count as f32 * size * ADVANCE <= room;
+    let count = text.chars().count();
+    if fits(count) {
+        return text.to_string();
+    }
+    let keep = (0..count).rev().find(|&keep| fits(keep + 1)).unwrap_or(0);
+    text.chars().take(keep).collect::<String>().trim_end().to_string() + "…"
 }
 
 /// The last day an item can finish without moving a successor (its free slack), at most its latest finish.

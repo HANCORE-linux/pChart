@@ -66,6 +66,24 @@ The same rule applies to menus and controls (maintainer, 2026-10-29): someone fr
 
 The approved mockups show ten key hints in the bar; under this rule the bar would show fewer and context-dependent ones. That is a change to the approved design and needs approval first.
 
+## Small windows
+
+Approved 2026-10-30 as pictures 15–21 in [docs/design](design/), with the rules below. pChart has to work in any window, from a full screen down to a tiled corner. Measured here (2560×1440, 9 pt font, 7×16 px cells): full screen 364×88 cells, half 182×88, quarter 182×43, eighth 91×43; the classic terminal is 80×24. The approved design is 170×50.
+
+What the spike does today: at 182×43 everything shows but the chain row is cut off; at 120×36 the side panels keep their width and squeeze the chart to 72 columns, week numbers run into each other, phase names shrink to "Re…" and no bar has a name; below 100×30 it shows only "pChart needs at least 100×30 cells".
+
+Rules, in the order things give way (cells are terminal cells):
+
+- **Always:** the title bar, the chart or the statement, the key hints (dropping from the right, `? help` stays).
+- **Title bar:** the path needs 135 columns ("saved" stays); below 100 the tabs show their numbers, the current tab's name and the warning count.
+- **Tiles** need 120×44; otherwise one summary line: "Launch Mon 01 Mar 2027 · fixed  holds · 12 wd to spare  start by Mon 16 Nov  ▲ 1 warning", shortened from the right.
+- **Roadmap side column** (Selection over Checks) needs 150 columns; Checks needs 38 rows of body. Without the column, two rows under the chart name the selected item, its dates and what it has to spare, so a name thinned out of the picture is still readable.
+- **Legend row** needs 110×36; **chain row** needs 30 rows and is cut around the selected item. The panel title shortens to fit ("ROADMAP · LANES 1–6 OF 7").
+- **In the picture:** the whole plan fits the width; the lane name column narrows from 22 to 14 columns; week numbers thin to every second week, then none; phase names need 4 letters; the place line needs Full and 3 rows per lane.
+- **Detail level:** the user picks it; the picture shows at most what fits (Full needs 4 rows per lane, the others 2) and the detail switch shows both. If lanes do not fit at 2 rows, they scroll ("lanes 1–6 of 7") and keep the selection in view; the lane with the fixed target date always stays in view.
+- **Situation screen:** the verdict always; "Since" needs 40 rows; below 150 columns the big number goes and only the small scale stays above the sentence that has the number; below 140 columns "What is burning next" and the chain as a vertical list sit side by side with "Who is waiting" underneath, listing only the chain's handoffs; the chain panel needs 30 rows; the next-6-weeks strip needs 100×44.
+- **Below 60×16:** rumb's "Terminal size too small" with the current and the needed size, the short side in red.
+
 ## Why pChart
 
 Research on 2026-10-29 found no Linux or terminal tool that combines templates, simple handling and presentation-ready output.
@@ -346,6 +364,20 @@ The second round, approved on 2026-10-30: the situation screen, the three detail
 ![Full](design/8-full.png)
 ![Question](design/9-question.png)
 ![Palette](design/10-palette.png)
+
+The third round, approved on 2026-10-30: the export views without a look of their own so far, and pChart in small windows (see [Small windows](#small-windows)).
+
+![Gantt chart](design/11-gantt.png)
+![Phase plan](design/12-phase-plan.png)
+![Now / Next / Later](design/13-now-next-later.png)
+![Swimlane roadmap, light](design/14-roadmap-light.png)
+![Roadmap 182×43](design/15-roadmap-182x43.png)
+![Roadmap 120×36](design/16-roadmap-120x36.png)
+![Roadmap 91×43](design/17-roadmap-91x43.png)
+![Roadmap 80×24](design/18-roadmap-80x24.png)
+![Situation 120×36](design/19-situation-120x36.png)
+![Situation 80×24](design/20-situation-80x24.png)
+![Too small](design/21-too-small.png)
 
 - Graphical, never ASCII.
 - The chart area is an image; panels, lists and key hints are terminal text.
@@ -642,7 +674,7 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 | 0 | Second mockup round: situation screen, detail levels, navigation. Approved 2026-10-30 | — | 1–2 |
 | 1 | Spike (see [Stack](#stack)), done 2026-10-30 | — | 2–4 |
 | 2 | Core and CLI: model, plan file, calendars and holiday data, scheduler, checks, statements, `pchart check`, `situation`, `schedule` with `--json`. Built 2026-10-30 on branch `core` | — | 5–8 |
-| 3 | Drawing and export: scene, the five v1 views, label placement and thinning, detail levels, PDF, SVG, PNG, Markdown | Step 0 approved | 6–10 |
+| 3 | Drawing and export: scene, the five v1 views, label placement and thinning, detail levels, PDF, SVG, PNG, Markdown. Started 2026-10-30 on branch `draw`: the roadmap at three levels, the milestone chart, label placement, Markdown. Next: the Gantt chart, phase plan, Now / Next / Later and the light roadmap (pictures 11–14), and the picture side of small windows | Step 0 approved | 6–10 |
 | 4 | TUI: templates, situation screen, roadmap editor, what-if, why, checks, export, palette, mouse, date input | Step 0 approved | 8–12 |
 | 5 | Templates and samples, projects list and workspace, snapshots and "what changed", AUR package, man page, docs | Workspace layout decided | 4–6 |
 
@@ -682,6 +714,11 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 - **Building blocks:** decision points in v1, suggestions in v1.x, packs later.
 - **Markdown export:** no Mermaid block.
 
+2026-10-30, maintainer, after the third mockup round:
+
+- Pictures 11–14 are approved, with these choices: the Gantt chart groups rows by phase, shows what an item has to spare as a number for items off the chain and the chain's number once in the legend; the phase plan draws phases to scale with dates and length in weeks (working days ÷ 5, holidays not counted) and the milestones as gates between them; Now / Next / Later: Now is running or starting within six weeks, Next the six weeks after, Later the rest, the rule printed once in the column heads; the light roadmap is the Standard level with the places of the lanes, the fixed target in pink, warnings as dark text on a yellow tag, and its legend on the page.
+- Pictures 15–21 and the rules under [Small windows](#small-windows) are approved; the lane with the fixed target date stays in view when lanes scroll.
+
 ### Step 2 as built
 
 What the core and the CLI do now, and choices made while building them that the maintainer should know:
@@ -698,6 +735,17 @@ What the core and the CLI do now, and choices made while building them that the 
 - **Tight** means less than 5 working days to spare (the value assumed in the mockups).
 - **Writing the plan file** keeps the fields and their order but not comments a person typed into the file.
 - **`why`** says what the chain has to spare once, not per step: per step, the count differs by lane calendar (the client in New York has other holidays) and looks contradictory.
+
+### Step 3 so far
+
+Built 2026-10-30 on branch `draw`, for the views that have approved pictures:
+
+- **Roadmap at three detail levels** (pictures 6–8): `pchart export PLAN --level overview|standard|full`. At the export size of 1220 px, the sample's chart area matches the mockups except for two things: the selection, which only the TUI draws, and the Development phase, which starts on Mon 21 Dec instead of Sat 19 Dec, because a phase now begins with its first item (Design now starts on Mon 30 Nov, as in the mockup; the Markdown no longer lists phases starting on a Saturday).
+- **Any plan, not only the sample:** items at the same time in a lane get their own row, and the lane grows by 0.6 of its height per row; two milestones on the same day are rows too. Without `--size`, the export is as tall as the lanes need. A bar's name goes above it, else below it, else ends at the bar's end; a milestone's name goes to its right, else above or below to its left. A name that fits nowhere is left out; the selection panel shows it. Lane names are cut with "…". A test draws the sample and a crowded plan at three sizes and all levels and finds no names covering each other.
+- **Milestone chart** (picture 4): `--view milestones`, the 16:9 page in Noto Sans, now bundled (SIL Open Font License); text widths come from the font, so names are placed by their real width. The fixed target is pink; a milestone that is too late would be red.
+- **Markdown:** `--md FILE` writes the plan as Markdown and the milestone chart as SVG next to it, following the example under [Markdown](#markdown); `--audience agents` adds every item with its id and how to report progress. The verdict is the sentence of the situation screen, so its headline has no year ("Launch on Mon 01 Mar holds.").
+- **Measured again** (`pchart bench`, 100 changes, same windows as the spike): change to picture, median / p90: kitty 26 / 29 ms, Ghostty 24 / 32 ms, foot 33 / 37 ms. Peak memory 31, 31 and 24 MB, about 4 MB more than the spike: the worldwide holiday text while it is read.
+- **Open, not in any approved picture:** the footer of the milestone chart for a plan without a fixed date ("Dates scheduled forwards from the start of the plan"), the red of a late milestone on the light page, and the Markdown sections beyond the example ("What is burning next", "Phases", the agents' "Items").
 
 ## Open decisions
 

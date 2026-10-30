@@ -41,5 +41,18 @@ impl Palette {
 pub const FONT: &str = "JetBrains Mono";
 pub const REGULAR: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
 pub const BOLD: &[u8] = include_bytes!("../assets/JetBrainsMono-Bold.ttf");
+/// The font of export pages.
+pub const SANS: &str = "Noto Sans";
+pub const SANS_REGULAR: &[u8] = include_bytes!("../assets/NotoSans-Regular.ttf");
+pub const SANS_BOLD: &[u8] = include_bytes!("../assets/NotoSans-Bold.ttf");
+/// Width of `text` in the bundled Noto Sans at `size`, from the advances of its glyphs.
+pub fn sans_width(text: &str, size: f32, bold: bool) -> f32 {
+    static FACES: std::sync::OnceLock<[ttf_parser::Face<'static>; 2]> = std::sync::OnceLock::new();
+    let faces = FACES.get_or_init(|| [SANS_REGULAR, SANS_BOLD].map(|data| ttf_parser::Face::parse(data, 0).expect("the bundled font reads")));
+    let face = &faces[usize::from(bold)];
+    let units: u32 = text.chars().map(|c| face.glyph_index(c).and_then(|glyph| face.glyph_hor_advance(glyph)).map_or(u32::from(face.units_per_em()) / 2, u32::from)).sum();
+    units as f32 * size / f32::from(face.units_per_em())
+}
+
 /// Advance of one character in JetBrains Mono, in font sizes.
 pub const ADVANCE: f32 = 0.6;

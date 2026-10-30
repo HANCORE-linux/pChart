@@ -3,7 +3,7 @@ use std::time::Duration;
 use jiff::civil::Date;
 use pchart_core::{Calendar, Plan, Schedule};
 use pchart_draw::scene::Color as Ink;
-use pchart_draw::{Palette, Settings};
+use pchart_draw::{Level, Palette, Settings};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -57,6 +57,7 @@ impl App {
             unit: f32::from(ch) / 21.0,
             today: self.today,
             selected: Some(self.selected),
+            level: Level::Full,
             palette: self.palette,
         };
         pchart_draw::roadmap(&self.plan, &self.schedule, &self.calendars, &settings).svg()

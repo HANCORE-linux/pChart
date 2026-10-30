@@ -48,14 +48,16 @@ impl Schedule {
         self.chain.first().map(|&first| self.slots[first].slack)
     }
 
+    /// Each phase from its first item to the item that ends it.
     pub fn phases(&self, plan: &Plan) -> Vec<(String, Date, Date)> {
-        let mut from = self.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(self.start);
+        let first_after = |day: Option<Date>| self.slots.iter().map(|slot| slot.planned.start).filter(|start| day.is_none_or(|day| *start > day)).min();
+        let mut from = first_after(None).unwrap_or(self.start);
         let mut out = Vec::new();
         for phase in &plan.phases {
             let Some(until) = plan.item(&phase.until) else { continue };
             let to = self.slots[until].planned.finish;
             out.push((phase.name.clone(), from, to));
-            from = next(to);
+            from = first_after(Some(to)).unwrap_or(next(to));
         }
         out
     }
