@@ -137,7 +137,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
     let known: &[&str] = match args.command {
         "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who"],
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
-        "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--md", "--audience"],
+        "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--audience"],
         "bench" => &["--frames", "--out"],
         _ => &[],
     };
@@ -456,7 +456,19 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
         "agents" => Audience::Agents,
         other => return Err(Failure::usage(format!("\"{other}\" is not an audience for Markdown; use management or agents"), args)),
     };
-    let scene = match args.option("--view").unwrap_or("roadmap") {
+    let view = args.option("--view").unwrap_or("roadmap");
+    let light = match args.option("--style").unwrap_or(if view == "roadmap" { "dark" } else { "light" }) {
+        "light" => true,
+        "dark" if view == "roadmap" => false,
+        "dark" => return Err(Failure::usage(format!("the {view} view is a light page; only the roadmap has a dark style"), args)),
+        other => return Err(Failure::usage(format!("\"{other}\" is not a style; use light or dark"), args)),
+    };
+    if light && let Some(option) = ["--size", "--level"].into_iter().find(|option| args.option(option).is_some()) {
+        return Err(Failure::usage(format!("{option} is for the dark roadmap; light views are 16:9 pages"), args));
+    }
+    let checks = || analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today).checks;
+    let scene = match view {
+        "roadmap" if light => pchart_draw::swimlanes(&ctx.plan, &ctx.schedule, ctx.today, &checks()),
         "roadmap" => {
             let size = match args.option("--size") {
                 Some(size) => Some(size.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or_else(|| Failure::usage(format!("\"{size}\" is not a size like 1220x756"), args))?),
@@ -472,13 +484,11 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
             settings.height = size.map_or_else(|| pchart_draw::natural_height(&ctx.plan, &ctx.schedule, &settings), |(_, height)| height);
             pchart_draw::roadmap(&ctx.plan, &ctx.schedule, &ctx.calendars, &settings)
         }
-        "milestones" => {
-            if let Some(option) = ["--size", "--level"].into_iter().find(|option| args.option(option).is_some()) {
-                return Err(Failure::usage(format!("{option} is for the roadmap; the milestone chart is a 16:9 page"), args));
-            }
-            pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today)
-        }
-        other => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap or milestones"), args)),
+        "milestones" => pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today),
+        "gantt" => pchart_draw::gantt(&ctx.plan, &ctx.schedule, ctx.today, &checks()),
+        "phases" => pchart_draw::phase_plan(&ctx.plan, &ctx.schedule, ctx.today),
+        "now-next-later" => pchart_draw::now_next_later(&ctx.plan, &ctx.schedule, ctx.today),
+        other => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases or now-next-later"), args)),
     };
     let svg = scene.svg();
     let write = |path: &Path, bytes: &[u8]| std::fs::write(path, bytes).map_err(|err| Failure::file(format!("{}: {err}", path.display())));

@@ -108,3 +108,23 @@ fn the_milestone_chart_is_a_page_without_detail_levels() {
     let output = pchart(&["export", path.to_str().unwrap()], None);
     assert_eq!(output.status.code(), Some(3));
 }
+
+#[test]
+fn every_view_exports_and_light_pages_refuse_terminal_options() {
+    let path = copy("views");
+    let svg = path.with_file_name("view.svg");
+    for (view, style) in [("gantt", None), ("phases", None), ("now-next-later", None), ("milestones", None), ("roadmap", Some("light")), ("roadmap", None)] {
+        let mut args = vec!["export", path.to_str().unwrap(), "--view", view, "--svg", svg.to_str().unwrap()];
+        if let Some(style) = style {
+            args.extend(["--style", style]);
+        }
+        let output = pchart(&args, None);
+        assert!(output.status.success(), "{view} {style:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(std::fs::read_to_string(&svg).unwrap().starts_with("<svg"), "{view}");
+    }
+    for args in [vec!["--view", "gantt", "--style", "dark"], vec!["--view", "roadmap", "--style", "light", "--level", "full"], vec!["--view", "timeline"]] {
+        let mut all = vec!["export", path.to_str().unwrap(), "--svg", svg.to_str().unwrap()];
+        all.extend(args.iter().copied());
+        assert_eq!(pchart(&all, None).status.code(), Some(3), "{args:?}");
+    }
+}

@@ -1,13 +1,22 @@
+pub mod gantt;
+pub mod later;
 pub mod markdown;
 pub mod milestones;
 pub mod output;
+pub mod page;
+pub mod phases;
 pub mod roadmap;
 pub mod scene;
 pub mod style;
+pub mod swimlanes;
 
+pub use gantt::gantt;
+pub use later::now_next_later;
 pub use markdown::{Audience, markdown};
 pub use milestones::milestones;
 pub use output::Output;
+pub use phases::phase_plan;
 pub use roadmap::{Level, Settings, natural_height, roadmap};
 pub use scene::Scene;
 pub use style::Palette;
+pub use swimlanes::swimlanes;

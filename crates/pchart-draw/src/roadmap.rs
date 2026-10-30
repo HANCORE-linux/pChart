@@ -54,6 +54,8 @@ struct Grid {
     /// From the top of a lane to the middle of its first row of bars, and from row to row.
     bar: f32,
     pitch: f32,
+    /// Height of a lane with one row of bars.
+    unit: f32,
 }
 
 impl Grid {
@@ -78,7 +80,10 @@ impl Grid {
 struct Chart<'a> {
     plan: &'a Plan,
     schedule: &'a Schedule,
+    /// For each item, the position of its lane among the lanes shown, or `usize::MAX` when it is hidden.
     lanes: Vec<usize>,
+    /// The lanes shown, by their index in the plan.
+    visible: Vec<usize>,
     /// The row of bars an item sits in within its lane, so items at the same time do not cover each other.
     rows: Vec<usize>,
     chain: HashSet<usize>,
@@ -93,13 +98,18 @@ struct Chart<'a> {
 impl Chart<'_> {
     /// Left end, right end and middle height of an item; both ends are the same for a milestone.
     fn bar(&self, index: usize) -> (f32, f32, f32) {
-        let y = self.g.lane_y(self.lanes[index]) + self.g.bar + self.rows[index] as f32 * self.g.pitch;
+        let lane = if self.shown(index) { self.lanes[index] } else { 0 };
+        let y = self.g.lane_y(lane) + self.g.bar + self.rows[index] as f32 * self.g.pitch;
         if self.plan.items[index].milestone {
             let x = self.milestone_x(index);
             return (x, x, y);
         }
         let span = self.schedule.slots[index].planned;
         (self.g.x(span.start), self.g.x(span.finish) + self.g.px, y)
+    }
+
+    fn shown(&self, index: usize) -> bool {
+        self.lanes[index] != usize::MAX
     }
 
     /// Calculated milestones sit at the end of their day, fixed ones in its middle.
@@ -176,7 +186,7 @@ pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], setting
     if c.level == Level::Overview {
         folded(&mut s, &c);
     } else {
-        let mut taken: Vec<Area> = (0..plan.items.len()).flat_map(|index| c.area(index)).collect();
+        let mut taken: Vec<Area> = (0..plan.items.len()).filter(|&index| c.shown(index)).flat_map(|index| c.area(index)).collect();
         if c.level == Level::Full {
             arrows(&mut s, &c);
             free_slack(&mut s, &c, &mut taken);
@@ -197,8 +207,10 @@ pub fn natural_height(plan: &Plan, schedule: &Schedule, settings: &Settings) -> 
     chart(plan, schedule, settings, None).g.bottom() + 22.0 * settings.unit
 }
 
-/// Lays the roadmap out: the days it shows, a row for every item, and lanes that share `height`, or
-/// get their natural room without one.
+/// Lays the roadmap out: the days it shows, a row for every item, the detail level that fits, and
+/// the lanes that share `height`, or get their natural room without one. Full needs 4 rows of 21 units
+/// per lane and steps down to Standard below that; below 2 rows per lane, only the lanes around the
+/// selection are shown, always with the lane of the fixed target.
 fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height: Option<f32>) -> Chart<'a> {
     let (u, today) = (settings.unit, settings.today);
     let first = schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(today).min(today);
@@ -209,15 +221,18 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     }
     let end = (0..20).fold(last, |day, _| next(day));
     let top = 26.0 * u;
-    let (x0, x1) = (220.0 * u, settings.width - 8.0 * u);
+    let x0 = if settings.width >= 1000.0 * u { 220.0 * u } else { 140.0 * u };
+    let x1 = settings.width - 8.0 * u;
     let px = (x1 - x0) / (days(start, end) + 1) as f32;
+    let lane_of: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect();
     let mut c = Chart {
         plan,
         schedule,
-        lanes: plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect(),
+        lanes: lane_of.clone(),
+        visible: (0..plan.lanes.len()).collect(),
         rows: vec![0; plan.items.len()],
         chain: schedule.chain.iter().copied().collect(),
-        g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u },
+        g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u, unit: LANE * u },
         p: settings.palette,
         u,
         width: settings.width,
@@ -227,52 +242,81 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     if c.level != Level::Overview {
         c.rows = rows(&c);
     }
-    let weights: Vec<f32> = (0..plan.lanes.len())
-        .map(|lane| {
-            let rows = (0..plan.items.len()).filter(|&index| c.lanes[index] == lane).map(|index| c.rows[index] + 1).max().unwrap_or(1);
-            1.0 + ROW * (rows - 1) as f32
-        })
-        .collect();
-    let rows_y = top + 64.0 * u;
-    let lane = match height {
-        Some(height) => ((height - rows_y - 22.0 * u) / weights.iter().sum::<f32>().max(1.0)).max(24.0 * u),
-        None => LANE * u,
+    let weight = |c: &Chart, lane: usize| {
+        let rows = (0..plan.items.len()).filter(|&index| lane_of[index] == lane).map(|index| c.rows[index] + 1).max().unwrap_or(1);
+        1.0 + ROW * (rows - 1) as f32
     };
+    let rows_y = top + 64.0 * u;
+    let mut unit = LANE * u;
+    if let Some(height) = height {
+        let available = height - rows_y - 22.0 * u;
+        let share = |c: &Chart, lanes: &[usize]| available / lanes.iter().map(|&lane| weight(c, lane)).sum::<f32>().max(1.0);
+        let all: Vec<usize> = (0..plan.lanes.len()).collect();
+        if c.level == Level::Full && share(&c, &all) < 84.0 * u {
+            c.level = Level::Standard;
+        }
+        if share(&c, &all) < 42.0 * u {
+            let fits = |lanes: &[usize]| share(&c, lanes) >= 42.0 * u;
+            let selected = settings.selected.map_or(0, |index| lane_of[index]);
+            let target = schedule.target.map(|index| lane_of[index]);
+            let window = |from: usize, extra: Option<usize>| {
+                let mut lanes: Vec<usize> = Vec::new();
+                for lane in from..plan.lanes.len() {
+                    let mut next: Vec<usize> = lanes.iter().copied().chain([lane]).chain(extra.filter(|&extra| extra != lane)).collect();
+                    next.sort_unstable();
+                    next.dedup();
+                    if !fits(&next) {
+                        break;
+                    }
+                    lanes.push(lane);
+                }
+                lanes.extend(extra);
+                lanes.sort_unstable();
+                lanes.dedup();
+                lanes
+            };
+            c.visible = (0..plan.lanes.len())
+                .map(|from| window(from, None))
+                .find(|lanes| lanes.contains(&selected) && target.is_none_or(|target| lanes.contains(&target)))
+                .or_else(|| (0..plan.lanes.len()).map(|from| window(from, target)).find(|lanes| lanes.contains(&selected) && fits(lanes)))
+                .unwrap_or_else(|| vec![selected]);
+        }
+        unit = share(&c, &c.visible).max(24.0 * u);
+    }
+    c.lanes = lane_of.iter().map(|lane| c.visible.iter().position(|shown| shown == lane).unwrap_or(usize::MAX)).collect();
+    let weights: Vec<f32> = c.visible.iter().map(|&lane| weight(&c, lane)).collect();
     c.g.tops = std::iter::once(rows_y).chain(weights.iter().scan(rows_y, |y, weight| {
-        *y += lane * weight;
+        *y += unit * weight;
         Some(*y)
     })).collect();
-    c.g.bar = (40.0 * u).min(lane * 0.45);
-    c.g.pitch = lane * ROW;
+    c.g.bar = if unit >= 84.0 * u {
+        40.0 * u
+    } else if unit >= 63.0 * u {
+        35.0 * u
+    } else {
+        (31.0 * u).min(unit - 9.0 * u).max(unit * 0.5)
+    };
+    c.g.pitch = unit * ROW;
+    c.g.unit = unit;
     c
 }
 
-/// Rows within each lane, first come first served: an item goes into the first row where it covers
-/// nothing. A milestone may sit at the end or start of a bar, but not inside it or on another milestone.
+/// The detail level a roadmap shows at the size of `settings`, and the lanes it shows, by their index
+/// in the plan.
+pub fn shown(plan: &Plan, schedule: &Schedule, settings: &Settings) -> (Level, Vec<usize>) {
+    let c = chart(plan, schedule, settings, Some(settings.height));
+    (c.level, c.visible)
+}
+
+/// Rows within each lane, so items at the same time do not cover each other.
 fn rows(c: &Chart) -> Vec<usize> {
-    let u = c.u;
-    let reach = |index: usize| {
-        let (x0, x1, _) = c.bar(index);
-        if c.plan.items[index].milestone { (x0 - 8.0 * u, x1 + 8.0 * u) } else { (x0, x1) }
-    };
-    let clash = |a: usize, b: usize| {
-        let (ma, mb) = (c.plan.items[a].milestone, c.plan.items[b].milestone);
-        let ((a0, a1), (b0, b1)) = (reach(a), reach(b));
-        match (ma, mb) {
-            (false, false) | (true, true) => a0 < b1 - 0.5 && b0 < a1 - 0.5,
-            (true, false) => (a0 + a1) / 2.0 > b0 + 0.5 && (a0 + a1) / 2.0 < b1 - 0.5,
-            (false, true) => (b0 + b1) / 2.0 > a0 + 0.5 && (b0 + b1) / 2.0 < a1 - 0.5,
-        }
-    };
-    let mut order: Vec<usize> = (0..c.plan.items.len()).collect();
-    order.sort_by(|&a, &b| reach(a).0.total_cmp(&reach(b).0));
-    let mut rows = vec![0; c.plan.items.len()];
-    let mut placed: Vec<usize> = Vec::new();
-    for index in order {
-        rows[index] = (0..).find(|&row| !placed.iter().any(|&other| c.lanes[other] == c.lanes[index] && rows[other] == row && clash(index, other))).unwrap_or(0);
-        placed.push(index);
-    }
-    rows
+    let items: Vec<(usize, f32, f32, bool)> = (0..c.plan.items.len())
+        .map(|index| {
+            let (x0, x1, _) = c.bar(index);
+            (c.lanes[index], x0, x1, c.plan.items[index].milestone)
+        })
+        .collect();
+    crate::page::rows(&items, 8.0 * c.u)
 }
 
 /// Months and weeks, phases, lanes, and in Full the holidays of each lane.
@@ -296,12 +340,16 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
         }
         month = following;
     }
+    let columns = 7.0 * g.px / (10.0 * u);
+    let step = if columns >= 4.0 { 1 } else if columns >= 2.0 { 2 } else { 0 };
     let mut monday = g.start;
-    let mut first_week = true;
-    while monday <= end {
-        let week = format!("{}{:02}", if first_week { "W" } else { "" }, monday.iso_week_date().week());
-        s.add(text(g.x(monday) + 2.0 * u, top + 33.0 * u, week, 12.5, p.muted));
-        first_week = false;
+    let mut count = 0;
+    while step > 0 && monday <= end {
+        if count % step == 0 {
+            let week = format!("{}{:02}", if count == 0 { "W" } else { "" }, monday.iso_week_date().week());
+            s.add(text(g.x(monday) + 2.0 * u, top + 33.0 * u, week, 12.5, p.muted));
+        }
+        count += 1;
         monday = (0..7).fold(monday, |day, _| next(day));
     }
     s.add(Shape::Line { x1: g.x0, y1: top + 40.0 * u, x2: g.x1, y2: top + 40.0 * u, stroke: c.rule(p.rule, 1.0 / u) });
@@ -312,18 +360,20 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     s.add(text(12.0 * u, top + 58.0 * u, "Phases".into(), 14.0, p.muted));
 
     let room = g.x0 - 24.0 * u;
-    for (index, lane) in c.plan.lanes.iter().enumerate() {
+    for (index, &shown) in c.visible.iter().enumerate() {
+        let lane = &c.plan.lanes[shown];
         let y = g.lane_y(index);
         if c.level == Level::Full {
-            for (day, _) in calendars[index].holidays(g.start, end) {
+            for (day, _) in calendars[shown].holidays(g.start, end) {
                 if !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday) {
                     s.add(Shape::Rect { x: g.x(day), y: y + 8.0 * u, w: g.px, h: g.lane_h(index) - 16.0 * u, radius: 0.0, fill: Fill::Hatch, stroke: None });
                 }
             }
         }
         s.add(Shape::Line { x1: 6.0 * u, y1: y, x2: g.x1, y2: y, stroke: c.rule(p.rule, 1.0 / u) });
-        s.add(text(12.0 * u, y + 31.0 * u, fit(&lane.name, 16.6 * u, room), 16.6, p.ink));
-        if c.level == Level::Full && g.lane_h(index) >= 60.0 * u {
+        let name_y = if g.unit >= 63.0 * u { 31.0 * u } else { (36.0 * u).min(g.unit - 6.0 * u) };
+        s.add(text(12.0 * u, y + name_y, fit(&lane.name, 16.6 * u, room), 16.6, p.ink));
+        if c.level == Level::Full && g.unit >= 63.0 * u {
             let place = [lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
             s.add(text(12.0 * u, y + 52.0 * u, fit(&place, 14.0 * u, room), 14.0, p.muted));
         }
@@ -334,7 +384,7 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
 fn arrows(s: &mut Scene, c: &Chart) {
     let u = c.u;
     for (index, item) in c.plan.items.iter().enumerate() {
-        for pred in item.after.iter().filter_map(|id| c.plan.item(id)) {
+        for pred in item.after.iter().filter_map(|id| c.plan.item(id)).filter(|&pred| c.shown(pred) && c.shown(index)) {
             let (ax0, ax1, ay) = c.bar(pred);
             let (bx0, _, by) = c.bar(index);
             let from_milestone = c.plan.items[pred].milestone;
@@ -365,7 +415,7 @@ fn free_slack(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
     let u = c.u;
     for (index, item) in c.plan.items.iter().enumerate() {
         let slot = &c.schedule.slots[index];
-        if item.milestone || c.chain.contains(&index) {
+        if item.milestone || c.chain.contains(&index) || !c.shown(index) {
             continue;
         }
         let free = free_until(c.plan, c.schedule, index);
@@ -380,7 +430,7 @@ fn free_slack(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
 
 fn bars(s: &mut Scene, c: &Chart) {
     let u = c.u;
-    for (index, item) in c.plan.items.iter().enumerate() {
+    for (index, item) in c.plan.items.iter().enumerate().filter(|&(index, _)| c.shown(index)) {
         if item.milestone {
             milestone(s, c, index);
             continue;
@@ -416,23 +466,23 @@ fn milestone(s: &mut Scene, c: &Chart, index: usize) {
     }
 }
 
-/// Names from left to right: a bar's name above it, else below it, else ending at its end; a
-/// milestone's name to its right, else above or below to its left. A name that fits nowhere is left
-/// out; the selection panel shows it.
+/// Names of fixed dates first, then from left to right: a bar's name above it, else below it, else to
+/// its right, else ending at its end; a milestone's name to its right, else to its left, above, level
+/// or below. A name that fits nowhere is left out; the selection panel shows it.
 fn labels(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
     let u = c.u;
     let size = 13.5;
-    let mut order: Vec<usize> = (0..c.plan.items.len()).collect();
-    order.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
+    let mut order: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.shown(index)).collect();
+    order.sort_by(|&a, &b| (c.plan.items[a].on.is_none(), c.bar(a).0).partial_cmp(&(c.plan.items[b].on.is_none(), c.bar(b).0)).unwrap_or(std::cmp::Ordering::Equal));
     for index in order {
         let item = &c.plan.items[index];
         let (x0, x1, y) = c.bar(index);
         let (text, places) = if item.milestone {
             let day = c.schedule.slots[index].planned.finish;
             let text = if item.on.is_some() || c.level == Level::Full { format!("{}  {}", item.name, day.strftime("%d %b")) } else { item.name.clone() };
-            (text, [(x0 + 12.0 * u, y + 5.0 * u, Anchor::Start), (x0 - 12.0 * u, y - 12.0 * u, Anchor::End), (x0 - 12.0 * u, y + 24.0 * u, Anchor::End), (x0 + 12.0 * u, y + 24.0 * u, Anchor::Start)])
+            (text, [(x0 + 12.0 * u, y + 5.0 * u, Anchor::Start), (x0 - 12.0 * u, y - 12.0 * u, Anchor::End), (x0 - 12.0 * u, y + 5.0 * u, Anchor::End), (x0 - 12.0 * u, y + 24.0 * u, Anchor::End), (x0 + 12.0 * u, y + 24.0 * u, Anchor::Start)])
         } else {
-            (item.name.clone(), [(x0, y - 13.0 * u, Anchor::Start), (x0, y + 24.0 * u, Anchor::Start), (x1, y - 13.0 * u, Anchor::End), (x1, y + 24.0 * u, Anchor::End)])
+            (item.name.clone(), [(x0, y - 13.0 * u, Anchor::Start), (x0, y + 24.0 * u, Anchor::Start), (x1 + 6.0 * u, y + 5.0 * u, Anchor::Start), (x1, y - 13.0 * u, Anchor::End), (x1, y + 24.0 * u, Anchor::End)])
         };
         if let Some((x, y, anchor, area)) = c.place(c.lanes[index], &text, size, &places, taken) {
             taken.push(area);
@@ -446,14 +496,25 @@ fn buffers(s: &mut Scene, c: &Chart, checks: &[Check], taken: &mut Vec<Area>) {
     let u = c.u;
     for check in checks {
         let Check::NoBuffer { before, target } = *check else { continue };
+        if !c.shown(before) || !c.shown(target) {
+            continue;
+        }
         let (bx0, bx1, _) = c.bar(before);
         let xa = if c.plan.items[before].milestone { bx0 } else { bx1 };
         let (xl, _, y) = c.bar(target);
-        let y = y + 26.0 * u;
-        s.add(Shape::Path { points: vec![(xa, y - 5.0 * u), (xa, y), (xl, y), (xl, y - 5.0 * u)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.warn, 1.6)) });
+        let y = y + (26.0 * u).min(c.g.unit - c.g.bar + 3.0 * u);
+        let lane = c.lanes[target];
+        let floor = if lane + 1 == c.visible.len() { c.g.bottom() + 20.0 * u } else { c.g.lane_y(lane + 1) - u };
         let text = if c.level == Level::Full { "▲ 0 wd buffer" } else { "▲ no buffer" };
-        taken.push([xa.min(xl) - u, y - 6.0 * u, xl + 10.0 * u + c.text_width(text, 13.5), y + 9.0 * u]);
-        s.add(Shape::Text { x: xl + 10.0 * u, y: y + 5.0 * u, text: text.into(), size: 13.5 * u, color: c.p.warn, bold: true, anchor: Anchor::Start });
+        let w = c.text_width(text, 13.5);
+        let x = if xl + 10.0 * u + w <= c.width - 2.0 * u { xl + 10.0 * u } else { xa.min(xl) - 10.0 * u - w };
+        if y + 9.0 * u > floor || x < c.g.x0 {
+            continue;
+        }
+        s.add(Shape::Path { points: vec![(xa, y - 5.0 * u), (xa, y), (xl, y), (xl, y - 5.0 * u)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.warn, 1.6)) });
+        taken.push([xa.min(xl) - u, y - 6.0 * u, xl.max(xa) + u, y + u]);
+        taken.push([x, y - 6.0 * u, x + w, y + 9.0 * u]);
+        s.add(Shape::Text { x, y: y + 5.0 * u, text: text.into(), size: 13.5 * u, color: c.p.warn, bold: true, anchor: Anchor::Start });
     }
 }
 
@@ -463,7 +524,7 @@ fn folded(s: &mut Scene, c: &Chart) {
     let size = 14.5;
     let selected_lane = c.selected.map(|index| c.lanes[index]);
     let mut taken: Vec<Area> = Vec::new();
-    let mut ends = vec![None; c.plan.lanes.len()];
+    let mut ends = vec![None; c.visible.len()];
     for (lane, end) in ends.iter_mut().enumerate() {
         let tasks: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.lanes[index] == lane && !c.plan.items[index].milestone).collect();
         let Some(&first) = tasks.first() else { continue };
@@ -487,7 +548,7 @@ fn folded(s: &mut Scene, c: &Chart) {
         taken.push([x0, y - 27.0 * u, x0 + c.text_width(&count, 12.5), y - 14.0 * u]);
         s.add(Shape::Text { x: x0, y: y - 17.0 * u, text: count, size: 12.5 * u, color: p.muted, bold: false, anchor: Anchor::Start });
     }
-    let mut milestones: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.plan.items[index].milestone).collect();
+    let mut milestones: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.plan.items[index].milestone && c.shown(index)).collect();
     milestones.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
     taken.extend(milestones.iter().flat_map(|&index| c.area(index)));
     for index in milestones {
@@ -553,16 +614,18 @@ fn chevron(s: &mut Scene, p: &Palette, u: f32, x0: f32, x1: f32, y: f32, h: f32,
     let points = vec![(x0, y), (x1 - tip, y), (x1, y + h / 2.0), (x1 - tip, y + h), (x0, y + h), (x0 + tip, y + h / 2.0)];
     s.add(Shape::Path { points, closed: true, fill: Fill::Color(p.raised), stroke: Some(Stroke { color: p.muted, width: u, dash: None }) });
     let room = x1 - x0 - tip - 8.0 * u;
-    let mut size = 13.5 * u;
-    let mut label: Vec<char> = label.chars().collect();
-    if label.len() as f32 * size * ADVANCE > room {
-        size = (room / (label.len() as f32 * ADVANCE)).max(10.5 * u);
-    }
-    while label.len() as f32 * size * ADVANCE > room && label.len() > 3 {
-        label.truncate(label.len() - 2);
-        label.push('…');
-    }
-    s.add(Shape::Text { x: (x0 + x1) / 2.0 + tip / 2.0, y: y + h / 2.0 + size * 0.36, text: label.into_iter().collect(), size, color: p.dim, bold: false, anchor: Anchor::Middle });
+    let count = label.chars().count();
+    let size = (room / (count as f32 * ADVANCE)).clamp(10.5 * u, 13.5 * u);
+    let fits = |chars: usize| chars as f32 * size * ADVANCE <= room;
+    let label = if fits(count) {
+        label.to_string()
+    } else {
+        match (4..count).rev().find(|&keep| fits(keep + 1)) {
+            Some(keep) => label.chars().take(keep).collect::<String>() + "…",
+            None => return,
+        }
+    };
+    s.add(Shape::Text { x: (x0 + x1) / 2.0 + tip / 2.0, y: y + h / 2.0 + size * 0.36, text: label, size, color: p.dim, bold: false, anchor: Anchor::Middle });
 }
 
 fn days(from: Date, to: Date) -> i32 {

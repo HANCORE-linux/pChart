@@ -18,7 +18,7 @@ cargo build --release
 ./target/release/pchart situation samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart schedule samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --level standard --png roadmap.png --pdf roadmap.pdf
-./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view milestones --pdf milestones.pdf --md ROADMAP.md
+./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view gantt --pdf gantt.pdf --md ROADMAP.md
 ```
 
 ↑↓ selects an item, ←→ makes it shorter or longer, q quits.
