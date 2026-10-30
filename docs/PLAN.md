@@ -632,7 +632,7 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 |---|---|---|---|
 | 0 | Second mockup round: situation screen, detail levels, navigation | — | 1–2 |
 | 1 | Spike (see [Stack](#stack)), done 2026-10-30 | — | 2–4 |
-| 2 | Core and CLI: model, plan file, calendars and holiday data, scheduler, checks, statements, `pchart check`, `situation`, `schedule` with `--json` | — | 5–8 |
+| 2 | Core and CLI: model, plan file, calendars and holiday data, scheduler, checks, statements, `pchart check`, `situation`, `schedule` with `--json`. Built 2026-10-30 on branch `core` except the bundled worldwide holiday data | — | 5–8 |
 | 3 | Drawing and export: scene, the five v1 views, label placement and thinning, detail levels, PDF, SVG, PNG, Markdown | Step 0 approved | 6–10 |
 | 4 | TUI: templates, situation screen, roadmap editor, what-if, why, checks, export, palette, mouse, date input | Step 0 approved | 8–12 |
 | 5 | Templates and samples, projects list and workspace, snapshots and "what changed", AUR package, man page, docs | Workspace layout decided | 4–6 |
@@ -650,6 +650,20 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 - Autosave with undo.
 - Milestones are points in time; the deciding chain follows the driving predecessor; items with slack as early as possible (see [Scheduling](#scheduling)).
 - Detail levels, situation screen and navigation get a second mockup round before they are drawn.
+
+### Step 2 as built
+
+What the core and the CLI do now, and choices made while building them that the maintainer should know:
+
+- **Commands:** `situation`, `why`, `waits`, `next`, `check`, `schedule`, `holidays`, and the changes `set`, `add`, `remove`, `link`, `unlink`, `apply` (a JSON list of edits, all or none). Every command has `--json`; every change has `--dry-run`. `pchart help --json` lists commands, options, exit codes and edits.
+- **Targets** are fixed milestones (with predecessors) and deadlines (`no_later_than`). A task fixed on a date ("Frontend starts on 1 Dec") is a constraint: if its predecessors are not ready, the check "fixed before predecessor" reports it.
+- **Checks:** target too late, deadline missed, fixed before predecessor (problems); no buffer before a fixed date, fixed date on a day off, overdue, two items of the same person at once (warnings); items longer than six weeks, a phase that ends without a milestone (hints). The sample plan gets the warning from the mockups and one hint: its Requirements phase ends with a task.
+- **A buffer** is any item whose name contains "buffer". **Open:** a field for it instead of the name.
+- **Exit codes 1 and 2 come from `check` only.** A change that works exits 0, even when the plan then does not hold; the output and the JSON say so.
+- **Wording of the verdict:** "12 working days to spare, with Requirements starting by Mon 16 Nov." The approved mockup says "if Requirements start by", which breaks for singular names ("if Frontend start"). **Open:** approval of the new wording.
+- **Tight** means less than 5 working days to spare (the value assumed in the mockups).
+- **Writing the plan file** keeps the fields and their order but not comments a person typed into the file.
+- **`why`** says what the chain has to spare once, not per step: per step, the count differs by lane calendar (the client in New York has other holidays) and looks contradictory.
 
 ## Open decisions
 
@@ -671,3 +685,5 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 7. Whether snapshots live inside the plan file or next to it.
 8. Scope of building blocks (proposal: decision points in v1, suggestions in v1.x, packs later).
 9. Markdown export: add a Mermaid gantt block or not (proposal: no).
+10. Worldwide holiday data in the binary: commit the generated file (`data/holidays.tsv.gz`, about 840 KB for 2006–2051) and embed it (proposal), or generate it at build time (needs Python with python-holidays wherever pChart is built).
+11. "To spare" for items off the chain: counted from today (total slack, the scheduler's view) or from where the item is planned (the situation mockup). Until decided, the CLI gives the total slack (`slack_wd`).

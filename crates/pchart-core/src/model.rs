@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use jiff::civil::Date;
 use serde::{Deserialize, Deserializer};
 
@@ -5,7 +7,7 @@ use crate::Error;
 
 pub const FORMAT: u32 = 1;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Plan {
     pub format: u32,
     pub name: String,
@@ -17,13 +19,13 @@ pub struct Plan {
     pub items: Vec<Item>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Phase {
     pub name: String,
     pub until: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Lane {
     pub id: String,
     pub name: String,
@@ -33,7 +35,7 @@ pub struct Lane {
     pub city: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
 pub struct Item {
     pub id: String,
     pub lane: String,
@@ -50,6 +52,13 @@ pub struct Item {
     pub no_earlier_than: Option<Date>,
     #[serde(default, deserialize_with = "date")]
     pub no_later_than: Option<Date>,
+    #[serde(default)]
+    pub done: bool,
+    /// The person or team doing the item; two items of the same `who` must not overlap.
+    #[serde(default)]
+    pub who: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl Plan {
@@ -62,6 +71,53 @@ impl Plan {
         Ok(plan)
     }
 
+    /// The plan file text: readable TOML in a fixed order, with only the fields that are set.
+    pub fn to_toml(&self) -> String {
+        let mut out = String::new();
+        let _ = writeln!(out, "format = {}", self.format);
+        let _ = writeln!(out, "name = {}", quote(&self.name));
+        if let Some(start) = self.start {
+            let _ = writeln!(out, "start = {start}");
+        }
+        for phase in &self.phases {
+            let _ = write!(out, "\n[[phases]]\nname = {}\nuntil = {}\n", quote(&phase.name), quote(&phase.until));
+        }
+        for lane in &self.lanes {
+            let _ = write!(out, "\n[[lanes]]\nid = {}\nname = {}\n", quote(&lane.id), quote(&lane.name));
+            for (key, value) in [("place", &lane.place), ("city", &lane.city)] {
+                if let Some(value) = value {
+                    let _ = writeln!(out, "{key} = {}", quote(value));
+                }
+            }
+        }
+        for item in &self.items {
+            let _ = write!(out, "\n[[items]]\nid = {}\nlane = {}\nname = {}\n", quote(&item.id), quote(&item.lane), quote(&item.name));
+            if item.milestone {
+                out.push_str("milestone = true\n");
+            } else {
+                let _ = writeln!(out, "duration = \"{}wd\"", item.duration);
+            }
+            if !item.after.is_empty() {
+                let after: Vec<String> = item.after.iter().map(|id| quote(id)).collect();
+                let _ = writeln!(out, "after = [{}]", after.join(", "));
+            }
+            for (key, value) in [("on", item.on), ("no_earlier_than", item.no_earlier_than), ("no_later_than", item.no_later_than)] {
+                if let Some(day) = value {
+                    let _ = writeln!(out, "{key} = {day}");
+                }
+            }
+            if item.done {
+                out.push_str("done = true\n");
+            }
+            for (key, value) in [("who", &item.who), ("note", &item.note)] {
+                if let Some(value) = value {
+                    let _ = writeln!(out, "{key} = {}", quote(value));
+                }
+            }
+        }
+        out
+    }
+
     pub fn item(&self, id: &str) -> Option<usize> {
         self.items.iter().position(|item| item.id == id)
     }
@@ -70,7 +126,7 @@ impl Plan {
         self.lanes.iter().position(|lane| lane.id == id)
     }
 
-    fn check(&self) -> Result<(), Error> {
+    pub(crate) fn check(&self) -> Result<(), Error> {
         for (index, item) in self.items.iter().enumerate() {
             if self.items[..index].iter().any(|other| other.id == item.id) {
                 return Err(Error::Plan(format!("the id \"{}\" is used twice", item.id)));
@@ -97,13 +153,26 @@ impl Plan {
     }
 }
 
+fn quote(text: &str) -> String {
+    toml::Value::String(text.to_string()).to_string()
+}
+
+/// A TOML date (`2027-03-01`) in plan files, or a string in JSON edits.
 fn date<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Date>, D::Error> {
-    let Some(value) = Option::<toml::value::Datetime>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-    match (value.date, value.time) {
-        (Some(day), None) => Date::new(day.year as i16, day.month as i8, day.day as i8).map(Some).map_err(serde::de::Error::custom),
-        _ => Err(serde::de::Error::custom(format!("{value} is not a date like 2027-03-01"))),
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Written {
+        Toml(toml::value::Datetime),
+        Text(String),
+    }
+    let not_a_date = |text: String| serde::de::Error::custom(format!("{text} is not a date like 2027-03-01"));
+    match Option::<Written>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(Written::Text(text)) => text.parse::<Date>().map(Some).map_err(|_| not_a_date(text)),
+        Some(Written::Toml(value)) => match (value.date, value.time) {
+            (Some(day), None) => Date::new(day.year as i16, day.month as i8, day.day as i8).map(Some).map_err(serde::de::Error::custom),
+            _ => Err(not_a_date(value.to_string())),
+        },
     }
 }
 
@@ -155,6 +224,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.items[0].on, Some(jiff::civil::date(2027, 3, 1)));
+    }
+
+    #[test]
+    fn the_sample_plan_survives_a_round_trip() {
+        let text = include_str!("../../../samples/customer-portal.pchart");
+        let plan = Plan::parse(text).unwrap();
+        assert_eq!(plan.to_toml(), text);
+        let mut changed = plan.clone();
+        changed.items[0].who = Some("Anna \"A\" Berg".into());
+        changed.items[0].done = true;
+        changed.items[1].no_later_than = Some(jiff::civil::date(2026, 12, 1));
+        changed.start = Some(jiff::civil::date(2026, 11, 2));
+        assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);
     }
 
     #[test]

@@ -14,6 +14,7 @@ Rules for AI agents working on pChart. The maintainer decides; when in doubt, as
 
 - Commits use the account's GitHub noreply address. Check `git log --format='%ae %ce'` before every push.
 - Never commit personal data: no real email addresses, and no screenshots or recordings of a real system. Pictures in `docs/` come from the sample plans.
+- No AI attribution in commits: no Co-Authored-By lines for agents, no "Generated with" footers.
 - Commit messages have a short imperative subject in English, like the existing history.
 - The plan file is the only source of truth. Everything else (SVG, PNG, PDF, Markdown, the index) is output and can be rebuilt from it.
 - `pchart-core` never reads the clock or the disk: today, holidays and files are passed in. Dependencies between the crates point downwards only: `pchart` → `pchart-tui` → `pchart-draw` → `pchart-store` → `pchart-core`.
@@ -55,6 +56,10 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 
 | Command | Use |
 |---|---|
+| `pchart help --json` | every command, option, exit code and edit |
+| `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |
+| `pchart check PLAN` | problems, warnings and hints; exit code 1 or 2 |
+| `pchart set … --dry-run`, `pchart apply PLAN - --dry-run` | try a change and read what it does, without writing |
 | `pchart schedule PLAN --json` | calculated dates, slack and the deciding chain |
 | `pchart export PLAN --svg F --png F --pdf F` | the roadmap picture as files |
 | `pchart bench PLAN --frames N --out F` | inside a terminal: changes a bar N times and times every step up to the terminal |

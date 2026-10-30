@@ -31,6 +31,7 @@ pub struct Schedule {
     pub order: Vec<usize>,
     /// The chain that decides the date, first item first.
     pub chain: Vec<usize>,
+    /// The fixed milestone or deadline with the least to spare. A task fixed on a date is a constraint, not a target.
     pub target: Option<usize>,
     /// The day the planned dates start from.
     pub start: Date,
@@ -91,7 +92,7 @@ pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Sche
     };
     let targets = (0..plan.items.len()).filter(|&index| {
         let item = &plan.items[index];
-        item.no_later_than.is_some() || (item.on.is_some() && !preds[index].is_empty())
+        item.no_later_than.is_some() || (item.milestone && item.on.is_some() && !preds[index].is_empty())
     });
     let target = targets.min_by_key(|&index| slack[trace(index)[0]]);
     let chain = match target {
@@ -144,7 +145,7 @@ fn order(plan: &Plan, preds: &[Vec<usize>]) -> Result<Vec<usize>, Error> {
 }
 
 /// The first day on which successors of an item may start.
-fn available(plan: &Plan, index: usize, span: Span) -> Date {
+pub(crate) fn available(plan: &Plan, index: usize, span: Span) -> Date {
     let item = &plan.items[index];
     if item.milestone && item.on.is_some() { span.start } else { next(span.finish) }
 }

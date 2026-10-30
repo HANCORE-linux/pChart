@@ -1,8 +1,13 @@
+pub mod analysis;
 pub mod calendar;
+pub mod edit;
 pub mod model;
 pub mod schedule;
+pub mod text;
 
+pub use analysis::{Analysis, Check, Handoff, Next, Severity, State, Verdict, analyse, why};
 pub use calendar::{Calendar, Holidays};
+pub use edit::{Edit, Fix, apply_all};
 pub use model::Plan;
 pub use schedule::{Schedule, Slot, Span, schedule};
 

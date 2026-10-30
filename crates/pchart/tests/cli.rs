@@ -1,0 +1,84 @@
+use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
+
+fn copy(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("pchart-cli-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("portal.pchart");
+    std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/customer-portal.pchart"), &path).unwrap();
+    path
+}
+
+fn pchart(args: &[&str], stdin: Option<&str>) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_pchart"));
+    command.args(args).args(["--today", "2026-10-29"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    if let Some(text) = stdin {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+    }
+    child.wait_with_output().unwrap()
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn the_situation_answers_the_three_questions() {
+    let path = copy("situation");
+    let output = pchart(&["situation", path.to_str().unwrap()], None);
+    let text = stdout(&output);
+    assert!(output.status.success());
+    assert!(text.starts_with("Launch on Mon 01 Mar holds.\n12 working days to spare, with Requirements starting by Mon 16 Nov.\n"), "{text}");
+    assert!(text.contains("Frontend (Bangalore) waits on Client (New York): Design sign-off due Fri 18 Dec."));
+    assert!(text.contains("1. Start Requirements by Mon 16 Nov: 12 working days from today."));
+}
+
+#[test]
+fn check_exits_with_one_on_warnings() {
+    let path = copy("check");
+    let output = pchart(&["check", path.to_str().unwrap(), "--json"], None);
+    assert_eq!(output.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["checks"][0]["rule"], "no-buffer-before-fixed-date");
+    assert_eq!(value["checks"][0]["items"], serde_json::json!(["acceptance", "launch"]));
+}
+
+#[test]
+fn a_dry_run_writes_nothing_and_tells_what_would_happen() {
+    let path = copy("dry");
+    let before = std::fs::read(&path).unwrap();
+    let output = pchart(&["set", path.to_str().unwrap(), "frontend", "--duration", "40", "--dry-run", "--json"], None);
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!((value["written"].as_bool(), value["verdict"]["state"].as_str(), value["verdict"]["spare_wd"].as_i64()), (Some(false), Some("does-not-hold"), Some(-3)));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn a_batch_is_applied_whole_or_not_at_all() {
+    let path = copy("batch");
+    let before = std::fs::read(&path).unwrap();
+    let failing = pchart(&["apply", path.to_str().unwrap(), "-", "--json"], Some(r#"[{"op": "rename", "item": "api", "name": "REST API"}, {"op": "remove", "item": "nope"}]"#));
+    assert_eq!(failing.status.code(), Some(3));
+    let error: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&failing.stderr)).unwrap();
+    assert_eq!(error["error"]["message"], "edit 2: there is no item \"nope\"");
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+
+    let working = pchart(&["apply", path.to_str().unwrap(), "-"], Some(r#"[{"op": "rename", "item": "api", "name": "REST API"}, {"op": "done", "item": "requirements", "done": true}]"#));
+    assert!(working.status.success(), "{}", String::from_utf8_lossy(&working.stderr));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("name = \"REST API\"") && text.contains("done = true"));
+}
+
+#[test]
+fn help_lists_every_command_for_programs() {
+    let output = pchart(&["help", "--json"], None);
+    let value: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let names: Vec<&str> = value["commands"].as_array().unwrap().iter().map(|command| command["name"].as_str().unwrap()).collect();
+    for name in ["situation", "why", "check", "set", "apply", "export"] {
+        assert!(names.contains(&name), "{name}");
+    }
+}
