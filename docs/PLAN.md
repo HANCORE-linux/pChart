@@ -675,8 +675,8 @@ Proposal with a rough estimate (2026-10-30). The estimate compares sizes and is 
 | 1 | Spike (see [Stack](#stack)), done 2026-10-30 | — | 2–4 |
 | 2 | Core and CLI: model, plan file, calendars and holiday data, scheduler, checks, statements, `pchart check`, `situation`, `schedule` with `--json`. Built 2026-10-30 on branch `core` | — | 5–8 |
 | 3 | Drawing and export: scene, the five v1 views, label placement and thinning, detail levels, PDF, SVG, PNG, Markdown. Built 2026-10-30 on branch `draw`: all five views, the roadmap at three levels and in small pictures, label placement, Markdown | Step 0 approved | 6–10 |
-| 4 | TUI: templates, situation screen, roadmap editor, what-if, why, checks, export, palette, mouse, date input | Step 0 approved | 8–12 |
-| 5 | Templates and samples, projects list and workspace, snapshots and "what changed", AUR package, man page, docs | Workspace layout decided | 4–6 |
+| 4 | TUI: templates, situation screen, roadmap editor, what-if, why, checks, export, palette, mouse, date input. Started 2026-10-30 on branch `tui`: the frame and the roadmap screen | Step 0 approved | 8–12 |
+| 5 | Templates and samples, projects list and workspace, snapshots and "what changed", AUR package, man page, docs, a short video of pChart in use (maintainer's request, 2026-10-30: the real TUI driven by a script and drawn off screen, so no desktop shows; the storyboard is approved as pictures first) | Workspace layout decided | 4–6 |
 
 - **v1:** about 26–42 active days. rumb has about 9,600 lines of Rust today; pChart v1 is estimated at two to three times that.
 - **After v1** (everything marked "later"): milestone trend analysis, network diagram and work breakdown structure (automatic box layout), honest dates (Monte Carlo), building-block suggestions and packs, roadmaps and checks across projects, git tags as actual dates, `pchart mcp`, school holidays. Roughly as much again as v1.
@@ -749,6 +749,17 @@ Built 2026-10-30 on branch `draw`, for the views that have approved pictures:
 - **Small pictures** (pictures 15–18, the picture side): the lane name column narrows below 1000 units, week numbers thin out, phase names need four letters, Full steps down to Standard below four rows per lane, and below two rows the lanes around the selection are shown together with the lane of the fixed target (`roadmap::shown` tells the TUI which level and lanes it got). In short lanes the bar sits lower so its name fits above, and a name may also stand to the right of its bar or to the left of a milestone at its height. The TUI uses this already; its frame for small windows is step 4.
 - **Measured again** after these changes: change to picture, median / p90: kitty 26 / 29 ms, Ghostty 22 / 25 ms, foot 33 / 41 ms.
 - **Open, not in any approved picture:** the footer of the milestone chart for a plan without a fixed date ("Dates scheduled forwards from the start of the plan"), the red of a late milestone on the light page, and the Markdown sections beyond the example ("What is burning next", "Phases", the agents' "Items").
+
+### Step 4 so far
+
+Started 2026-10-30 on branch `tui`:
+
+- **Pictures:** a screen now has several pictures, each in its own place with its own kitty image id, painted off the UI thread, as in rumb. Pictures have no ground of their own, so the terminal's background, also a transparent one, shows through; in foot, half transparent edges are mixed with the page colour, since sixel pixels are either drawn or not.
+- **Frame** (pictures 7, 8, 15–18, 21): the title bar with the tabs (the current one on a raised ground with a pink number and underline, Checks with its count) and the path, which needs 135 columns; the four tiles with their values as pictures, or the summary line below 120×44; the key bar; rumb's "Terminal size too small" below 60×16.
+- **Roadmap screen** (pictures 6–8, 15–18): the detail switch (`d`) highlights the level shown and underlines the one picked when the window shows less; legend symbols are small pictures; the chain row is cut around the selection; the selection and checks panels need 150 columns, otherwise two rows under the chart name the selection; when lanes scroll, the title says so ("ROADMAP · LANES 3–7 OF 7") and the lane of the selection and of the fixed target stay in view.
+- **Not like the pictures:** the chain row uses the items' names and cuts them around the selection, since the plan has no short names ("UX", "Sign-off" in the mockups); text larger than a cell (the selected item's name) is bold cell text, only tile values are pictures; the detail level starts at Standard.
+- **Not yet:** the screens behind tabs 1, 3 and 4, the keys Enter, ←→, Ctrl+P and ?, what-if, the date question, the palette, mouse, autosave with undo. The key bar shows only keys that work, and `q` quits for now.
+- **Measured:** the bench ran while the machine had a load of 11.7 from other programs (kitty 35 / 42 ms, Ghostty 29 / 32 ms, foot 47 / 106 ms, median / p90), so it is not comparable with the spike; to be measured again on a quiet machine.
 
 ## Open decisions
 

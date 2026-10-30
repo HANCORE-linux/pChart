@@ -91,6 +91,7 @@ struct Chart<'a> {
     p: Palette,
     u: f32,
     width: f32,
+    height: f32,
     selected: Option<usize>,
     level: Level,
 }
@@ -175,7 +176,7 @@ impl Chart<'_> {
 /// The swimlane roadmap at the detail level of `settings`.
 pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings) -> Scene {
     let (p, u, today) = (settings.palette, settings.unit, settings.today);
-    let mut s = Scene { width: settings.width, height: settings.height, background: p.page, hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
+    let mut s = Scene { width: settings.width, height: settings.height, background: Some(p.page), hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
     let c = chart(plan, schedule, settings, Some(settings.height));
 
     frame(&mut s, &c, calendars);
@@ -236,6 +237,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         p: settings.palette,
         u,
         width: settings.width,
+        height: height.unwrap_or(f32::MAX),
         selected: settings.selected,
         level: settings.level,
     };
@@ -250,13 +252,15 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     let mut unit = LANE * u;
     if let Some(height) = height {
         let available = height - rows_y - 22.0 * u;
-        let share = |c: &Chart, lanes: &[usize]| available / lanes.iter().map(|&lane| weight(c, lane)).sum::<f32>().max(1.0);
+        let share = |c: &Chart, lanes: &[usize], room: f32| room / lanes.iter().map(|&lane| weight(c, lane)).sum::<f32>().max(1.0);
         let all: Vec<usize> = (0..plan.lanes.len()).collect();
-        if c.level == Level::Full && share(&c, &all) < 84.0 * u {
+        if c.level == Level::Full && share(&c, &all, available) < 84.0 * u {
             c.level = Level::Standard;
         }
-        if share(&c, &all) < 42.0 * u {
-            let fits = |lanes: &[usize]| share(&c, lanes) >= 42.0 * u;
+        let mut room = available;
+        if share(&c, &all, available) < 42.0 * u {
+            room += 18.0 * u;
+            let fits = |lanes: &[usize]| share(&c, lanes, room) >= 42.0 * u;
             let selected = settings.selected.map_or(0, |index| lane_of[index]);
             let target = schedule.target.map(|index| lane_of[index]);
             let window = |from: usize, extra: Option<usize>| {
@@ -281,7 +285,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
                 .or_else(|| (0..plan.lanes.len()).map(|from| window(from, target)).find(|lanes| lanes.contains(&selected) && fits(lanes)))
                 .unwrap_or_else(|| vec![selected]);
         }
-        unit = share(&c, &c.visible).max(24.0 * u);
+        unit = share(&c, &c.visible, room).max(24.0 * u);
     }
     c.lanes = lane_of.iter().map(|lane| c.visible.iter().position(|shown| shown == lane).unwrap_or(usize::MAX)).collect();
     let weights: Vec<f32> = c.visible.iter().map(|&lane| weight(&c, lane)).collect();
@@ -504,7 +508,7 @@ fn buffers(s: &mut Scene, c: &Chart, checks: &[Check], taken: &mut Vec<Area>) {
         let (xl, _, y) = c.bar(target);
         let y = y + (26.0 * u).min(c.g.unit - c.g.bar + 3.0 * u);
         let lane = c.lanes[target];
-        let floor = if lane + 1 == c.visible.len() { c.g.bottom() + 20.0 * u } else { c.g.lane_y(lane + 1) - u };
+        let floor = if lane + 1 == c.visible.len() { (c.g.bottom() + 20.0 * u).min(c.height - 2.0 * u) } else { c.g.lane_y(lane + 1) - u };
         let text = if c.level == Level::Full { "▲ 0 wd buffer" } else { "▲ no buffer" };
         let w = c.text_width(text, 13.5);
         let x = if xl + 10.0 * u + w <= c.width - 2.0 * u { xl + 10.0 * u } else { xa.min(xl) - 10.0 * u - w };

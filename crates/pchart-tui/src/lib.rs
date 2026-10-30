@@ -1,6 +1,7 @@
 mod app;
 mod pictures;
 mod sixel;
+mod ui;
 
 use std::fmt::Write as _;
 use std::io::{self, Read, Write};
@@ -15,7 +16,7 @@ use ratatui_image::picker::cap_parser::QueryStdioOptions;
 use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::app::App;
-use crate::pictures::{Job, Painter, Worker};
+use crate::pictures::{Painter, Pictures};
 
 fn picker() -> io::Result<Picker> {
     let picker = Picker::from_query_stdio_with_options(QueryStdioOptions { kitty_compression: true, ..QueryStdioOptions::default() }).map_err(|err| io::Error::other(err.to_string()))?;
@@ -28,12 +29,9 @@ fn picker() -> io::Result<Picker> {
 pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io::Result<()> {
     let picker = picker()?;
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
-    let painter = Painter::new(picker, &pchart_draw::Palette::labra());
-    let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, painter.protocol_name(), painter.cell());
-    let mut worker = Worker::start(painter);
+    let mut pictures = Pictures::start(Painter::new(picker, &pchart_draw::Palette::labra()));
+    let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
     let mut terminal = ratatui::init();
-    let mut requested = None;
-    let mut changed = Instant::now();
     let mut trace = std::env::var_os("PCHART_TRACE").and_then(|path| std::fs::File::create(path).ok());
     let begun = Instant::now();
     let mut note = |text: String| {
@@ -42,28 +40,16 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         }
     };
     let result = loop {
-        let area = terminal.get_frame().area();
-        let rect = App::picture_rect(area);
-        if requested != Some((app.generation, rect)) && rect.width > 0 && rect.height > 0 {
-            note(format!("request generation {} rect {rect:?}", app.generation));
-            worker.request(Job { generation: app.generation, rect, svg: app.svg(rect) });
-            requested = Some((app.generation, rect));
+        if pictures.receive() {
+            note("pictures done".into());
         }
-        while let Some(done) = worker.finished() {
-            note(format!("done generation {} rect {:?} painted {}", done.generation, done.rect, done.protocol.is_some()));
-            if let Some(protocol) = done.protocol
-                && done.rect == rect
-            {
-                if done.generation == app.generation {
-                    app.cost = Some((done.cost, changed.elapsed()));
-                }
-                app.picture = Some((done.generation, done.rect, protocol));
-            }
-        }
-        if let Err(err) = terminal.draw(|frame| app.draw(frame)) {
+        let mut waiting = false;
+        if let Err(err) = terminal.draw(|frame| {
+            let placements = ui::draw(&app, frame);
+            waiting = pictures.draw(frame, placements);
+        }) {
             break Err(err);
         }
-        let waiting = app.picture.as_ref().is_none_or(|(generation, _, _)| *generation != app.generation);
         match event::poll(if waiting { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
             Ok(false) => continue,
             Ok(true) => {}
@@ -72,21 +58,14 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         let read = event::read();
         note(format!("event {read:?}"));
         match read {
-            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                let before = app.generation;
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
-                    KeyCode::Up => app.select(-1),
-                    KeyCode::Down => app.select(1),
-                    KeyCode::Left => app.stretch(-1),
-                    KeyCode::Right => app.stretch(1),
-                    _ => {}
-                }
-                if app.generation != before {
-                    changed = Instant::now();
-                }
-            }
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Up => app.select(-1),
+                KeyCode::Down => app.select(1),
+                KeyCode::Char('d') => app.detail(),
+                _ => {}
+            },
             Ok(_) => {}
             Err(err) => break Err(err),
         }
@@ -101,7 +80,10 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
     let picker = picker()?;
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
     let mut painter = Painter::new(picker, &pchart_draw::Palette::labra());
-    let mut app = App::new(plan, calendars, today, "bench".into(), schedule, painter.protocol_name(), painter.cell());
+    let mut app = App::new(plan, calendars, today, "bench".into(), schedule, painter.cell());
+    app.level = pchart_draw::Level::Full;
+    let protocol_name = painter.protocol_name();
+    let id = std::process::id() << 8;
     let (bytes, input) = mpsc::channel::<u8>();
     std::thread::spawn(move || {
         let mut stdin = io::stdin();
@@ -126,7 +108,7 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
     }
     terminal.autoresize()?;
     let area = ratatui::layout::Rect::new(0, 0, area.width, area.height);
-    let rect = App::picture_rect(area);
+    let rect = ui::chart(area);
     let steps = ["schedule", "scene and SVG", "text and parse", "raster", "encode", "write", "terminal reads it", "change to picture"];
     let mut times: Vec<Vec<f64>> = vec![Vec::new(); steps.len()];
     let started = Instant::now();
@@ -138,13 +120,15 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
         let t1 = Instant::now();
         let svg = app.svg(rect);
         let t2 = Instant::now();
-        let Some((protocol, cost)) = painter.paint(&svg, rect) else {
+        let Some((protocol, cost)) = painter.paint(&svg, rect, id) else {
             failure = Some("the picture could not be painted".to_string());
             break;
         };
-        app.picture = Some((app.generation, rect, protocol));
         let t3 = Instant::now();
-        terminal.draw(|frame| app.draw(frame))?;
+        terminal.draw(|frame| {
+            ui::draw(&app, frame);
+            frame.render_widget(ratatui_image::Image::new(&protocol), rect);
+        })?;
         let t4 = Instant::now();
         let mut stdout = io::stdout();
         stdout.write_all(b"\x1b[c")?;
@@ -154,7 +138,6 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
             break;
         }
         let t5 = Instant::now();
-        app.cost = Some((cost, t5 - t0));
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         for (index, value) in [ms(t1 - t0), ms(t2 - t1), ms(cost.parse), ms(cost.raster), ms(cost.encode), ms(t4 - t3), ms(t5 - t4), ms(t5 - t0)].into_iter().enumerate() {
             times[index].push(value);
@@ -167,7 +150,7 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
     let (cw, ch) = app.cell;
     let mut report = String::new();
     let name = terminal_process.as_ref().map_or("unknown terminal".to_string(), |(pid, name)| format!("{name} (pid {pid})"));
-    let _ = writeln!(report, "terminal  {name}, {}", app.protocol);
+    let _ = writeln!(report, "terminal  {name}, {protocol_name}");
     let _ = writeln!(report, "screen    {}×{} cells of {cw}×{ch} px", area.width, area.height);
     let _ = writeln!(report, "picture   {}×{} cells = {}×{} px", rect.width, rect.height, u32::from(rect.width) * u32::from(cw), u32::from(rect.height) * u32::from(ch));
     let _ = writeln!(report, "frames    {} in {seconds:.1} s", times[0].len());

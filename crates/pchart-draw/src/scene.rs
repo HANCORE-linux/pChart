@@ -54,7 +54,8 @@ pub struct Mark {
 pub struct Scene {
     pub width: f32,
     pub height: f32,
-    pub background: Color,
+    /// The ground of the picture; without one, it is transparent and the terminal shows through.
+    pub background: Option<Color>,
     pub hatch: (Color, Color),
     pub hatch_alert: (Color, Color),
     pub spare: Color,
@@ -75,7 +76,9 @@ impl Scene {
         let mut out = String::with_capacity(64 * self.marks.len() + 512);
         let (w, h) = (self.width, self.height);
         let _ = write!(out, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="{}">"#, self.font);
-        let _ = write!(out, r#"<rect width="{w}" height="{h}" fill="{}"/>"#, self.background.hex());
+        if let Some(background) = self.background {
+            let _ = write!(out, r#"<rect width="{w}" height="{h}" fill="{}"/>"#, background.hex());
+        }
         let pattern = |out: &mut String, id: &str, size: f32, (ground, ink): (Color, Color), width: f32| {
             let _ = write!(
                 out,
@@ -207,7 +210,7 @@ mod tests {
 
     fn scene() -> Scene {
         let ink = Color(1, 2, 3);
-        Scene { width: 100.0, height: 50.0, background: ink, hatch: (ink, ink), hatch_alert: (ink, ink), spare: ink, font: "JetBrains Mono", marks: Vec::new() }
+        Scene { width: 100.0, height: 50.0, background: Some(ink), hatch: (ink, ink), hatch_alert: (ink, ink), spare: ink, font: "JetBrains Mono", marks: Vec::new() }
     }
 
     #[test]

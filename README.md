@@ -21,7 +21,7 @@ cargo build --release
 ./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view gantt --pdf gantt.pdf --md ROADMAP.md
 ```
 
-↑↓ selects an item, ←→ makes it shorter or longer, q quits.
+↑↓ selects an item, d changes the detail level, q quits.
 
 ## Terminals
 

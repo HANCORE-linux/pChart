@@ -8,6 +8,8 @@ use resvg::tiny_skia::Pixmap;
 pub struct Encoder {
     colors: Vec<[u8; 3]>,
     lookup: Vec<u16>,
+    /// What half transparent pixels are mixed with: the page of the palette.
+    ground: [u8; 3],
 }
 
 fn rgb(color: Color) -> [u8; 3] {
@@ -38,7 +40,7 @@ impl Encoder {
             }
         }
         colors.truncate(256);
-        Encoder { colors, lookup: vec![0; 1 << 18] }
+        Encoder { colors, lookup: vec![0; 1 << 18], ground: rgb(palette.page) }
     }
 
     fn index(&mut self, r: u8, g: u8, b: u8) -> u8 {
@@ -63,12 +65,21 @@ impl Encoder {
     pub fn encode(&mut self, pixmap: &Pixmap) -> String {
         let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
         let mut indices = vec![0u8; width * height];
-        for (slot, pixel) in indices.iter_mut().zip(pixmap.pixels()) {
-            *slot = self.index(pixel.red(), pixel.green(), pixel.blue());
+        let mut clear = vec![false; width * height];
+        for ((slot, clear), pixel) in indices.iter_mut().zip(clear.iter_mut()).zip(pixmap.pixels()) {
+            if pixel.alpha() < 24 {
+                *clear = true;
+                continue;
+            }
+            let rest = 255 - u16::from(pixel.alpha());
+            let over = |value: u8, ground: u8| (u16::from(value) + (u16::from(ground) * rest + 127) / 255).min(255) as u8;
+            *slot = self.index(over(pixel.red(), self.ground[0]), over(pixel.green(), self.ground[1]), over(pixel.blue(), self.ground[2]));
         }
         let mut used = [false; 256];
-        for index in &indices {
-            used[usize::from(*index)] = true;
+        for (index, clear) in indices.iter().zip(&clear) {
+            if !clear {
+                used[usize::from(*index)] = true;
+            }
         }
         let mut out = String::with_capacity(width * height / 2);
         let _ = write!(out, "\x1bP0;1;0q\"1;1;{width};{height}");
@@ -91,7 +102,11 @@ impl Encoder {
             }
             for row in 0..6.min(height - band) {
                 let line = &indices[(band + row) * width..(band + row + 1) * width];
+                let holes = &clear[(band + row) * width..(band + row + 1) * width];
                 for (x, index) in line.iter().enumerate() {
+                    if holes[x] {
+                        continue;
+                    }
                     let color = usize::from(*index);
                     if seen[color] {
                         let span = &mut spans[color];

@@ -1,3 +1,4 @@
+pub mod bits;
 pub mod gantt;
 pub mod later;
 pub mod markdown;
@@ -16,7 +17,7 @@ pub use markdown::{Audience, markdown};
 pub use milestones::milestones;
 pub use output::Output;
 pub use phases::phase_plan;
-pub use roadmap::{Level, Settings, natural_height, roadmap};
+pub use roadmap::{Level, Settings, natural_height, roadmap, shown};
 pub use scene::Scene;
 pub use style::Palette;
 pub use swimlanes::swimlanes;

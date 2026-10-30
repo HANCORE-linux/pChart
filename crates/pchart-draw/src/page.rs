@@ -93,7 +93,7 @@ impl Page {
     /// the foot. `height` is at least that of a slide.
     pub fn new(plan: &Plan, schedule: &Schedule, today: Date, view: &str, height: f32) -> Page {
         let height = height.max(HEIGHT);
-        let scene = Scene { width: WIDTH, height, background: PAPER, hatch: (LIGHT, MID), hatch_alert: (LIGHT, LATE), spare: MID, font: SANS, marks: Vec::new() };
+        let scene = Scene { width: WIDTH, height, background: Some(PAPER), hatch: (LIGHT, MID), hatch_alert: (LIGHT, LATE), spare: MID, font: SANS, marks: Vec::new() };
         let mut page = Page { scene, texts: Vec::new(), shapes: Vec::new(), grids: Vec::new() };
         page.text(X0, 70.0, &plan.name, 34.0, INK, true, Anchor::Start, None);
         page.text(X0, 102.0, &format!("{view} · as of {}", today.strftime("%d %b %Y")), 17.0, GRAY, false, Anchor::Start, None);
