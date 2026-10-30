@@ -1,0 +1,18 @@
+[package]
+name = "pchart-tui"
+description = "Terminal user interface for pChart"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pchart-core.workspace = true
+pchart-draw.workspace = true
+jiff.workspace = true
+ratatui.workspace = true
+ratatui-image.workspace = true
+image.workspace = true
+resvg.workspace = true
+
+[lints]
+workspace = true

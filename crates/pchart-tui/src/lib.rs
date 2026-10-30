@@ -1,0 +1,238 @@
+mod app;
+mod pictures;
+mod sixel;
+
+use std::fmt::Write as _;
+use std::io::{self, Read, Write};
+use std::path::Path;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use jiff::civil::Date;
+use pchart_core::{Calendar, Plan};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui_image::picker::cap_parser::QueryStdioOptions;
+use ratatui_image::picker::{Picker, ProtocolType};
+
+use crate::app::App;
+use crate::pictures::{Job, Painter, Worker};
+
+fn picker() -> io::Result<Picker> {
+    let picker = Picker::from_query_stdio_with_options(QueryStdioOptions { kitty_compression: true, ..QueryStdioOptions::default() }).map_err(|err| io::Error::other(err.to_string()))?;
+    if matches!(picker.protocol_type(), ProtocolType::Halfblocks | ProtocolType::Iterm2) {
+        return Err(io::Error::other("this terminal shows no kitty or sixel pictures; pChart runs in kitty, Ghostty and foot"));
+    }
+    Ok(picker)
+}
+
+pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io::Result<()> {
+    let picker = picker()?;
+    let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
+    let painter = Painter::new(picker, &pchart_draw::Palette::labra());
+    let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, painter.protocol_name(), painter.cell());
+    let mut worker = Worker::start(painter);
+    let mut terminal = ratatui::init();
+    let mut requested = None;
+    let mut changed = Instant::now();
+    let mut trace = std::env::var_os("PCHART_TRACE").and_then(|path| std::fs::File::create(path).ok());
+    let begun = Instant::now();
+    let mut note = |text: String| {
+        if let Some(file) = trace.as_mut() {
+            let _ = writeln!(file, "{:>8.1} {text}", begun.elapsed().as_secs_f64() * 1000.0);
+        }
+    };
+    let result = loop {
+        let area = terminal.get_frame().area();
+        let rect = App::picture_rect(area);
+        if requested != Some((app.generation, rect)) && rect.width > 0 && rect.height > 0 {
+            note(format!("request generation {} rect {rect:?}", app.generation));
+            worker.request(Job { generation: app.generation, rect, svg: app.svg(rect) });
+            requested = Some((app.generation, rect));
+        }
+        while let Some(done) = worker.finished() {
+            note(format!("done generation {} rect {:?} painted {}", done.generation, done.rect, done.protocol.is_some()));
+            if let Some(protocol) = done.protocol
+                && done.rect == rect
+            {
+                if done.generation == app.generation {
+                    app.cost = Some((done.cost, changed.elapsed()));
+                }
+                app.picture = Some((done.generation, done.rect, protocol));
+            }
+        }
+        if let Err(err) = terminal.draw(|frame| app.draw(frame)) {
+            break Err(err);
+        }
+        let waiting = app.picture.as_ref().is_none_or(|(generation, _, _)| *generation != app.generation);
+        match event::poll(if waiting { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(err) => break Err(err),
+        }
+        let read = event::read();
+        note(format!("event {read:?}"));
+        match read {
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                let before = app.generation;
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                    KeyCode::Up => app.select(-1),
+                    KeyCode::Down => app.select(1),
+                    KeyCode::Left => app.stretch(-1),
+                    KeyCode::Right => app.stretch(1),
+                    _ => {}
+                }
+                if app.generation != before {
+                    changed = Instant::now();
+                }
+            }
+            Ok(_) => {}
+            Err(err) => break Err(err),
+        }
+    };
+    ratatui::restore();
+    result
+}
+
+/// Changes the selected item `frames` times like a held arrow key and measures every step,
+/// up to the moment the terminal has read the new picture. Writes a report to `out`.
+pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, out: &Path) -> io::Result<()> {
+    let picker = picker()?;
+    let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
+    let mut painter = Painter::new(picker, &pchart_draw::Palette::labra());
+    let mut app = App::new(plan, calendars, today, "bench".into(), schedule, painter.protocol_name(), painter.cell());
+    let (bytes, input) = mpsc::channel::<u8>();
+    std::thread::spawn(move || {
+        let mut stdin = io::stdin();
+        let mut byte = [0u8; 1];
+        while stdin.read(&mut byte).is_ok_and(|read| read == 1) {
+            if bytes.send(byte[0]).is_err() {
+                return;
+            }
+        }
+    });
+    let terminal_process = terminal_process();
+    let mut terminal = ratatui::init();
+    let mut area = terminal.size()?;
+    let mut stable = Instant::now();
+    let waiting = Instant::now();
+    while stable.elapsed() < Duration::from_millis(400) && waiting.elapsed() < Duration::from_secs(3) {
+        std::thread::sleep(Duration::from_millis(50));
+        let now = terminal.size()?;
+        if now != area {
+            (area, stable) = (now, Instant::now());
+        }
+    }
+    terminal.autoresize()?;
+    let area = ratatui::layout::Rect::new(0, 0, area.width, area.height);
+    let rect = App::picture_rect(area);
+    let steps = ["schedule", "scene and SVG", "text and parse", "raster", "encode", "write", "terminal reads it", "change to picture"];
+    let mut times: Vec<Vec<f64>> = vec![Vec::new(); steps.len()];
+    let started = Instant::now();
+    let (own_before, terminal_before) = (cpu_ticks(std::process::id()), terminal_process.as_ref().and_then(|(pid, _)| cpu_ticks(*pid)));
+    let mut failure = None;
+    for frame in 0..frames {
+        let t0 = Instant::now();
+        app.stretch(if frame % 2 == 0 { 1 } else { -1 });
+        let t1 = Instant::now();
+        let svg = app.svg(rect);
+        let t2 = Instant::now();
+        let Some((protocol, cost)) = painter.paint(&svg, rect) else {
+            failure = Some("the picture could not be painted".to_string());
+            break;
+        };
+        app.picture = Some((app.generation, rect, protocol));
+        let t3 = Instant::now();
+        terminal.draw(|frame| app.draw(frame))?;
+        let t4 = Instant::now();
+        let mut stdout = io::stdout();
+        stdout.write_all(b"\x1b[c")?;
+        stdout.flush()?;
+        if !answered(&input, Duration::from_secs(3)) {
+            failure = Some(format!("the terminal did not answer after frame {frame}"));
+            break;
+        }
+        let t5 = Instant::now();
+        app.cost = Some((cost, t5 - t0));
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        for (index, value) in [ms(t1 - t0), ms(t2 - t1), ms(cost.parse), ms(cost.raster), ms(cost.encode), ms(t4 - t3), ms(t5 - t4), ms(t5 - t0)].into_iter().enumerate() {
+            times[index].push(value);
+        }
+    }
+    let seconds = started.elapsed().as_secs_f64();
+    let (own_after, terminal_after) = (cpu_ticks(std::process::id()), terminal_process.as_ref().and_then(|(pid, _)| cpu_ticks(*pid)));
+    ratatui::restore();
+
+    let (cw, ch) = app.cell;
+    let mut report = String::new();
+    let name = terminal_process.as_ref().map_or("unknown terminal".to_string(), |(pid, name)| format!("{name} (pid {pid})"));
+    let _ = writeln!(report, "terminal  {name}, {}", app.protocol);
+    let _ = writeln!(report, "screen    {}×{} cells of {cw}×{ch} px", area.width, area.height);
+    let _ = writeln!(report, "picture   {}×{} cells = {}×{} px", rect.width, rect.height, u32::from(rect.width) * u32::from(cw), u32::from(rect.height) * u32::from(ch));
+    let _ = writeln!(report, "frames    {} in {seconds:.1} s", times[0].len());
+    if let Some(failure) = failure {
+        let _ = writeln!(report, "stopped   {failure}");
+    }
+    let _ = writeln!(report, "\n{:<20}{:>10}{:>10}{:>10}", "step (ms)", "median", "p90", "max");
+    for (step, values) in steps.iter().zip(&mut times) {
+        values.sort_by(f64::total_cmp);
+        if values.is_empty() {
+            continue;
+        }
+        let at = |q: f64| values[((values.len() - 1) as f64 * q).round() as usize];
+        let _ = writeln!(report, "{step:<20}{:>10.1}{:>10.1}{:>10.1}", at(0.5), at(0.9), at(1.0));
+    }
+    let share = |before: Option<u64>, after: Option<u64>| match (before, after) {
+        (Some(before), Some(after)) => format!("{:.0} % of one core", (after - before) as f64 / 100.0 / seconds * 100.0),
+        _ => "unknown".into(),
+    };
+    let _ = writeln!(report, "\ncpu       pchart {}, terminal {}", share(own_before, own_after), share(terminal_before, terminal_after));
+    let _ = writeln!(report, "memory    pchart peak {}", peak_memory().unwrap_or_else(|| "unknown".into()));
+    std::fs::write(out, report)
+}
+
+/// Waits for the answer to a primary device attributes query (`ESC [ ? … c`).
+fn answered(input: &mpsc::Receiver<u8>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let mut seen = Vec::new();
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(byte) = input.recv_timeout(left) else { return false };
+        seen.push(byte);
+        if byte == b'c' && seen.windows(3).any(|window| window == b"\x1b[?") {
+            return true;
+        }
+    }
+    false
+}
+
+fn stat_fields(pid: u32) -> Option<Vec<String>> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    Some(stat.rsplit_once(')')?.1.split_whitespace().map(str::to_string).collect())
+}
+
+/// User and system time of a process in clock ticks (100 per second on Linux).
+fn cpu_ticks(pid: u32) -> Option<u64> {
+    let fields = stat_fields(pid)?;
+    Some(fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?)
+}
+
+fn terminal_process() -> Option<(u32, String)> {
+    let mut pid = std::process::id();
+    for _ in 0..12 {
+        let parent: u32 = stat_fields(pid)?.get(1)?.parse().ok()?;
+        let name = std::fs::read_to_string(format!("/proc/{parent}/comm")).ok()?.trim().to_string();
+        if ["kitty", "ghostty", "foot"].contains(&name.as_str()) {
+            return Some((parent, name));
+        }
+        pid = parent;
+    }
+    None
+}
+
+fn peak_memory() -> Option<String> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;
+    let kb: f64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(format!("{:.0} MB", kb / 1024.0))
+}

@@ -1,0 +1,14 @@
+[package]
+name = "pchart-core"
+description = "Plan model, file format, calendars, scheduling and analysis for pChart"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jiff.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true
