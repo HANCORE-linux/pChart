@@ -17,10 +17,14 @@ pub struct Slot {
     pub planned: Span,
     /// As early as possible from today, or from the fixed plan start.
     pub earliest: Span,
-    /// As late as possible without moving the target.
+    /// As late as possible without moving a fixed date; for an item no fixed date waits on,
+    /// without moving the planned last day.
     pub latest: Span,
     /// Working days between earliest and latest, counted in the item's lane calendar.
     pub slack: i32,
+    /// What the item has to spare: on the deciding chain, what the chain has; elsewhere, working
+    /// days from where it is planned to its latest, counted in the item's lane calendar.
+    pub spare: i32,
     /// The predecessor that sets the earliest start.
     pub driver: Option<usize>,
 }
@@ -72,14 +76,11 @@ pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Sche
 
     let base = plan.start.unwrap_or(today);
     let earliest = forward(plan, &preds, &order, &cal, base);
-    let end = earliest.iter().map(|(span, _)| span.finish).max().unwrap_or(base);
-    let latest = backward(plan, &succs, &order, &cal, end);
-    let slack: Vec<i32> = (0..plan.items.len())
-        .map(|index| {
-            let (early, late) = (earliest[index].0, latest[index]);
-            if plan.items[index].milestone { cal(index).between(early.finish, late.finish) } else { cal(index).between(early.start, late.start) }
-        })
-        .collect();
+    let bound = backward(plan, &succs, &order, &cal, None);
+    let gap = |index: usize, from: Span, to: Span| {
+        if plan.items[index].milestone { cal(index).between(from.finish, to.finish) } else { cal(index).between(from.start, to.start) }
+    };
+    let bound_slack = |index: usize| bound[index].map(|late| gap(index, earliest[index].0, late));
 
     let trace = |mut index: usize| {
         let mut chain = vec![index];
@@ -94,20 +95,31 @@ pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Sche
         let item = &plan.items[index];
         item.no_later_than.is_some() || (item.milestone && item.on.is_some() && !preds[index].is_empty())
     });
-    let target = targets.min_by_key(|&index| slack[trace(index)[0]]);
+    let target = targets.min_by_key(|&index| bound_slack(trace(index)[0]).unwrap_or(i32::MAX));
     let chain = match target {
         Some(target) => trace(target),
         None => (0..plan.items.len()).max_by_key(|&index| earliest[index].0.finish).map(trace).unwrap_or_default(),
     };
 
     let start = match (plan.start, target, chain.first()) {
-        (None, Some(_), Some(&first)) if slack[first] > 0 => latest[first].start,
+        (None, Some(_), Some(&first)) if bound_slack(first).is_some_and(|slack| slack > 0) => bound[first].expect("the chain leads to the target").start,
         _ => base,
     };
     let planned = if start == base { earliest.clone() } else { forward(plan, &preds, &order, &cal, start) };
+    let end = planned.iter().map(|(span, _)| span.finish).max().unwrap_or(start);
+    let soft = backward(plan, &succs, &order, &cal, Some(end));
+    let latest: Vec<Span> = bound.iter().zip(&soft).map(|(bound, soft)| bound.or(*soft).expect("the planned last day limits every item")).collect();
+    let slack: Vec<i32> = (0..plan.items.len()).map(|index| gap(index, earliest[index].0, latest[index])).collect();
 
     let slots = (0..plan.items.len())
-        .map(|index| Slot { planned: planned[index].0, earliest: earliest[index].0, latest: latest[index], slack: slack[index], driver: earliest[index].1 })
+        .map(|index| Slot {
+            planned: planned[index].0,
+            earliest: earliest[index].0,
+            latest: latest[index],
+            slack: slack[index],
+            spare: if chain.contains(&index) { slack[chain[0]] } else { gap(index, planned[index].0, latest[index]) },
+            driver: earliest[index].1,
+        })
         .collect();
     Ok(Schedule { slots, order, chain, target, start })
 }
@@ -181,25 +193,27 @@ fn forward<'a>(plan: &Plan, preds: &[Vec<usize>], order: &[usize], cal: &impl Fn
     out
 }
 
-fn backward<'a>(plan: &Plan, succs: &[Vec<usize>], order: &[usize], cal: &impl Fn(usize) -> &'a Calendar, end: Date) -> Vec<Span> {
-    let mut out = vec![Span { start: end, finish: end }; plan.items.len()];
+/// Latest spans. Without `end`, only fixed dates limit them, and an item no fixed date waits on has none.
+fn backward<'a>(plan: &Plan, succs: &[Vec<usize>], order: &[usize], cal: &impl Fn(usize) -> &'a Calendar, end: Option<Date>) -> Vec<Option<Span>> {
+    let mut out: Vec<Option<Span>> = vec![None; plan.items.len()];
     for &index in order.iter().rev() {
         let item = &plan.items[index];
-        let mut by = succs[index].iter().map(|&succ| required(plan, succ, out[succ])).min().unwrap_or(end);
-        if let Some(limit) = item.no_later_than {
-            by = by.min(limit);
-        }
+        let by = succs[index].iter().filter_map(|&succ| out[succ].map(|span| required(plan, succ, span))).min().or(end);
+        let by = match (by, item.no_later_than) {
+            (Some(by), Some(limit)) => Some(by.min(limit)),
+            (by, limit) => by.or(limit),
+        };
         out[index] = match (item.milestone, item.on) {
-            (_, Some(day)) if item.milestone => Span { start: day, finish: day },
-            (true, _) => {
+            (_, Some(day)) if item.milestone => Some(Span { start: day, finish: day }),
+            (true, _) => by.map(|by| {
                 let day = cal(index).on_or_before(by);
                 Span { start: day, finish: day }
-            }
-            (false, Some(day)) => Span { start: day, finish: cal(index).finish(day, item.duration) },
-            (false, None) => {
+            }),
+            (false, Some(day)) => Some(Span { start: day, finish: cal(index).finish(day, item.duration) }),
+            (false, None) => by.map(|by| {
                 let finish = cal(index).on_or_before(by);
                 Span { start: cal(index).start(finish, item.duration), finish }
-            }
+            }),
         };
     }
     out
@@ -286,6 +300,25 @@ on = 2026-11-16
         let docs = &s.slots[p.item("docs").unwrap()];
         assert_eq!(docs.planned.start, date(2026, 11, 12));
         assert_eq!(docs.latest.start, date(2026, 11, 13));
+    }
+
+    #[test]
+    fn off_the_chain_the_spare_counts_from_where_the_item_is_planned() {
+        let p = plan(CHAIN);
+        let s = run(&p, date(2026, 11, 2));
+        let spare = |id: &str| s.slots[p.item(id).unwrap()].spare;
+        assert_eq!((spare("build"), spare("test"), spare("launch")), (3, 3, 3));
+        assert_eq!(spare("docs"), 1);
+    }
+
+    #[test]
+    fn an_item_no_fixed_date_waits_on_does_not_change_the_spare() {
+        let p = plan(&format!("{CHAIN}[[items]]\nid = \"manual\"\nlane = \"a\"\nname = \"Manual\"\nduration = \"30wd\"\nafter = [\"build\"]\n"));
+        let s = run(&p, date(2026, 11, 2));
+        assert_eq!(s.spare(), Some(3));
+        assert_eq!(s.start, date(2026, 11, 5));
+        let manual = &s.slots[p.item("manual").unwrap()];
+        assert_eq!((manual.planned.start, manual.spare), (date(2026, 11, 12), 0));
     }
 
     #[test]

@@ -46,6 +46,9 @@ pub struct Item {
     pub after: Vec<String>,
     #[serde(default)]
     pub milestone: bool,
+    /// Time held back before a fixed date, so the work before it does not end right before it.
+    #[serde(default)]
+    pub buffer: bool,
     #[serde(default, deserialize_with = "date")]
     pub on: Option<Date>,
     #[serde(default, deserialize_with = "date")]
@@ -97,6 +100,9 @@ impl Plan {
             } else {
                 let _ = writeln!(out, "duration = \"{}wd\"", item.duration);
             }
+            if item.buffer {
+                out.push_str("buffer = true\n");
+            }
             if !item.after.is_empty() {
                 let after: Vec<String> = item.after.iter().map(|id| quote(id)).collect();
                 let _ = writeln!(out, "after = [{}]", after.join(", "));
@@ -142,6 +148,9 @@ impl Plan {
             }
             if !item.milestone && item.duration == 0 {
                 return Err(Error::Plan(format!("\"{}\" has no duration", item.id)));
+            }
+            if item.milestone && item.buffer {
+                return Err(Error::Plan(format!("the milestone \"{}\" cannot be a buffer; a buffer takes time", item.id)));
             }
         }
         for phase in &self.phases {
@@ -234,6 +243,7 @@ mod tests {
         let mut changed = plan.clone();
         changed.items[0].who = Some("Anna \"A\" Berg".into());
         changed.items[0].done = true;
+        changed.items[0].buffer = true;
         changed.items[1].no_later_than = Some(jiff::civil::date(2026, 12, 1));
         changed.start = Some(jiff::civil::date(2026, 11, 2));
         assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);

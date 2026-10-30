@@ -15,10 +15,10 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "holidays", usage: "pchart holidays PLAN LANE", about: "The days off of a lane while the plan runs." },
     Command {
         name: "set",
-        usage: "pchart set PLAN ITEM [--duration DAYS] [--on DATE | --no-earlier-than DATE | --no-later-than DATE | --calculated] [--done | --not-done] [--name NAME] [--lane LANE] [--who WHO]",
+        usage: "pchart set PLAN ITEM [--duration DAYS] [--on DATE | --no-earlier-than DATE | --no-later-than DATE | --calculated] [--done | --not-done] [--buffer | --no-buffer] [--name NAME] [--lane LANE] [--who WHO]",
         about: "Change an item.",
     },
-    Command { name: "add", usage: "pchart add PLAN ID --lane LANE --name NAME (--duration DAYS | --milestone) [--after ID,ID] [--on DATE] [--who WHO]", about: "Add an item." },
+    Command { name: "add", usage: "pchart add PLAN ID --lane LANE --name NAME (--duration DAYS [--buffer] | --milestone) [--after ID,ID] [--on DATE] [--who WHO]", about: "Add an item." },
     Command { name: "remove", usage: "pchart remove PLAN ITEM", about: "Remove an item that nothing waits on." },
     Command { name: "link", usage: "pchart link PLAN FROM TO", about: "Let TO wait on FROM." },
     Command { name: "unlink", usage: "pchart unlink PLAN FROM TO", about: "TO no longer waits on FROM." },
@@ -48,10 +48,11 @@ pub const EDITS: &[(&str, &str)] = &[
     ("rename", r#"{"op": "rename", "item": ID, "name": NAME}"#),
     ("lane", r#"{"op": "lane", "item": ID, "lane": LANE}"#),
     ("done", r#"{"op": "done", "item": ID, "done": true}"#),
+    ("buffer", r#"{"op": "buffer", "item": ID, "buffer": true}"#),
     ("who", r#"{"op": "who", "item": ID, "who": NAME | null}"#),
 ];
 
-const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated"];
+const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer"];
 
 pub struct Args {
     pub command: &'static str,

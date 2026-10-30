@@ -88,12 +88,22 @@ pub struct Holidays {
 impl Holidays {
     /// Reads lines of `REGION<TAB>YYYY-MM-DD<TAB>Name`.
     pub fn parse(text: &str) -> Holidays {
+        Holidays::parse_for(text, |_| true)
+    }
+
+    /// Reads only the regions `keep` accepts, so a plan pays only for the places it has.
+    pub fn parse_for(text: &str, keep: impl Fn(&str) -> bool) -> Holidays {
         let mut regions: HashMap<String, BTreeMap<Date, String>> = HashMap::new();
+        let mut last = ("", false);
         for line in text.lines() {
-            let mut fields = line.splitn(3, '\t');
-            let (Some(region), Some(day), Some(name)) = (fields.next(), fields.next(), fields.next()) else {
+            let Some((region, rest)) = line.split_once('\t') else { continue };
+            if region != last.0 {
+                last = (region, keep(region));
+            }
+            if !last.1 {
                 continue;
-            };
+            }
+            let Some((day, name)) = rest.split_once('\t') else { continue };
             let Ok(day) = day.parse::<Date>() else { continue };
             regions.entry(region.to_string()).or_default().insert(day, name.to_string());
         }

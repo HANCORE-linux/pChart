@@ -192,7 +192,7 @@ impl App {
             ("Then", then, ink),
             ("Planned", format!("{} – {}", long(slot.planned.start), long(slot.planned.finish)), ink),
             ("Latest", format!("{} – {}", long(slot.latest.start), long(slot.latest.finish)), dim),
-            ("To spare", format!("{} wd{}", slot.slack, if decides { " · decides the date" } else { "" }), if slot.slack < 0 { color(p.alert) } else { ink }),
+            ("To spare", format!("{} wd{}", slot.spare, if decides { " · decides the date" } else { "" }), if slot.spare < 0 { color(p.alert) } else { ink }),
             ("Date", if item.on.is_some() { "fixed".into() } else { "calculated".into() }, dim),
         ];
         for (row, (key, value, tone)) in rows.into_iter().enumerate() {

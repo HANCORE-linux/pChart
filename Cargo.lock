@@ -1230,6 +1230,7 @@ dependencies = [
 name = "pchart"
 version = "0.0.0"
 dependencies = [
+ "flate2",
  "jiff",
  "pchart-core",
  "pchart-draw",

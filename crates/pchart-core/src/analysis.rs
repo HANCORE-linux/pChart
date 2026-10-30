@@ -200,7 +200,7 @@ fn checks(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date,
         if let Some(day) = item.on
             && !preds(index).is_empty()
             && let Some(&before) = preds(index).iter().max_by_key(|&&pred| schedule.slots[pred].planned.finish)
-            && !is_buffer(&plan.items[before].name)
+            && !plan.items[before].buffer
             && cal(index).between(next(schedule.slots[before].planned.finish), day) == 0
             && verdict.is_none_or(|verdict| verdict.spare >= 0 || verdict.target != index)
         {
@@ -248,11 +248,6 @@ fn checks(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date,
     out
 }
 
-/// An item meant as buffer, so the work before a fixed date does not end right before it.
-fn is_buffer(name: &str) -> bool {
-    name.to_lowercase().contains("buffer")
-}
-
 /// The chain that sets the date of `item`, first item first.
 pub fn why(schedule: &Schedule, item: usize) -> Vec<usize> {
     let mut chain = vec![item];
@@ -268,6 +263,8 @@ pub fn why(schedule: &Schedule, item: usize) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edit::Edit;
+    use crate::model::Item;
     use crate::{Holidays, schedule};
     use jiff::civil::date;
 
@@ -316,6 +313,18 @@ mod tests {
         let serious: Vec<&Check> = analysis.checks.iter().filter(|check| check.severity() != Severity::Hint).collect();
         assert_eq!(serious, [&Check::NoBuffer { before: acceptance, target: launch }]);
         assert!(analysis.checks.contains(&Check::PhaseEndsWithoutMilestone { phase: 0, item: plan.item("requirements").unwrap() }));
+    }
+
+    #[test]
+    fn only_an_item_marked_as_buffer_ends_the_warning() {
+        let (plan, calendars) = sample();
+        let with = |buffer| {
+            let item = Item { id: "spare".into(), lane: "client".into(), name: "Buffer".into(), duration: 5, after: vec!["acceptance".into()], buffer, ..Item::default() };
+            crate::edit::apply_all(&plan, &[Edit::Add { item }, Edit::Link { from: "spare".into(), to: "launch".into() }]).unwrap()
+        };
+        let warns = |plan: &Plan| run(plan, &calendars, date(2026, 10, 29)).checks.iter().any(|check| matches!(check, Check::NoBuffer { .. }));
+        assert!(warns(&with(false)));
+        assert!(!warns(&with(true)));
     }
 
     #[test]

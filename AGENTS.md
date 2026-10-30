@@ -60,10 +60,10 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |
 | `pchart check PLAN` | problems, warnings and hints; exit code 1 or 2 |
 | `pchart set … --dry-run`, `pchart apply PLAN - --dry-run` | try a change and read what it does, without writing |
-| `pchart schedule PLAN --json` | calculated dates, slack and the deciding chain |
+| `pchart schedule PLAN --json` | calculated dates, what each item has to spare, and the deciding chain |
 | `pchart export PLAN --svg F --png F --pdf F` | the roadmap picture as files |
 | `pchart bench PLAN --frames N --out F` | inside a terminal: changes a bar N times and times every step up to the terminal |
 | `--today YYYY-MM-DD` | calculate from a fixed day, so results repeat |
-| `--holidays FILE` | holiday data instead of the bundled sample |
+| `--holidays FILE` | holiday data instead of the bundled data |
 | `tools/holidays/generate.py FIRST LAST OUT [REGION …]` | holiday data from python-holidays |
 | `PCHART_TRACE=FILE` | the TUI writes every wake-up (picture requests, finished pictures, events) to FILE |

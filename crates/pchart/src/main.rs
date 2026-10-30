@@ -1,7 +1,7 @@
 mod cli;
 mod report;
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -15,7 +15,15 @@ use serde_json::json;
 
 use crate::cli::Args;
 
-const SAMPLE_HOLIDAYS: &str = include_str!("../../../samples/holidays.tsv");
+/// `println!` that ends quietly when the reader has gone, as in `pchart schedule PLAN | head`.
+macro_rules! say {
+    ($($arg:tt)*) => {
+        emit(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+
+/// Holidays of every country and subdivision python-holidays knows, 2006–2051 (see `data/README.md`).
+const HOLIDAYS: &[u8] = include_bytes!("../../../data/holidays.tsv.gz");
 
 /// Why a command failed: exit code, kind for programs, message and a hint.
 struct Failure {
@@ -75,10 +83,16 @@ fn context(args: &Args) -> Result<Context, Failure> {
         Some(text) => date(text, args)?,
         None => jiff::Zoned::now().date(),
     };
-    let holidays = match args.option("--holidays") {
-        Some(file) => Holidays::parse(&std::fs::read_to_string(file).map_err(|err| Failure::file(format!("{file}: {err}")))?),
-        None => Holidays::parse(SAMPLE_HOLIDAYS),
+    let text = match args.option("--holidays") {
+        Some(file) => std::fs::read_to_string(file).map_err(|err| Failure::file(format!("{file}: {err}")))?,
+        None => {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(HOLIDAYS).read_to_string(&mut text).expect("the bundled holiday data is gzip text");
+            text
+        }
     };
+    let places: Vec<&str> = plan.lanes.iter().filter_map(|lane| lane.place.as_deref()).collect();
+    let holidays = Holidays::parse_for(&text, |region| places.iter().any(|place| *place == region || place.split_once('-').is_some_and(|(country, _)| country == region)));
     if !args.flag("--json") {
         for lane in &plan.lanes {
             if let Some(place) = &lane.place
@@ -97,8 +111,18 @@ fn date(text: &str, args: &Args) -> Result<Date, Failure> {
     text.parse::<Date>().map_err(|_| Failure::usage(format!("\"{text}\" is not a date like 2027-03-01"), args))
 }
 
+fn emit(text: std::fmt::Arguments) {
+    if let Err(err) = std::io::stdout().write_fmt(text) {
+        if err.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("stdout: {err}");
+        std::process::exit(4);
+    }
+}
+
 fn print_json(value: &serde_json::Value) {
-    println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+    say!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
 }
 
 fn run(args: &Args) -> Result<u8, Failure> {
@@ -106,7 +130,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         if args.flag("--json") {
             print_json(&cli::help_json());
         } else {
-            print!("{}", cli::help());
+            emit(format_args!("{}", cli::help()));
         }
         return Ok(0);
     }
@@ -134,7 +158,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
             if json {
                 print_json(&report::situation_json(&ctx.plan, &ctx.schedule, &analysis));
             } else {
-                print!("{}", report::situation_text(&ctx.plan, &ctx.schedule, &analysis));
+                emit(format_args!("{}", report::situation_text(&ctx.plan, &ctx.schedule, &analysis)));
             }
             Ok(0)
         }
@@ -146,19 +170,19 @@ fn run(args: &Args) -> Result<u8, Failure> {
                     .iter()
                     .map(|&step| {
                         let slot = &ctx.schedule.slots[step];
-                        json!({ "item": ctx.plan.items[step].id, "lane": ctx.plan.items[step].lane, "start": report::iso(slot.planned.start), "finish": report::iso(slot.planned.finish), "slack_wd": slot.slack })
+                        json!({ "item": ctx.plan.items[step].id, "lane": ctx.plan.items[step].lane, "start": report::iso(slot.planned.start), "finish": report::iso(slot.planned.finish), "spare_wd": slot.spare })
                     })
                     .collect();
                 print_json(&json!({ "schema": 1, "item": ctx.plan.items[index].id, "chain": steps }));
             } else {
                 let slot = &ctx.schedule.slots[index];
-                println!("{} on {} is set by this chain:", ctx.plan.items[index].name, text::day(slot.planned.finish));
+                say!("{} on {} is set by this chain:", ctx.plan.items[index].name, text::day(slot.planned.finish));
                 for line in text::chain_steps(&ctx.plan, &ctx.schedule, &chain) {
-                    println!("  {line}");
+                    say!("  {line}");
                 }
                 let first = &ctx.schedule.slots[chain[0]];
                 if chain.len() > 1 {
-                    println!("{} to spare: {} can start {} at the earliest and {} at the latest.", text::working_days(first.slack), ctx.plan.items[chain[0]].name, text::day(first.earliest.start), text::day(first.latest.start));
+                    say!("{} to spare: {} can start {} at the earliest and {} at the latest.", text::working_days(first.slack), ctx.plan.items[chain[0]].name, text::day(first.earliest.start), text::day(first.latest.start));
                 }
             }
             Ok(0)
@@ -168,10 +192,10 @@ fn run(args: &Args) -> Result<u8, Failure> {
             if json {
                 print_json(&json!({ "schema": 1, "waits": analysis.handoffs.iter().map(|h| report::handoff(&ctx.plan, h)).collect::<Vec<_>>() }));
             } else if analysis.handoffs.is_empty() {
-                println!("No lane waits on another.");
+                say!("No lane waits on another.");
             } else {
                 for handoff in &analysis.handoffs {
-                    println!("{}{}", if handoff.deciding { "" } else { "  " }, text::handoff(&ctx.plan, handoff));
+                    say!("{}{}", if handoff.deciding { "" } else { "  " }, text::handoff(&ctx.plan, handoff));
                 }
             }
             Ok(0)
@@ -181,10 +205,10 @@ fn run(args: &Args) -> Result<u8, Failure> {
             if json {
                 print_json(&json!({ "schema": 1, "next": analysis.next.iter().map(|n| report::next(&ctx.plan, &analysis, n)).collect::<Vec<_>>() }));
             } else if analysis.next.is_empty() {
-                println!("Nothing is due.");
+                say!("Nothing is due.");
             } else {
                 for (number, next) in analysis.next.iter().enumerate() {
-                    println!("{}. {}", number + 1, text::next(&ctx.plan, &analysis, next));
+                    say!("{}. {}", number + 1, text::next(&ctx.plan, &analysis, next));
                 }
             }
             Ok(0)
@@ -194,7 +218,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
             if json {
                 print_json(&json!({ "schema": 1, "checks": analysis.checks.iter().map(|c| report::check(&ctx.plan, c)).collect::<Vec<_>>() }));
             } else {
-                print!("{}", report::checks_text(&ctx.plan, &analysis));
+                emit(format_args!("{}", report::checks_text(&ctx.plan, &analysis)));
             }
             let worst = analysis.checks.iter().map(|check| check.severity()).min();
             Ok(match worst {
@@ -237,10 +261,10 @@ fn holidays(args: &Args, ctx: &Context, json: bool) -> Result<u8, Failure> {
         let list: Vec<_> = days.iter().map(|(day, name)| json!({ "date": report::iso(*day), "name": name, "working_day_lost": ctx.calendars[lane].between(*day, pchart_core::calendar::next(*day)) == 0 && !matches!(day.weekday(), jiff::civil::Weekday::Saturday | jiff::civil::Weekday::Sunday) })).collect();
         print_json(&json!({ "schema": 1, "lane": id, "place": place, "known": place.is_some_and(|place| ctx.holidays.knows(place)), "holidays": list }));
     } else if days.is_empty() {
-        println!("No holidays for {} between {} and {}.", ctx.plan.lanes[lane].name, text::day(from), text::day(to));
+        say!("No holidays for {} between {} and {}.", ctx.plan.lanes[lane].name, text::day(from), text::day(to));
     } else {
         for (day, name) in days {
-            println!("{}  {name}", day.strftime("%a %d %b %Y"));
+            say!("{}  {name}", day.strftime("%a %d %b %Y"));
         }
     }
     Ok(0)
@@ -267,6 +291,9 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
             }
             if args.flag("--done") || args.flag("--not-done") {
                 list.push(Edit::Done { item: item.clone(), done: args.flag("--done") });
+            }
+            if args.flag("--buffer") || args.flag("--no-buffer") {
+                list.push(Edit::Buffer { item: item.clone(), buffer: args.flag("--buffer") });
             }
             if let Some(name) = args.option("--name") {
                 list.push(Edit::Rename { item: item.clone(), name: name.into() });
@@ -296,6 +323,7 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
                 name: args.option("--name").ok_or_else(|| Failure::usage("add needs --name", args))?.into(),
                 duration,
                 milestone,
+                buffer: args.flag("--buffer"),
                 after: args.option("--after").map(|list| list.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect()).unwrap_or_default(),
                 who: args.option("--who").map(str::to_string),
                 ..Item::default()
@@ -353,21 +381,21 @@ fn change(args: &Args, ctx: &Context, edits: &[Edit], json: bool) -> Result<u8, 
         out["checks"] = json!(analysis.checks.iter().map(|c| report::check(&plan, c)).collect::<Vec<_>>());
         print_json(&out);
     } else {
-        println!("{}", if dry { "Dry run, nothing written." } else { "Saved." });
+        say!("{}", if dry { "Dry run, nothing written." } else { "Saved." });
         let span = |span: Option<(Date, Date)>| span.map_or("—".to_string(), |(start, finish)| if start == finish { text::day(start) } else { format!("{} – {}", text::day(start), text::day(finish)) });
         if moved.is_empty() {
-            println!("No date moved.");
+            say!("No date moved.");
         }
         for change in &moved {
             let name = plan.item(&change.id).map_or_else(|| ctx.plan.items[ctx.plan.item(&change.id).unwrap_or(0)].name.clone(), |index| plan.items[index].name.clone());
-            println!("  {name}: {} → {}", span(change.before), span(change.after));
+            say!("  {name}: {} → {}", span(change.before), span(change.after));
         }
         if let Some(verdict) = &analysis.verdict {
             let (headline, detail) = text::verdict(&plan, verdict);
-            println!("{headline} {detail}");
+            say!("{headline} {detail}");
         }
         for check in analysis.checks.iter().filter(|check| check.severity() != Severity::Hint && !matches!(check, pchart_core::Check::TooLate { .. })) {
-            println!("{} {}", if check.severity() == Severity::Problem { "✖" } else { "▲" }, text::check(&plan, check).0);
+            say!("{} {}", if check.severity() == Severity::Problem { "✖" } else { "▲" }, text::check(&plan, check).0);
         }
     }
     Ok(0)
@@ -386,7 +414,7 @@ fn print_schedule(plan: &Plan, schedule: &Schedule, json: bool) {
                     "finish": report::iso(slot.planned.finish),
                     "earliest": [report::iso(slot.earliest.start), report::iso(slot.earliest.finish)],
                     "latest": [report::iso(slot.latest.start), report::iso(slot.latest.finish)],
-                    "slack_wd": slot.slack,
+                    "spare_wd": slot.spare,
                 })
             })
             .collect();
@@ -403,19 +431,19 @@ fn print_schedule(plan: &Plan, schedule: &Schedule, json: bool) {
     for &index in &schedule.order {
         let (item, slot) = (&plan.items[index], &schedule.slots[index]);
         let mark = if schedule.chain.contains(&index) { '*' } else { ' ' };
-        println!(
-            "{mark} {:<16} {:<11} {} – {}   latest {} – {}   slack {:>3} wd",
+        say!(
+            "{mark} {:<16} {:<11} {} – {}   latest {} – {}   to spare {:>3} wd",
             item.name,
             item.lane,
             text::day(slot.planned.start),
             text::day(slot.planned.finish),
             text::day(slot.latest.start),
             text::day(slot.latest.finish),
-            slot.slack
+            slot.spare
         );
     }
     if let (Some(target), Some(spare)) = (schedule.target, schedule.spare()) {
-        println!("\n{}: {} to spare, plan starts {}", plan.items[target].name, text::working_days(spare), text::day(schedule.start));
+        say!("\n{}: {} to spare, plan starts {}", plan.items[target].name, text::working_days(spare), text::day(schedule.start));
     }
 }
 

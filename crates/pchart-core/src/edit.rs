@@ -28,6 +28,7 @@ pub enum Edit {
     Rename { item: String, name: String },
     Lane { item: String, lane: String },
     Done { item: String, done: bool },
+    Buffer { item: String, buffer: bool },
     Who { item: String, who: Option<String> },
 }
 
@@ -101,6 +102,7 @@ impl Edit {
                 next.items[find(item)?].lane = lane.clone();
             }
             Edit::Done { item, done } => next.items[find(item)?].done = *done,
+            Edit::Buffer { item, buffer } => next.items[find(item)?].buffer = *buffer,
             Edit::Who { item, who } => next.items[find(item)?].who = who.clone(),
         }
         next.check()?;
@@ -148,13 +150,14 @@ mod tests {
             r#"[{"op": "duration", "item": "frontend", "days": 30},
                 {"op": "fix", "item": "frontend", "kind": "no_earlier_than", "date": "2027-01-04"},
                 {"op": "add", "item": {"id": "buffer", "lane": "client", "name": "Buffer", "duration": "5wd", "after": ["acceptance"]}},
-                {"op": "link", "from": "buffer", "to": "launch"}]"#,
+                {"op": "link", "from": "buffer", "to": "launch"},
+                {"op": "buffer", "item": "buffer", "buffer": true}]"#,
         );
         let plan = apply_all(&sample(), &list).unwrap();
         let frontend = &plan.items[plan.item("frontend").unwrap()];
         assert_eq!((frontend.duration, frontend.no_earlier_than), (30, Some(jiff::civil::date(2027, 1, 4))));
         assert_eq!(plan.items[plan.item("launch").unwrap()].after, ["acceptance", "buffer"]);
-        assert_eq!(plan.items[plan.item("buffer").unwrap()].duration, 5);
+        assert_eq!((plan.items[plan.item("buffer").unwrap()].duration, plan.items[plan.item("buffer").unwrap()].buffer), (5, true));
     }
 
     #[test]
