@@ -479,18 +479,19 @@ mod tests {
     fn the_checks_screen_lists_by_weight_and_says_what_a_check_means() {
         let mut app = app();
         app.screen = Screen::Checks;
+        let svg = |placements: &[Placement]| placements.iter().map(|placement| placement.svg.as_str()).collect::<String>();
         let (rows, placements) = screen(&app, 170, 50);
-        assert!(has(&rows, ":: CHECKS · 1 WARNING · 1 HINT") && has(&rows, "PROBLEMS   none") && has(&rows, "› ▲ No buffer before a fixed date"));
-        assert!(has(&rows, "Acceptance Fri 26 Feb → Launch Mon 01 Mar") && has(&rows, "Its last item is Requirements, Fri 27 Nov"));
-        assert!(has(&rows, "Every fixed date holds · deadlines kept ·") && has(&rows, "Two items of one person at once: the plan names no one"));
-        assert!(has(&rows, ":: HOLIDAYS ACCOUNTED FOR · 5") && has(&rows, "Frontend      Tue 26 Jan  Republic Day"));
-        assert!(has(&rows, ":: IN THE ROADMAP · 18 JAN – 12 MAR 2027") && has(&rows, "starting by Mon 09 Nov.") && placements.len() == 1);
+        let all = svg(&placements);
+        assert!(has(&rows, ":: CHECKS · 1 WARNING · 1 HINT") && has(&rows, ":: IN THE ROADMAP · 18 JAN – 12 MAR 2027"));
+        for text in ["1 thing to look at", "No buffer before a fixed date", "Acceptance Fri 26 Feb  →  Launch Mon 01 Mar", "Requirements phase ends without a milestone", "6 other checks found nothing", "5 holidays accounted for", "If Acceptance slips by a day, Launch is late.", "Add a 5-day buffer before Launch:", "still on track, with "] {
+            assert!(all.contains(text), "{text}");
+        }
+        assert!(!all.contains("Its last item is Requirements") && placements.len() == 7);
         let (rows, placements) = screen(&app, 80, 24);
-        assert!(has(&rows, "If Acceptance slips by a day, Launch is late.") && has(&rows, "A 5 wd buffer before it leaves 7 wd to spare."));
-        assert!(placements.is_empty() && !has(&rows, "IN THE ROADMAP"));
+        assert!(!has(&rows, "IN THE ROADMAP") && svg(&placements).contains("Add a 5-day buffer before Launch:"));
         app.choose_check(1);
-        let (rows, _) = screen(&app, 170, 50);
-        assert!(has(&rows, ":: IN THE ROADMAP · 12 OCT – 04 DEC 2026") && has(&rows, "Add a milestone after Requirements"));
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, ":: IN THE ROADMAP · 12 OCT – 04 DEC 2026") && svg(&placements).contains("Add a milestone after Requirements.") && svg(&placements).contains("Its last item is Requirements, Fri 27 Nov"));
         app.show_check_in_roadmap();
         assert_eq!((app.screen, app.plan.items[app.selected].id.as_str()), (Screen::Roadmap, "requirements"));
     }

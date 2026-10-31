@@ -116,23 +116,3 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         placements.push(Placement { rect, svg: situation::chain(&app.plan, &app.schedule, pw, ph, unit(app), &app.palette).svg(), paper: false });
     }
 }
-
-/// Words wrapped to `room` columns, keeping the style of each span.
-pub(crate) fn wrap(spans: Vec<Span<'static>>, room: u16) -> Vec<Vec<Span<'static>>> {
-    let mut lines: Vec<Vec<Span<'static>>> = vec![Vec::new()];
-    let mut used = 0u16;
-    for span in spans {
-        let style = span.style;
-        let words: Vec<String> = span.content.split_inclusive(' ').map(str::to_string).collect();
-        for word in words {
-            let w = word.trim_end().chars().count() as u16;
-            if used + w > room && used > 0 {
-                lines.push(Vec::new());
-                used = 0;
-            }
-            used += word.chars().count() as u16;
-            lines.last_mut().expect("a line").push(Span::styled(word, style));
-        }
-    }
-    lines
-}

@@ -176,3 +176,54 @@ pub fn line(parts: &[Part], width: f32, height: f32, unit: f32, palette: &Palett
     }
     s
 }
+
+/// A symbol and a bold line of text beside it, as "1 thing to look at" heads the Checks screen.
+pub fn headline(icon: Icon, tone: Color, text: &str, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let u = unit;
+    let mut s = scene(width, height, palette);
+    let size = (30.0 * u).min((width - 64.0 * u) / (text.chars().count().max(1) as f32 * crate::style::ADVANCE));
+    draw_icon(&mut s, icon, 22.0 * u, height / 2.0, 36.0 * u, tone, palette.page);
+    runs(&mut s, 56.0 * u, height / 2.0 + size * 0.36, size, &[(text, palette.bright, true)]);
+    s
+}
+
+/// One check in a list: its symbol and title, and for the chosen one a raised band with a pink edge
+/// and the line that says where it is.
+#[allow(clippy::too_many_arguments)]
+pub fn row(icon: Icon, tone: Color, title: &str, place: Option<&str>, chosen: bool, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let (p, u) = (palette, unit);
+    let mut s = scene(width, height, p);
+    let ground = if chosen { p.raised } else { p.page };
+    if chosen {
+        s.add(Shape::Rect { x: 0.0, y: 2.0 * u, w: width, h: height - 6.0 * u, radius: 0.0, fill: Fill::Color(p.raised), stroke: None });
+        s.add(Shape::Rect { x: 0.0, y: 2.0 * u, w: 4.0 * u, h: height - 6.0 * u, radius: 0.0, fill: Fill::Color(p.accent), stroke: None });
+    }
+    let fit = |text: &str, size: f32, room: f32| {
+        let count = (room / (size * crate::style::ADVANCE)).floor() as usize;
+        if text.chars().count() <= count { text.to_string() } else { text.chars().take(count.saturating_sub(1)).collect::<String>() + "…" }
+    };
+    draw_icon(&mut s, icon, 26.0 * u, 18.0 * u, 18.0 * u, tone, ground);
+    let size = 17.0 * u;
+    runs(&mut s, 46.0 * u, 24.0 * u, size, &[(&fit(title, size, width - 50.0 * u), if chosen { p.bright } else { p.ink }, chosen)]);
+    if let Some(place) = place {
+        runs(&mut s, 46.0 * u, 46.0 * u, 15.0 * u, &[(&fit(place, 15.0 * u, width - 50.0 * u), p.dim, false)]);
+    }
+    s
+}
+
+/// What a check means, the step to take after a play mark, and what the plan is then: three lines of
+/// text larger than a cell, numbers that stand out in bold.
+pub fn advice(happens: &[(String, bool)], step: &str, then: &[(String, bool)], width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let (p, u) = (palette, unit);
+    let mut s = scene(width, height, p);
+    let size = (19.0 * u).min(width / 60.0 / crate::style::ADVANCE);
+    let line = |s: &mut Scene, x: f32, y: f32, parts: &[(String, bool)], plain: Color| {
+        let parts: Vec<(&str, Color, bool)> = parts.iter().map(|(text, strong)| (text.as_str(), if *strong { p.bright } else { plain }, *strong)).collect();
+        runs(s, x, y, size, &parts);
+    };
+    line(&mut s, 0.0, 22.0 * u, happens, p.ink);
+    draw_icon(&mut s, Icon::Play, 8.0 * u, 62.0 * u, 20.0 * u, p.ink, p.page);
+    runs(&mut s, 26.0 * u, 68.0 * u, size, &[(step, p.bright, true)]);
+    line(&mut s, 26.0 * u, 96.0 * u, then, p.ink);
+    s
+}

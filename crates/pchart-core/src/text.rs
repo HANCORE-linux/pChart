@@ -97,13 +97,13 @@ pub fn check(plan: &Plan, check: &Check) -> (String, String) {
 /// A run of text; `true` marks a number or date that stands out.
 pub type Run = (String, bool);
 
-/// What a check means and what can be done about it. Each line of `means` and `can_do` starts on a
-/// line of its own; `short` says both in one line each, for small windows.
+/// What a check means and what can be done about it, as picture 35 says it: what happens, the step to
+/// take, and what the plan is then, if pChart can tell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advice {
-    pub means: Vec<Vec<Run>>,
-    pub can_do: Vec<Vec<Run>>,
-    pub short: [Vec<Run>; 2],
+    pub happens: Vec<Run>,
+    pub step: String,
+    pub then: Vec<Run>,
 }
 
 /// The buffer the Checks screen suggests before a fixed date, in working days.
@@ -115,75 +115,37 @@ fn plain(text: String) -> Vec<Run> {
 
 /// What `check` means for this plan and what can be done about it. A missing buffer is answered with
 /// the plan as it would be with one.
-pub fn advice(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date, check: &Check) -> Advice {
-    let planned = |item: usize| &schedule.slots[item].planned;
+pub fn advice(plan: &Plan, calendars: &[Calendar], today: Date, check: &Check) -> Advice {
     let place = |item: usize| {
         let lane = &plan.lanes[plan.lane(&plan.items[item].lane).unwrap_or(0)];
         lane.city.clone().or_else(|| lane.place.clone()).unwrap_or_else(|| lane.name.clone())
     };
-    let both = |means: Vec<String>, can_do: String, short: [String; 2]| Advice { means: means.into_iter().map(plain).collect(), can_do: vec![plain(can_do)], short: short.map(plain) };
+    let say = |happens: String, step: String| Advice { happens: plain(happens), step, then: Vec::new() };
     match *check {
-        Check::TooLate { target, late } => {
-            let t = name(plan, target);
-            both(
-                vec![format!("{t} is fixed on {}, but the work before it ends {} later.", day(planned(target).finish), working_days(late))],
-                format!("Shorten a step of the chain that decides the date, let steps overlap, or move {t}."),
-                [format!("The work before {t} ends {} too late.", working_days(late)), "Shorten the chain that decides the date.".into()],
-            )
-        }
-        Check::MissedDeadline { item, by, finish } => {
-            let i = name(plan, item);
-            both(vec![format!("{i} has to be done by {}. As planned, it ends {}.", day(by), day(finish))], "Start the work before it earlier, or make it shorter.".into(), [format!("{i} ends {}, after its deadline.", day(finish)), "Start earlier or make it shorter.".into()])
-        }
-        Check::FixedTooEarly { item, waits_on, ready } => {
-            let (i, w) = (name(plan, item), name(plan, waits_on));
-            let fixed = plan.items[item].on.map(day).unwrap_or_default();
-            both(vec![format!("{i} is fixed on {fixed}, but it waits on {w}, which is ready on {} at the earliest.", day(ready))], format!("Move {i} to {} or later, or let it start when {w} is ready.", day(ready)), [format!("{w} is not ready before {}.", day(ready)), format!("Move {i} to {} or later.", day(ready))])
-        }
+        Check::TooLate { target, late } => say(format!("The work before {} ends {} too late.", name(plan, target), working_days(late)), "Shorten or overlap the steps that decide the date.".into()),
+        Check::MissedDeadline { item, by, finish } => say(format!("{} ends {}, after its deadline {}.", name(plan, item), day(finish), day(by)), "Start the work before it earlier, or make it shorter.".into()),
+        Check::FixedTooEarly { item, waits_on, ready } => say(format!("{} is not ready before {}.", name(plan, waits_on), day(ready)), format!("Move {} to {} or later.", name(plan, item), day(ready))),
         Check::NoBuffer { before, target } => {
             let (b, t) = (name(plan, before), name(plan, target));
-            let means = vec![format!("{t} is fixed on {}. {b} ends on {}, the working day before.", day(planned(target).finish), day(planned(before).finish)), format!("If {b} or anything before it slips by a day, {t} is late.")];
-            let mut can_do = vec![(format!("A buffer of {} before {t} takes small delays.", working_days(BUFFER as i32)), false)];
-            let mut short = vec![(format!("A {BUFFER} wd buffer before it"), false)];
-            match with_buffer(plan, calendars, today, before, target) {
-                Some(verdict) if verdict.state == State::DoesNotHold => {
-                    can_do.extend([(" The plan is then ".into(), false), (working_days(-verdict.spare), true), (" late.".into(), false)]);
-                    short.extend([(" makes it ".into(), false), (format!("{} wd", -verdict.spare), true), (" late.".into(), false)]);
-                }
-                Some(verdict) => {
-                    let first = name(plan, verdict.first);
-                    can_do.extend([(" The plan is then still on track, with ".into(), false), (verdict.spare.to_string(), true), (format!(" working {} to spare, with {first} starting by ", if verdict.spare == 1 { "day" } else { "days" }), false), (day(verdict.latest_start), true), (".".into(), false)]);
-                    short.extend([(" leaves ".into(), false), (verdict.spare.to_string(), true), (" wd to spare.".into(), false)]);
-                }
-                None => short.push((" takes small delays.".into(), false)),
-            }
-            Advice { means: means.into_iter().map(plain).collect(), can_do: vec![can_do], short: [plain(format!("If {b} slips by a day, {t} is late.")), short] }
+            let then = match with_buffer(plan, calendars, today, before, target) {
+                Some(verdict) if verdict.state == State::DoesNotHold => vec![("then ".into(), false), (working_days(-verdict.spare), true), (" late.".into(), false)],
+                Some(verdict) => vec![("still on track, with ".into(), false), (working_days(verdict.spare), true), (" to spare.".into(), false)],
+                None => Vec::new(),
+            };
+            Advice { happens: plain(format!("If {b} slips by a day, {t} is late.")), step: format!("Add a {BUFFER}-day buffer before {t}:"), then }
         }
         Check::DayOff { item, date, ref holiday } => {
-            let i = name(plan, item);
             let off = match holiday {
                 Some(holiday) => format!("{holiday} in {}", place(item)),
                 None if matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday) => "a weekend".into(),
                 None => format!("a day off in {}", place(item)),
             };
-            both(vec![format!("{i} is fixed on {}, which is {off}.", day(date))], format!("Move it to a working day in {}.", place(item)), [format!("{} is {off}.", day(date)), "Move it to a working day.".into()])
+            say(format!("{} is {off}.", day(date)), format!("Move {} to a working day.", name(plan, item)))
         }
-        Check::Overdue { item, finish } => {
-            let i = name(plan, item);
-            both(vec![format!("{i} was planned to end {} and is not marked done.", day(finish))], "Mark it done, or give it the days it still needs.".into(), [format!("Planned to end {}, not marked done.", day(finish)), "Mark it done or give it more days.".into()])
-        }
-        Check::Overlap { ref who, first, second } => {
-            let (a, b) = (name(plan, first), name(plan, second));
-            both(vec![format!("{who} is planned on {a} and {b} at the same time.")], "Let one wait on the other, or give one of them to someone else.".into(), [format!("{who} is on {a} and {b} at once."), "Let one wait on the other.".into()])
-        }
-        Check::LongItem { item } => {
-            let i = name(plan, item);
-            both(vec![format!("{i} takes {}. Over six weeks, it is hard to see whether it is on track.", working_days(plan.items[item].duration as i32))], "Split it into parts of six weeks or less.".into(), ["Hard to see whether it is on track.".into(), "Split it into parts of six weeks or less.".into()])
-        }
-        Check::PhaseEndsWithoutMilestone { phase, item } => {
-            let (p, i) = (&plan.phases[phase].name, name(plan, item));
-            both(vec![format!("The phase {p} ends with {i}, a piece of work, so nothing marks when the phase is done.")], format!("Add a milestone after {i}, such as \"{p} done\"."), [format!("Nothing marks when {p} is done."), format!("Add a milestone after {i}.")])
-        }
+        Check::Overdue { item, finish } => say(format!("{} was planned to end {} and is not marked done.", name(plan, item), day(finish)), "Mark it done, or give it the days it still needs.".into()),
+        Check::Overlap { ref who, first, second } => say(format!("{who} is planned on {} and {} at once.", name(plan, first), name(plan, second)), "Let one wait on the other.".into()),
+        Check::LongItem { item } => say(format!("Over six weeks, it is hard to see whether {} is on track.", name(plan, item)), "Split it into parts of six weeks or less.".into()),
+        Check::PhaseEndsWithoutMilestone { phase, item } => say(format!("Nothing marks when {} is done.", plan.phases[phase].name), format!("Add a milestone after {}.", name(plan, item))),
     }
 }
 
@@ -238,10 +200,10 @@ mod tests {
         assert_eq!(next(&plan, &analysis, &analysis.next[0]), "Start Requirements by Mon 16 Nov: 12 working days from today.");
         assert_eq!(next(&plan, &analysis, &analysis.next[1]), "No buffer before Launch on Mon 01 Mar.");
         let line = |runs: &[Run]| runs.iter().map(|(text, _)| text.as_str()).collect::<String>();
-        let buffer = advice(&plan, &calendars, &schedule, today, &analysis.checks[0]);
-        assert_eq!(line(&buffer.means[0]), "Launch is fixed on Mon 01 Mar. Acceptance ends on Fri 26 Feb, the working day before.");
-        assert_eq!(line(&buffer.can_do[0]), "A buffer of 5 working days before Launch takes small delays. The plan is then still on track, with 7 working days to spare, with Requirements starting by Mon 09 Nov.");
-        assert_eq!(line(&buffer.short[1]), "A 5 wd buffer before it leaves 7 wd to spare.");
-        assert!(buffer.can_do[0].iter().any(|(text, strong)| text == "Mon 09 Nov" && *strong));
+        let buffer = advice(&plan, &calendars, today, &analysis.checks[0]);
+        assert_eq!(line(&buffer.happens), "If Acceptance slips by a day, Launch is late.");
+        assert_eq!(buffer.step, "Add a 5-day buffer before Launch:");
+        assert_eq!(line(&buffer.then), "still on track, with 7 working days to spare.");
+        assert!(buffer.then.iter().any(|(text, strong)| text == "7 working days" && *strong));
     }
 }
