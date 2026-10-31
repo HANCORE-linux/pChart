@@ -68,7 +68,8 @@ pub const ADVANCE: f32 = 0.6;
 
 /// The lines and text size of a phase name in its arrow, `room` wide and `height` high: the whole name
 /// on one line, as large as `most` and as small as `least`; else on two lines, broken at a space; else
-/// the plan's short name the same way; else the name cut with "…" at `least`. `width` measures text.
+/// the plan's short name the same way; else its first three letters in capitals ("REQ"), or the first
+/// letters of its words ("B&A"); else the name cut with "…" at `least`. `width` measures text.
 pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most: f32, least: f32, width: impl Fn(&str, f32) -> f32) -> (Vec<String>, f32) {
     let one = |text: &str| most.min(most * room / width(text, most).max(0.01));
     let two = |text: &str| {
@@ -80,7 +81,14 @@ pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most
             })
             .max_by(|x, y| x.0.total_cmp(&y.0))
     };
-    for text in std::iter::once(name).chain(short) {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let letters = if words.len() > 1 {
+        words.iter().filter_map(|word| if *word == "&" || word.eq_ignore_ascii_case("and") { Some('&') } else { word.chars().find(|c| c.is_alphanumeric()) }).collect::<String>()
+    } else {
+        name.chars().filter(|c| c.is_alphanumeric()).take(3).collect()
+    }
+    .to_uppercase();
+    for text in std::iter::once(name).chain(short).chain(Some(letters.as_str()).filter(|letters| !letters.is_empty())) {
         if one(text) >= least {
             return (vec![text.to_string()], one(text));
         }
@@ -106,6 +114,9 @@ mod tests {
         let (lines, _) = phase_label("Beta and acceptance testing", None, 80.0, 52.0, 17.0, 8.0, width);
         assert_eq!(lines, ["Beta and", "acceptance testing"]);
         assert_eq!(phase_label("Requirements", Some("Reqs"), 30.0, 52.0, 17.0, 8.0, width).0, ["Reqs"]);
-        assert_eq!(phase_label("Requirements", None, 30.0, 52.0, 17.0, 8.0, width).0, ["Requi…"]);
+        assert_eq!(phase_label("Requirements", None, 30.0, 52.0, 17.0, 8.0, width).0, ["REQ"]);
+        assert_eq!(phase_label("Requirements", None, 12.0, 52.0, 17.0, 8.0, width).0, ["R…"]);
+        assert_eq!(phase_label("Beta & acceptance", None, 30.0, 52.0, 17.0, 8.0, width).0, ["B&A"]);
+        assert_eq!(phase_label("Discovery and research", None, 30.0, 18.0, 12.0, 10.0, width).0, ["D&R"]);
     }
 }

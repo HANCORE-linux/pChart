@@ -53,7 +53,7 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
 #[allow(clippy::too_many_arguments)]
 fn chevron(page: &mut Page, x0: f32, x1: f32, y: f32, h: f32, name: &str, short: Option<&str>, fill: Color) {
     let tip = page.chevron(x0, x1, y, h, fill, 14.0);
-    let (lines, size) = phase_label(name, short, x1 - x0 - tip - 4.0, h, 17.0, 8.0, |text, size| sans_width(text, size, false));
+    let (lines, size) = phase_label(name, short, x1 - x0 - tip - 4.0, h, 17.0, 10.0, |text, size| sans_width(text, size, false));
     let pitch = size * 1.2;
     let first = y + h / 2.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
     for (index, line) in lines.iter().enumerate() {

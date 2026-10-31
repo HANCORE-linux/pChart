@@ -6,7 +6,7 @@ use pchart_core::{Plan, Schedule};
 
 use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows, wrap};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
-use crate::style::sans_width;
+use crate::style::{phase_label, sans_width};
 use crate::views::Audience;
 
 const LANE: f32 = 51.0;
@@ -53,20 +53,14 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     page.line(X0, 152.0, X1, 152.0, MID, 1.2);
 
     page.text(X0, PHASES_Y + 13.0, "Phases", 12.0, GRAY, false, Anchor::Start, None);
-    let mut names = Vec::new();
-    for (index, (name, from, to)) in schedule.phases(plan).into_iter().enumerate() {
+    for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
         let (x0, x1) = (axis.x(from), axis.xe(to));
         let tip = page.chevron(x0, x1, PHASES_Y, 18.0, SHADES[index % SHADES.len()], 7.0);
-        names.push((index, name, x0, x1, tip));
-    }
-    for (index, name, x0, x1, tip) in names {
-        let y = PHASES_Y + 13.0;
-        if sans_width(&name, 12.0, false) <= x1 - x0 - 2.0 * tip - 6.0 {
-            page.text((x0 + x1) / 2.0 + tip / 2.0, y, &name, 12.0, INK, false, Anchor::Middle, None);
-        } else {
-            let (right, left) = ((x1 + 5.0, y, Anchor::Start), (x0 - 4.0, y, Anchor::End));
-            let places = if index == 0 { [left, right] } else { [right, left] };
-            page.place(&places, &name, 12.0, INK, false, None, [gx0, PHASES_Y - 2.0, X1, PHASES_Y + 20.0]);
+        let (lines, size) = phase_label(&name, phase.short.as_deref(), x1 - x0 - tip - 4.0, 18.0, 12.0, 10.0, |text, size| sans_width(text, size, false));
+        let pitch = size * 1.2;
+        let first = PHASES_Y + 9.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
+        for (line, text) in lines.iter().enumerate() {
+            page.text((x0 + x1) / 2.0 + tip / 2.0, first + pitch * line as f32, text, size, INK, false, Anchor::Middle, None);
         }
     }
 
