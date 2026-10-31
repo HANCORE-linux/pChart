@@ -43,7 +43,7 @@ fn words(app: &App, check: &Check) -> (String, String) {
 }
 
 fn symbol(app: &App, check: &Check) -> (Icon, pchart_draw::scene::Color) {
-    let p = app.palette;
+    let p = app.shown();
     match check.severity() {
         Severity::Problem => (Icon::Cross, p.alert),
         Severity::Warning => (Icon::Warn, p.warn),
@@ -76,7 +76,7 @@ fn fine(app: &App) -> Vec<&'static str> {
 /// The list behind a chosen quiet line, in `rect`: the checks that found nothing, or the holidays the
 /// plan accounts for, as many as fit.
 fn quiet(app: &App, frame: &mut Frame, inks: &Inks, placements: &mut Vec<Placement>, rect: Rect, holidays_chosen: bool, spacing: u16) {
-    let p = app.palette;
+    let p = app.shown();
     let bottom = rect.y + rect.height;
     if !holidays_chosen {
         let who = app.plan.items.iter().any(|item| item.who.is_some());
@@ -148,7 +148,7 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     let Some(&index) = order.get(app.check) else { return };
     let check = &app.analysis.checks[index];
     let advice = text::advice(&app.plan, &app.calendars, app.today, check);
-    let p = app.palette;
+    let p = app.shown();
     if !wide {
         let gap = u16::from(y + 6 < left.y + left.height);
         let rect = Rect { x: left.x + 3, y: y + gap, width: left.width.saturating_sub(6), height: 5 };
@@ -185,7 +185,7 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
 
 /// The headline, the checks by weight, and the two quiet lines. Returns the row after them.
 fn list(app: &App, placements: &mut Vec<Placement>, rect: Rect, spacing: u16) -> u16 {
-    let p = app.palette;
+    let p = app.shown();
     let (x, w) = (rect.x + 2, rect.width.saturating_sub(4));
     let bottom = rect.y + rect.height - 1;
     let looks = app.analysis.checks.iter().filter(|check| check.severity() != Severity::Hint).count();

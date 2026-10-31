@@ -34,7 +34,7 @@ fn team(app: &App, item: usize) -> String {
 
 /// A statement of "Next" in the words and symbols of picture 32.
 fn statement(app: &App, next: &Next) -> Statement {
-    let p = app.palette;
+    let p = app.shown();
     let name = |item: usize| app.plan.items[item].name.clone();
     let when = |in_wd: i32| match in_wd {
         0 => "today".to_string(),
@@ -73,7 +73,7 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         Some(verdict) => {
             let rect = Rect { x, y: stand.y + 2, width: w, height: hero };
             let (pw, ph) = pixels(app, rect);
-            placements.push(Placement { rect, svg: situation::verdict(&app.plan, verdict, pw, ph, unit(app), &app.palette).svg(), paper: false });
+            placements.push(Placement { rect, svg: situation::verdict(&app.plan, verdict, pw, ph, unit(app), &app.shown()).svg(), paper: false });
         }
         None => {
             let end = app.schedule.slots.iter().map(|slot| slot.planned.finish).max().unwrap_or(app.today);
@@ -105,7 +105,7 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         }
         let rect = Rect { x: band, y, width: band_w, height: 4 };
         let (pw, ph) = pixels(app, rect);
-        placements.push(Placement { rect, svg: situation::statement(&statement(app, step), index == app.statement, pw, ph, unit(app), &app.palette).svg(), paper: false });
+        placements.push(Placement { rect, svg: situation::statement(&statement(app, step), index == app.statement, pw, ph, unit(app), &app.shown()).svg(), paper: false });
         y += 5;
     }
 
@@ -113,6 +113,6 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         panel(frame, inks, decides, "THIS CHAIN DECIDES THE DATE", false);
         let rect = Rect { y: decides.y + 2, ..chain };
         let (pw, ph) = pixels(app, rect);
-        placements.push(Placement { rect, svg: situation::chain(&app.plan, &app.schedule, pw, ph, unit(app), &app.palette).svg(), paper: false });
+        placements.push(Placement { rect, svg: situation::chain(&app.plan, &app.schedule, pw, ph, unit(app), &app.shown()).svg(), paper: false });
     }
 }

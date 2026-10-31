@@ -87,7 +87,7 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
 /// that is on, the audience and the formats as boxes, the folder and the files. The part `↑↓` is on has its label in brighter ink; `←→` rings a
 /// format in pink. Rows are 21 units, as cells.
 fn options(app: &App, width: f32, height: f32, unit: f32, compact: bool, wide: bool) -> pchart_draw::Scene {
-    let (p, u, e) = (app.palette, unit, &app.export);
+    let (p, u, e) = (app.shown(), unit, &app.export);
     let mut s = bits::canvas(width, height, &p);
     let row = 21.0 * u;
     let size = 16.6 * u;

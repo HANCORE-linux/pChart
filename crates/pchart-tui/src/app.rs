@@ -70,6 +70,13 @@ pub struct Notes {
     pub typed: Option<String>,
 }
 
+/// The finder (Ctrl+P, picture 50): what is typed so far, and the line chosen in what it found.
+#[derive(Default)]
+pub struct Finder {
+    pub typed: String,
+    pub chosen: usize,
+}
+
 /// The plan as it was before a what-if, which Esc goes back to.
 pub struct Before {
     pub plan: Plan,
@@ -107,13 +114,25 @@ pub struct App {
     /// Set while a what-if is tried: the plan, schedule and analysis hold the tried plan, which is not
     /// written until Enter keeps it.
     pub before: Option<Before>,
+    /// The help of this screen is open (`?`).
+    pub help: bool,
+    pub finder: Option<Finder>,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None }
+    }
+
+    /// The colours of the screen under the help or the finder: dimmed while one of them is open.
+    pub fn shown(&self) -> Palette {
+        if self.overlay() { self.palette.dimmed() } else { self.palette }
+    }
+
+    pub fn overlay(&self) -> bool {
+        self.help || self.finder.is_some()
     }
 
     /// The roadmap picture for `rect`.
@@ -126,7 +145,7 @@ impl App {
             today: self.today,
             selected: if matches!(self.spot(), Some(Spot::Place(..))) { None } else { Some(self.selected) },
             level: self.level,
-            palette: self.palette,
+            palette: self.shown(),
             cursor: self.notes.as_ref().map(|notes| (notes.lane, notes.day)),
         }
     }
@@ -453,6 +472,11 @@ impl App {
     /// `i` in the notes mode: marks the milestone under the cursor important, or no longer.
     pub fn toggle_important(&mut self) {
         let Some(Spot::Item(index)) = self.spot() else { return };
+        self.mark_important(index);
+    }
+
+    /// Marks the milestone `index` important, or no longer.
+    pub fn mark_important(&mut self, index: usize) {
         let item = &self.plan.items[index];
         if !item.milestone {
             return;

@@ -97,12 +97,13 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     }
     let mut placements = Vec::new();
     title_bar(app, frame, &inks, area);
+    let under = Inks::of(app.shown());
     match app.screen {
-        Screen::Situation => crate::situation::draw(app, frame, &inks, area, &mut placements),
-        Screen::Checks => crate::checks::draw(app, frame, &inks, area, &mut placements),
-        Screen::Export => crate::export::draw(app, frame, &inks, area, &mut placements),
+        Screen::Situation => crate::situation::draw(app, frame, &under, area, &mut placements),
+        Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
+        Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
         Screen::Roadmap => {
-            let palette = if app.question.is_some() || writing(app) { app.palette.dimmed() } else { app.palette };
+            let palette = if app.question.is_some() || writing(app) || app.overlay() { app.palette.dimmed() } else { app.palette };
             let under = Inks::of(palette);
             let top = if area.width >= 120 && area.height >= 44 {
                 tiles(app, &palette, frame, &under, area, &mut placements);
@@ -113,6 +114,15 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
             };
             roadmap(app, &palette, frame, &under, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }, &mut placements);
         }
+    }
+    if app.overlay() {
+        placements.retain(|placement| !placement.paper);
+    }
+    if app.help {
+        crate::help::draw(app, frame, area, &mut placements);
+    }
+    if app.finder.is_some() {
+        crate::finder::draw(app, frame, area, &mut placements);
     }
     keys(app, frame, &inks, area);
     placements
@@ -359,17 +369,23 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         hints.push(("Esc", "done"));
         hints
     };
-    let hints: Vec<(&str, &str)> = match app.screen {
-        Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
+    let mut hints: Vec<(&str, &str)> = match app.screen {
+        _ if app.finder.is_some() => vec![("↑↓", "choose"), ("Enter", "run"), ("Esc", "close")],
+        _ if app.help => vec![("Esc", "close"), ("Ctrl+P", "find an action")],
+        Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
-        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
-        Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
-        Screen::Checks => vec![("↑↓", "check"), ("1", "situation"), ("q", "quit")],
-        Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
+        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
+        Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
+        Screen::Checks => vec![("↑↓", "check"), ("?", "help")],
+        Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back"), ("?", "help")],
     };
+    let total = |hints: &[(&str, &str)]| hints.iter().map(|(key, label)| key.chars().count() + label.chars().count() + 5).sum::<usize>();
+    while hints.len() > 1 && total(&hints) > usize::from(area.width.saturating_sub(1)) && hints.last().is_some_and(|(key, _)| *key == "?") {
+        hints.remove(hints.len() - 2);
+    }
     let mut spans = Vec::new();
     for (key, label) in hints {
         let next = [Span::styled(key, bold(inks.ink)), Span::styled(format!(" {label}"), inks.dim), Span::raw("    ")];
@@ -900,5 +916,28 @@ mod tests {
         assert_eq!(app.screen, Screen::Checks);
         app.choose_check(1);
         assert_eq!(app.check, 0);
+    }
+
+    #[test]
+    fn the_help_explains_the_screen_and_the_finder_runs_what_was_typed() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let rows = screen(&app, 170, 50).0;
+        assert!(has(&rows, "? help") && !has(&rows, "q quit") && has(&screen(&app, 60, 16).0, "? help"));
+        app.help = true;
+        let (rows, placements) = screen(&app, 170, 50);
+        let help = &placements.last().unwrap().svg;
+        assert!(has(&rows, "Esc close") && help.contains(":: HELP · ROADMAP") && help.contains("Find any action by typing") && help.contains("decides the date"));
+        let chart = &placements[placements.len() - 3].svg;
+        assert!(chart.contains(&app.palette.dimmed().ink.hex()) && !chart.contains(&app.palette.ink.hex()));
+        app.help = false;
+        app.finder = Some(crate::app::Finder { typed: "move launch".into(), chosen: 0 });
+        let (rows, placements) = screen(&app, 170, 50);
+        let finder = &placements.last().unwrap().svg;
+        assert!(has(&rows, "Enter run") && finder.contains("2 matches") && finder.contains("Change a date") && finder.contains("when Launch is · now Mon 01 Mar, fixed"));
+        let (action, item) = crate::actions::find(&app, "move launch")[0];
+        app.finder = None;
+        assert!(!action.run(&mut app, item, "move launch"));
+        assert!(app.question.as_ref().is_some_and(|question| Some(question.item) == app.plan.item("launch")));
     }
 }

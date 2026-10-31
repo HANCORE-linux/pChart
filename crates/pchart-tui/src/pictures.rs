@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -143,11 +143,14 @@ pub struct Pictures {
     palette: Palette,
     jobs: Sender<Job>,
     done: Receiver<Done>,
+    /// Places whose new picture has not been shown yet.
+    fresh: HashSet<Rect>,
+    sixel: bool,
 }
 
 impl Pictures {
     pub fn start(mut painter: Painter) -> Self {
-        let (cell, palette) = (painter.cell(), painter.palette);
+        let (cell, palette, sixel) = (painter.cell(), painter.palette, painter.picker.protocol_type() == ProtocolType::Sixel);
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
         thread::spawn(move || {
@@ -159,7 +162,7 @@ impl Pictures {
                 }
             }
         });
-        Pictures { cell, slots: HashMap::new(), pending: HashMap::new(), waiting: HashMap::new(), ids: HashMap::new(), free: Vec::new(), next: std::process::id() << 8, palette, jobs, done }
+        Pictures { cell, slots: HashMap::new(), pending: HashMap::new(), waiting: HashMap::new(), ids: HashMap::new(), free: Vec::new(), next: std::process::id() << 8, palette, jobs, done, fresh: HashSet::new(), sixel }
     }
 
     /// Paints the pictures still to come for another theme.
@@ -179,6 +182,7 @@ impl Pictures {
             self.pending.remove(&done.rect);
             if let Some(protocol) = done.protocol {
                 self.slots.insert(done.rect, (done.key, protocol));
+                self.fresh.insert(done.rect);
             }
             if let Some(job) = self.waiting.remove(&done.rect) {
                 self.send(job);
@@ -204,11 +208,21 @@ impl Pictures {
                 self.send(job);
             }
         }
+        let mut changed: Vec<Rect> = Vec::new();
+        let mut again = false;
         for rect in &rects {
+            if self.sixel && changed.iter().any(|under| under.intersects(*rect)) {
+                again = true;
+                continue;
+            }
             if let Some((_, protocol)) = self.slots.get(rect) {
                 frame.render_widget(Image::new(protocol), *rect);
             }
+            if self.fresh.contains(rect) {
+                changed.push(*rect);
+            }
         }
+        self.fresh.clear();
         self.slots.retain(|rect, _| rects.contains(rect));
         self.waiting.retain(|rect, _| rects.contains(rect));
         let (pending, free) = (&self.pending, &mut self.free);
@@ -219,7 +233,7 @@ impl Pictures {
             }
             keep
         });
-        rects.iter().any(|rect| self.pending.contains_key(rect) || !self.slots.contains_key(rect))
+        again || rects.iter().any(|rect| self.pending.contains_key(rect) || !self.slots.contains_key(rect))
     }
 
     fn send(&mut self, job: Job) {

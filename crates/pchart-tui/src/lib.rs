@@ -1,6 +1,9 @@
+mod actions;
 mod app;
 mod checks;
 mod export;
+mod finder;
+mod help;
 mod note;
 mod pictures;
 mod question;
@@ -103,6 +106,44 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
         let read = event::read();
         note(format!("event {read:?}"));
         match read {
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.finder.is_some() => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => app.finder = None,
+                KeyCode::Esc => app.finder = None,
+                KeyCode::Up | KeyCode::Down => {
+                    let count = app.finder.as_ref().map_or(0, |finder| actions::find(&app, &finder.typed).len());
+                    if let Some(finder) = app.finder.as_mut().filter(|_| count > 0) {
+                        finder.chosen = (finder.chosen + if key.code == KeyCode::Up { count - 1 } else { 1 }) % count;
+                    }
+                }
+                KeyCode::Enter => {
+                    let finder = app.finder.take().unwrap_or_default();
+                    if let Some(&(action, item)) = actions::find(&app, &finder.typed).get(finder.chosen)
+                        && action.run(&mut app, item, &finder.typed)
+                    {
+                        break Ok(());
+                    }
+                }
+                KeyCode::Backspace => app.finder.iter_mut().for_each(|finder| {
+                    finder.typed.pop();
+                    finder.chosen = 0;
+                }),
+                KeyCode::Char(c) => app.finder.iter_mut().for_each(|finder| {
+                    finder.typed.push(c);
+                    finder.chosen = 0;
+                }),
+                _ => {}
+            },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.help => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.help = false;
+                    app.finder = Some(app::Finder::default());
+                }
+                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Esc | KeyCode::Char('?') => app.help = false,
+                _ => {}
+            },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.question.is_some() => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Esc => app.question = None,
@@ -157,6 +198,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match (app.screen, key.code) {
                 (_, KeyCode::Char('q')) => break Ok(()),
                 (_, KeyCode::Char('c')) if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                (_, KeyCode::Char('p')) if key.modifiers.contains(KeyModifiers::CONTROL) => app.finder = Some(app::Finder::default()),
+                (_, KeyCode::Char('?')) => app.help = true,
                 (_, KeyCode::Char('1')) => app.screen = Screen::Situation,
                 (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
                 (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
