@@ -55,6 +55,13 @@ pub struct Question {
     pub typed: String,
 }
 
+/// The plan as it was before a what-if, which Esc goes back to.
+pub struct Before {
+    pub plan: Plan,
+    pub schedule: Schedule,
+    pub analysis: Analysis,
+}
+
 pub struct App {
     pub plan: Plan,
     pub calendars: Vec<Calendar>,
@@ -79,13 +86,16 @@ pub struct App {
     /// The plan changed and is still to be written.
     pub unsaved: bool,
     pub question: Option<Question>,
+    /// Set while a what-if is tried: the plan, schedule and analysis hold the tried plan, which is not
+    /// written until Enter keeps it.
+    pub before: Option<Before>,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), history: Vec::new(), unsaved: false, question: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), history: Vec::new(), unsaved: false, question: None, before: None }
     }
 
     /// The roadmap picture for `rect`.
@@ -102,9 +112,12 @@ impl App {
         }
     }
 
-    /// The roadmap picture for `rect`, without a ground of its own.
+    /// The roadmap picture for `rect`, without a ground of its own; in a what-if with the old places.
     pub fn svg(&self, rect: Rect) -> String {
-        let mut scene = pchart_draw::roadmap(&self.plan, &self.schedule, &self.calendars, &self.settings(rect));
+        let mut scene = match &self.before {
+            Some(before) => pchart_draw::what_if(&self.plan, &self.schedule, &self.calendars, &self.settings(rect), &before.schedule),
+            None => pchart_draw::roadmap(&self.plan, &self.schedule, &self.calendars, &self.settings(rect)),
+        };
         scene.background = None;
         scene.svg()
     }
@@ -265,6 +278,86 @@ impl App {
         }
     }
 
+    /// Tries `edit` as what-if, on top of what was tried before: nothing is written.
+    fn try_edit(&mut self, edit: &Edit) {
+        let tried = edit.apply(&self.plan).map_err(|err| err.to_string()).and_then(|plan| pchart_core::schedule(&plan, &self.calendars, self.today).map(|schedule| (plan, schedule)).map_err(|err| err.to_string()));
+        match tried {
+            Ok((plan, schedule)) => {
+                if self.before.is_none() {
+                    self.before = Some(Before { plan: self.plan.clone(), schedule: self.schedule.clone(), analysis: self.analysis.clone() });
+                }
+                self.analysis = analyse(&plan, &self.calendars, &schedule, self.today);
+                self.plan = plan;
+                self.schedule = schedule;
+                self.message = None;
+            }
+            Err(err) => self.message = Some(err),
+        }
+    }
+
+    /// `←→` on the roadmap: the selected item a working day longer or shorter, as what-if.
+    pub fn try_length(&mut self, days: i32) {
+        let item = &self.plan.items[self.selected];
+        if item.milestone {
+            self.message = Some(format!("{} is a milestone; it has no duration", item.name));
+            return;
+        }
+        let days = (item.duration as i32 + days).max(1) as u32;
+        self.try_edit(&Edit::Duration { item: item.id.clone(), days });
+    }
+
+    /// Tab in the date question: its answer as what-if.
+    pub fn try_answer(&mut self) {
+        match self.answer() {
+            Some(edit) => {
+                self.try_edit(&edit);
+                if self.message.is_none() {
+                    self.question = None;
+                }
+            }
+            None => self.message = Some("Type a date, such as 4 jan or next friday".into()),
+        }
+    }
+
+    /// What the what-if changed, item by item: "Frontend +12 wd", "Frontend start".
+    pub fn changes(&self) -> Vec<String> {
+        let Some(before) = &self.before else { return Vec::new() };
+        before
+            .plan
+            .items
+            .iter()
+            .zip(&self.plan.items)
+            .filter_map(|(old, new)| {
+                if old.duration != new.duration {
+                    Some(format!("{} {:+} wd", new.name, i64::from(new.duration) - i64::from(old.duration)))
+                } else if (old.on, old.no_earlier_than, old.no_later_than) != (new.on, new.no_earlier_than, new.no_later_than) {
+                    Some(format!("{} {}", new.name, if new.milestone { "date" } else { "start" }))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Enter in a what-if: the tried plan becomes the plan and is written; `u` takes it back.
+    pub fn keep(&mut self) {
+        let changes = self.changes();
+        let Some(before) = self.before.take() else { return };
+        if !changes.is_empty() {
+            self.history.push((before.plan, changes.join(", ")));
+            self.unsaved = true;
+        }
+    }
+
+    /// Esc in a what-if: back to the plan as it was.
+    pub fn discard(&mut self) {
+        if let Some(before) = self.before.take() {
+            self.plan = before.plan;
+            self.schedule = before.schedule;
+            self.analysis = before.analysis;
+        }
+    }
+
     /// Overview, Standard, Full, and round again.
     pub fn detail(&mut self) {
         self.level = match self.level {
@@ -272,25 +365,5 @@ impl App {
             Level::Standard => Level::Full,
             Level::Full => Level::Overview,
         };
-    }
-
-    /// Lengthens or shortens the selected item by working days.
-    pub fn stretch(&mut self, days: i32) {
-        let item = &self.plan.items[self.selected];
-        if item.milestone {
-            self.message = Some(format!("{} is a milestone; it has no duration", item.name));
-            return;
-        }
-        let mut plan = self.plan.clone();
-        plan.items[self.selected].duration = (item.duration as i32 + days).max(1) as u32;
-        match pchart_core::schedule(&plan, &self.calendars, self.today) {
-            Ok(schedule) => {
-                self.analysis = analyse(&plan, &self.calendars, &schedule, self.today);
-                self.plan = plan;
-                self.schedule = schedule;
-                self.message = None;
-            }
-            Err(err) => self.message = Some(err.to_string()),
-        }
     }
 }

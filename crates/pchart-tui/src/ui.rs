@@ -2,7 +2,7 @@
 
 use jiff::civil::{Date, Weekday};
 use pchart_core::analysis::{Severity, State};
-use pchart_draw::bits::{self, Icon, Part};
+use pchart_draw::bits::{self, Icon, MixedPart, Part};
 use pchart_draw::scene::Color as Ink;
 use pchart_draw::{Level, Palette, shown};
 use ratatui::Frame;
@@ -157,10 +157,22 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         put(frame, x, 0, w, spans);
         x += w + 1;
     }
-    if app.question.is_some() && app.screen == Screen::Roadmap {
-        let mode = if area.width >= 100 { "CHANGE A DATE · nothing changed yet" } else { "CHANGE A DATE" };
-        let w = mode.chars().count() as u16;
-        if x + w + 2 < area.width {
+    let modes: Vec<String> = match (app.screen, &app.question, &app.before) {
+        (Screen::Roadmap, Some(_), _) if area.width >= 100 => vec!["CHANGE A DATE · nothing changed yet".into()],
+        (Screen::Roadmap, Some(_), _) => vec!["CHANGE A DATE".into()],
+        (Screen::Roadmap, None, Some(_)) => {
+            let changes = app.changes();
+            match changes.len() {
+                0 => vec!["WHAT-IF · nothing changed yet".into(), "WHAT-IF".into()],
+                1 => vec![format!("WHAT-IF · {} · not saved", changes[0]), "WHAT-IF · not saved".into(), "WHAT-IF".into()],
+                count => vec![format!("WHAT-IF · {count} changes · not saved"), "WHAT-IF · not saved".into(), "WHAT-IF".into()],
+            }
+        }
+        _ => Vec::new(),
+    };
+    if !modes.is_empty() {
+        if let Some(mode) = modes.into_iter().find(|mode| x + mode.chars().count() as u16 + 2 < area.width) {
+            let w = mode.chars().count() as u16;
             put(frame, area.width - w - 1, 0, w, vec![Span::styled(mode, inks.warn)]);
         }
         return;
@@ -224,7 +236,11 @@ fn tiles(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, area: Rec
                 let item = &app.plan.items[index];
                 let date = app.schedule.slots[index].planned.finish;
                 let kind = if item.on.is_some() { "TARGET · FIXED" } else { "TARGET · DEADLINE" };
-                (kind.into(), day(date).0, p.bright, day(date).1, inks.dim, format!("{} · scheduled backwards", item.name))
+                let (side, side_style) = match state(app, inks).filter(|_| app.before.is_some()) {
+                    Some((word, style)) => (word.to_string(), style),
+                    None => (day(date).1, inks.dim),
+                };
+                (kind.into(), day(date).0, p.bright, side, side_style, format!("{} · scheduled backwards", item.name))
             }
             None => match end {
                 Some((index, date)) => ("END".into(), day(date).0, p.bright, day(date).1, inks.dim, format!("{} · scheduled forwards", app.plan.items[index].name)),
@@ -234,12 +250,20 @@ fn tiles(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, area: Rec
         match first {
             Some(index) => {
                 let date = app.schedule.slots[index].latest.start;
-                ("LATEST START".into(), day(date).0, p.bright, day(date).1, inks.dim, app.plan.items[index].name.clone())
+                let name = app.plan.items[index].name.clone();
+                match app.before {
+                    Some(_) if date < app.today => ("LATEST START".into(), day(date).0, p.alert, day(date).1, inks.dim, name),
+                    Some(_) if date == app.today => ("LATEST START".into(), day(date).0, p.warn, "today".into(), inks.warn, name),
+                    _ => ("LATEST START".into(), day(date).0, p.bright, day(date).1, inks.dim, name),
+                }
             }
             None => ("LATEST START".into(), String::new(), p.bright, String::new(), inks.dim, String::new()),
         },
         match spare {
-            Some(spare) => ("TO SPARE".into(), spare.to_string(), tone, "working days".into(), inks.dim, "until the latest start".into()),
+            Some(spare) => {
+                let foot = app.before.as_ref().and_then(|before| before.schedule.spare()).map_or("until the latest start".to_string(), |was| format!("was {was}"));
+                ("TO SPARE".into(), spare.to_string(), tone, "working days".into(), inks.dim, foot)
+            }
             None => ("TO SPARE".into(), String::new(), p.bright, String::new(), inks.dim, String::new()),
         },
         {
@@ -318,8 +342,9 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
     let hints: &[(&str, &str)] = match app.screen {
         Screen::Situation => &[("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
-        Screen::Roadmap if app.question.is_some() => &[("↑↓", "choose"), ("Enter", "apply"), ("Esc", "keep as it is")],
-        Screen::Roadmap => &[("↑↓", item), ("Enter", "change a date"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+        Screen::Roadmap if app.question.is_some() => &[("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
+        Screen::Roadmap if app.before.is_some() => &[("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
+        Screen::Roadmap => &[("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
         Screen::Checks => &[("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
         Screen::Export => &[("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
     };
@@ -370,14 +395,15 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
     let span = format!("{} – {}", first.strftime("%b %Y"), last.strftime("%b %Y")).to_uppercase();
     let switch_w = 34;
     let room = l.panel.width.saturating_sub(4 + switch_w) as usize;
+    let mode = if app.before.is_some() { "WHAT-IF · " } else { "" };
     let title = if lanes.len() < app.plan.lanes.len() {
-        format!("ROADMAP · LANES {}–{} OF {}", lanes.first().map_or(0, |lane| lane + 1), lanes.last().map_or(0, |lane| lane + 1), app.plan.lanes.len())
-    } else if format!(":: SWIMLANE ROADMAP · {span}").chars().count() <= room {
-        format!("SWIMLANE ROADMAP · {span}")
-    } else if format!(":: ROADMAP · {span}").chars().count() <= room {
-        format!("ROADMAP · {span}")
+        format!("{mode}ROADMAP · LANES {}–{} OF {}", lanes.first().map_or(0, |lane| lane + 1), lanes.last().map_or(0, |lane| lane + 1), app.plan.lanes.len())
+    } else if format!(":: {mode}SWIMLANE ROADMAP · {span}").chars().count() <= room {
+        format!("{mode}SWIMLANE ROADMAP · {span}")
+    } else if format!(":: {mode}ROADMAP · {span}").chars().count() <= room {
+        format!("{mode}ROADMAP · {span}")
     } else {
-        "ROADMAP".to_string()
+        format!("{mode}ROADMAP")
     };
     panel(frame, inks, l.panel, &title, true);
 
@@ -399,7 +425,10 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
 
     let (cw, ch) = app.cell;
     if l.chart.width > 0 && l.chart.height > 0 {
-        let mut scene = pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings);
+        let mut scene = match &app.before {
+            Some(before) => pchart_draw::what_if(&app.plan, &app.schedule, &app.calendars, &settings, &before.schedule),
+            None => pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings),
+        };
         scene.background = None;
         if app.question.is_some() {
             let w = l.chart.width.saturating_sub(4).min(94);
@@ -410,7 +439,58 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
         placements.push(Placement { rect: l.chart, svg: scene.svg(), paper: false });
     }
     let rect = Rect { x: l.panel.x + 2, y: l.line, width: l.panel.width.saturating_sub(4), height: 1 };
-    placements.push(Placement { rect, svg: bits::line(&selection(app, level, palette), f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0, palette).svg(), paper: false });
+    let (w, h, u) = (f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0);
+    let line = if app.before.is_some() { bits::line_of_runs(&trial(app, palette), w, h, u, palette) } else { bits::line(&selection(app, level, palette), w, h, u, palette) };
+    placements.push(Placement { rect, svg: line.svg(), paper: false });
+}
+
+/// The line under a what-if (picture 38): the selected item and how its length or its date changed,
+/// then what the tried plan means for the target and when the work has to start.
+fn trial(app: &App, palette: &Palette) -> Vec<MixedPart> {
+    let p = *palette;
+    let item = &app.plan.items[app.selected];
+    let when = |schedule: &pchart_core::Schedule| {
+        let span = schedule.slots[app.selected].planned;
+        if item.milestone { span.finish } else { span.start }
+    };
+    let mut parts = vec![(None, vec![(item.name.clone(), p.bright, true)])];
+    let before = app.before.as_ref();
+    let length = before.map(|before| before.plan.items[app.selected].duration).filter(|&old| old != item.duration);
+    let moved = before.map(|before| when(&before.schedule)).filter(|&old| old != when(&app.schedule));
+    if let Some(old) = length {
+        parts.push((Some((Icon::Clock, p.dim)), vec![(format!("{old} → "), p.dim, false), (format!("{} wd", item.duration), p.bright, true)]));
+    } else if let Some(old) = moved {
+        parts.push((Some((Icon::Calendar, p.dim)), vec![(format!("{} → ", day(old)), p.dim, false), (day(when(&app.schedule)), p.bright, true)]));
+    } else if item.milestone {
+        parts.push((Some((Icon::Calendar, p.dim)), vec![(day(when(&app.schedule)), p.ink, false)]));
+    } else {
+        parts.push((Some((Icon::Clock, p.dim)), vec![(format!("{} wd", item.duration), p.ink, false)]));
+    }
+    if let Some(verdict) = &app.analysis.verdict {
+        let (icon, tone) = match verdict.state {
+            State::Holds => (Icon::Check, p.bright),
+            State::Tight => (Icon::Clock, p.warn),
+            State::DoesNotHold => (Icon::Cross, p.alert),
+        };
+        let mut runs = vec![(format!("{} is ", app.plan.items[verdict.target].name), p.ink, false)];
+        if verdict.state == State::DoesNotHold {
+            runs.push((format!("{} wd late", -verdict.spare), p.alert, true));
+        } else {
+            runs.push((pchart_draw::situation::state_words(verdict.state).to_string(), tone, true));
+            runs.push((format!(" · {} wd to spare", verdict.spare), p.ink, false));
+        }
+        if let Some(&first) = app.schedule.chain.first().filter(|_| verdict.state != State::DoesNotHold) {
+            let (name, start) = (&app.plan.items[first].name, app.schedule.slots[first].latest.start);
+            let when = match start.cmp(&app.today) {
+                std::cmp::Ordering::Equal => format!("{name} must start today"),
+                std::cmp::Ordering::Greater => format!("{name} must start by {}", day(start)),
+                std::cmp::Ordering::Less => format!("{name} should have started {}", day(start)),
+            };
+            runs.push((format!(" · {when}"), p.ink, false));
+        }
+        parts.push((Some((icon, tone)), runs));
+    }
+    parts
 }
 
 /// The line about the selection: its name, its team, its dates and length, and whether it decides the
@@ -648,5 +728,53 @@ mod tests {
         assert_eq!(app.analysis.verdict.as_ref().map(|verdict| verdict.state), Some(pchart_core::analysis::State::Holds));
         app.undo();
         assert_eq!(app.message.as_deref(), Some("Nothing to undo"));
+    }
+
+    #[test]
+    fn a_what_if_writes_nothing_until_enter_keeps_it() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let frontend = app.plan.item("frontend").unwrap();
+        app.selected = frontend;
+        let (_, placements) = screen(&app, 170, 50);
+        let dashes = |placements: &[Placement]| placements.iter().map(|placement| placement.svg.matches("stroke-dasharray").count()).sum::<usize>();
+        let before = dashes(&placements);
+        for _ in 0..12 {
+            app.try_length(1);
+        }
+        assert!(app.before.is_some() && !app.unsaved && app.history.is_empty() && app.changes() == ["Frontend +12 wd"]);
+        assert_eq!(app.analysis.verdict.as_ref().map(|verdict| (verdict.state, verdict.spare)), Some((pchart_core::analysis::State::Tight, 0)));
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        for text in ["WHAT-IF · Frontend +12 wd · not saved", ":: WHAT-IF · SWIMLANE ROADMAP", "today", "was 12", "Esc discard", "←→ keep changing"] {
+            assert!(has(&rows, text), "{text}");
+        }
+        for text in ["25 → ", "37 wd", "Launch is ", "at risk", " · 0 wd to spare", " · Requirements must start today"] {
+            assert!(svg.contains(text), "{text}");
+        }
+        assert!(dashes(&placements) > before + 5);
+
+        app.discard();
+        assert!(app.before.is_none() && app.plan.items[frontend].duration == 25 && app.analysis.verdict.as_ref().is_some_and(|verdict| verdict.spare == 12));
+        app.try_length(1);
+        app.try_length(1);
+        app.keep();
+        assert!(app.before.is_none() && app.unsaved && app.plan.items[frontend].duration == 27 && app.history.len() == 1);
+        app.undo();
+        assert!(app.plan.items[frontend].duration == 25 && app.message.as_deref() == Some("Undone: Frontend +2 wd"));
+        app.unsaved = false;
+
+        app.ask();
+        let question = app.question.as_mut().unwrap();
+        question.choice = 2;
+        question.typed = "4 jan".into();
+        app.try_answer();
+        assert!(app.question.is_none() && app.before.is_some() && !app.unsaved && app.changes() == ["Frontend start"]);
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("Mon 21 Dec → ") && svg.contains("Mon 04 Jan") && svg.contains("9 wd late") && !svg.contains("must start"));
+        app.discard();
+        app.selected = app.plan.item("launch").unwrap();
+        app.try_length(1);
+        assert!(app.before.is_none() && app.message.as_deref() == Some("Launch is a milestone; it has no duration"));
     }
 }

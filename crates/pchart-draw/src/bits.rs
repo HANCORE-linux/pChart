@@ -156,15 +156,27 @@ pub fn runs(s: &mut Scene, x: f32, y: f32, size: f32, parts: &[(&str, Color, boo
 /// A part of a line: a symbol and its colour, then text, its colour and whether it is bold.
 pub type Part = (Option<(Icon, Color)>, String, Color, bool);
 
+/// Text in one colour within a part of a line, and whether it is bold.
+pub type Run = (String, Color, bool);
+
+/// A part of a line in several colours: a symbol and its colour, then the runs of text.
+pub type MixedPart = (Option<(Icon, Color)>, Vec<Run>);
+
 /// A line of symbols and words, one part after the other with room between them, as the line about
 /// the selection under the roadmap. What does not fit is cut with "…".
 pub fn line(parts: &[Part], width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let parts: Vec<MixedPart> = parts.iter().map(|(icon, text, color, bold)| (*icon, vec![(text.clone(), *color, *bold)])).collect();
+    line_of_runs(&parts, width, height, unit, palette)
+}
+
+/// `line` with parts in several colours, as "Launch is at risk" with only "at risk" in yellow.
+pub fn line_of_runs(parts: &[MixedPart], width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
     let u = unit;
     let mut s = scene(width, height, palette);
     let size = 16.6 * u;
     let y = height * 0.72;
     let mut x = 2.0 * u;
-    for (index, (icon, text, color, bold)) in parts.iter().enumerate() {
+    for (index, (icon, texts)) in parts.iter().enumerate() {
         if index > 0 {
             x += 30.0 * u;
         }
@@ -173,12 +185,14 @@ pub fn line(parts: &[Part], width: f32, height: f32, unit: f32, palette: &Palett
             draw_icon(&mut s, *icon, x + centre, y - 5.0 * u, 15.0 * u, *tone, palette.page);
             x += advance;
         }
-        let room = ((width - x) / (size * crate::style::ADVANCE)).floor() as usize;
-        if room == 0 {
-            break;
+        for (text, color, bold) in texts {
+            let room = ((width - x) / (size * crate::style::ADVANCE)).floor() as usize;
+            if room == 0 {
+                return s;
+            }
+            let text = if text.chars().count() <= room { text.clone() } else { text.chars().take(room.saturating_sub(1)).collect::<String>() + "…" };
+            x = runs(&mut s, x, y, size, &[(&text, *color, *bold)]);
         }
-        let text = if text.chars().count() <= room { text.clone() } else { text.chars().take(room.saturating_sub(1)).collect::<String>() + "…" };
-        x = runs(&mut s, x, y, size, &[(&text, *color, *bold)]);
     }
     s
 }

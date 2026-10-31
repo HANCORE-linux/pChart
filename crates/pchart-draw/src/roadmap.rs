@@ -204,15 +204,20 @@ impl Chart<'_> {
 
 /// The swimlane roadmap at the detail level of `settings`.
 pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings) -> Scene {
-    draw(plan, schedule, calendars, settings, None)
+    draw(plan, schedule, calendars, settings, None, None)
 }
 
 /// The part of the swimlane roadmap within `cut`; bars that reach beyond it are cut at its edges.
 pub fn part(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: &Cut) -> Scene {
-    draw(plan, schedule, calendars, settings, Some(cut))
+    draw(plan, schedule, calendars, settings, Some(cut), None)
 }
 
-fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: Option<&Cut>) -> Scene {
+/// The roadmap of a plan tried as what-if, with the places items had in `before` dashed.
+pub fn what_if(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, before: &Schedule) -> Scene {
+    draw(plan, schedule, calendars, settings, None, Some(before))
+}
+
+fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: Option<&Cut>, before: Option<&Schedule>) -> Scene {
     let (p, u, today) = (settings.palette, settings.unit, settings.today);
     let mut s = Scene { width: settings.width, height: settings.height, background: Some(p.page), hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
     let c = chart(plan, schedule, settings, Some(settings.height), cut);
@@ -229,6 +234,9 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         if c.level == Level::Full {
             arrows(&mut s, &c);
             free_slack(&mut s, &c, &mut taken);
+        }
+        if let Some(before) = before {
+            ghosts(&mut s, &c, before);
         }
         bars(&mut s, &c);
         buffers(&mut s, &c, &analyse(plan, calendars, schedule, today).checks, &mut taken);
@@ -496,6 +504,29 @@ fn bars(s: &mut Scene, c: &Chart) {
         s.add_for(index, opacity, Shape::Rect { x: x0 + u, y: y - 7.0 * u, w: x1 - x0 - 2.5 * u, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Color(color), stroke: None });
         if c.selected == Some(index) {
             corners(s, c, x0, x1, y, 11.0 * u);
+        }
+    }
+}
+
+/// The places items had before a what-if, dashed, for the items that moved.
+fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule) {
+    let u = c.u;
+    let stroke = Stroke { color: c.p.muted, width: 1.2 * u, dash: Some((3.0 * u, 3.0 * u)) };
+    for (index, item) in c.plan.items.iter().enumerate().filter(|&(index, _)| c.shown(index)) {
+        let Some(old) = before.slots.get(index).map(|slot| slot.planned) else { continue };
+        if old == c.schedule.slots[index].planned {
+            continue;
+        }
+        let y = c.bar(index).2;
+        if item.milestone {
+            let x = c.g.x(old.finish) + if item.on.is_some() { c.g.px / 2.0 } else { c.g.px };
+            let r = 7.0 * u;
+            s.add(Shape::Path { points: vec![(x, y - r), (x + r, y), (x, y + r), (x - r, y)], closed: true, fill: Fill::None, stroke: Some(stroke) });
+        } else {
+            let (x0, x1) = (c.g.x(old.start).max(c.g.x0), (c.g.x(old.finish) + c.g.px).min(c.g.x1));
+            if x1 > x0 {
+                s.add(Shape::Rect { x: x0 + u, y: y - 7.0 * u, w: x1 - x0 - 2.5 * u, h: 14.0 * u, radius: 3.0 * u, fill: Fill::None, stroke: Some(stroke) });
+            }
         }
     }
 }

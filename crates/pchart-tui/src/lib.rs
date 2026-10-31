@@ -64,7 +64,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         if pictures.receive() {
             note("pictures done".into());
         }
-        if app.unsaved {
+        if app.unsaved && app.before.is_none() {
             app.unsaved = false;
             let _ = save.send(app.plan.clone());
         }
@@ -97,12 +97,25 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Esc => app.question = None,
                 KeyCode::Enter => app.confirm(),
+                KeyCode::Tab => app.try_answer(),
                 KeyCode::Up => app.question.as_mut().into_iter().for_each(|question| question.choice = (question.choice + 3) % 4),
                 KeyCode::Down => app.question.as_mut().into_iter().for_each(|question| question.choice = (question.choice + 1) % 4),
                 KeyCode::Backspace => app.question.as_mut().into_iter().for_each(|question| {
                     question.typed.pop();
                 }),
                 KeyCode::Char(c) => app.question.as_mut().into_iter().for_each(|question| question.typed.push(c)),
+                _ => {}
+            },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.before.is_some() => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Enter => app.keep(),
+                KeyCode::Esc => app.discard(),
+                KeyCode::Left if app.level != pchart_draw::Level::Overview => app.try_length(-1),
+                KeyCode::Right if app.level != pchart_draw::Level::Overview => app.try_length(1),
+                KeyCode::Up => app.select(-1),
+                KeyCode::Down => app.select(1),
+                KeyCode::Char('d') => app.detail(),
                 _ => {}
             },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match (app.screen, key.code) {
@@ -142,6 +155,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
                 (_, KeyCode::Char('d')) => app.detail(),
                 (_, KeyCode::Char('u')) => app.undo(),
                 (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
+                (Screen::Roadmap, KeyCode::Left) if app.level != pchart_draw::Level::Overview => app.try_length(-1),
+                (Screen::Roadmap, KeyCode::Right) if app.level != pchart_draw::Level::Overview => app.try_length(1),
                 _ => {}
             },
             Ok(_) => {}
@@ -197,7 +212,7 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
     let mut failure = None;
     for frame in 0..frames {
         let t0 = Instant::now();
-        app.stretch(if frame % 2 == 0 { 1 } else { -1 });
+        app.try_length(if frame % 2 == 0 { 1 } else { -1 });
         let t1 = Instant::now();
         let svg = app.svg(rect);
         let t2 = Instant::now();
