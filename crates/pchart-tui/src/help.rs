@@ -52,7 +52,7 @@ fn help(screen: Screen) -> Help {
         Screen::Roadmap => Help {
             title: "HELP · ROADMAP",
             lead: "When each piece of work happens, and which ones decide the date.",
-            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
+            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
             legend_title: "WHAT THE PICTURE SHOWS",
             legend: vec![
                 (Sign::Chain, "decides the date"),

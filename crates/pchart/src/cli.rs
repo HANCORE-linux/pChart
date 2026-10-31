@@ -57,6 +57,7 @@ pub const EDITS: &[(&str, &str)] = &[
     ("note", r#"{"op": "note", "item": ID, "note": TEXT | null}"#),
     ("important", r#"{"op": "important", "item": MILESTONE, "important": true}"#),
     ("note_at", r#"{"op": "note_at", "lane": LANE, "date": "YYYY-MM-DD", "note": TEXT | null}"#),
+    ("phase", r#"{"op": "phase", "phase": NAME, "until": ID}"#),
 ];
 
 const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important"];

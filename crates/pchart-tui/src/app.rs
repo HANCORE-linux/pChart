@@ -105,6 +105,7 @@ pub enum Form {
     Rename { item: usize, typed: String },
     /// What `item` waits on: one box for each item, and the one `↑↓` is on.
     WaitsOn { item: usize, on: Vec<bool>, at: usize },
+    Remove { item: usize },
 }
 
 /// The plan as it was before a what-if, which Esc goes back to.
@@ -347,6 +348,46 @@ impl App {
         self.form = Some(Form::WaitsOn { item: self.selected, on, at });
     }
 
+    /// `x` on the roadmap: removes the selected item.
+    pub fn start_remove(&mut self) {
+        if self.plan.items.len() < 2 {
+            self.message = Some("A plan keeps one item at least".into());
+            return;
+        }
+        self.form = Some(Form::Remove { item: self.selected });
+    }
+
+    /// What removing `index` changes, as edits and in words: what waited on it waits on what it waited
+    /// on, and a phase that ended with it ends with the item before it that ends last.
+    pub fn removal(&self, index: usize) -> Result<(Vec<Edit>, Vec<String>), String> {
+        let item = &self.plan.items[index];
+        let name = |id: &String| self.plan.item(id).map_or_else(|| id.clone(), |other| self.plan.items[other].name.clone());
+        let (mut edits, mut words) = (Vec::new(), Vec::new());
+        for other in self.plan.items.iter().filter(|other| other.after.contains(&item.id)) {
+            edits.push(Edit::Unlink { from: item.id.clone(), to: other.id.clone() });
+            let added: Vec<&String> = item.after.iter().filter(|before| !other.after.contains(before)).collect();
+            edits.extend(added.iter().map(|before| Edit::Link { from: (*before).clone(), to: other.id.clone() }));
+            words.push(if added.is_empty() {
+                format!("{} no longer waits on {}.", other.name, item.name)
+            } else {
+                format!("{} waits on {} instead of {}.", other.name, added.iter().map(|id| name(id)).collect::<Vec<_>>().join(", "), item.name)
+            });
+        }
+        for phase in self.plan.phases.iter().filter(|phase| phase.until == item.id) {
+            let last = item.after.iter().filter_map(|id| self.plan.item(id)).max_by_key(|&other| self.schedule.slots[other].planned.finish);
+            let Some(last) = last else {
+                return Err(format!("{} cannot be removed: the {} phase ends with it, and nothing comes before it.", item.name, phase.name));
+            };
+            edits.push(Edit::Phase { phase: phase.name.clone(), until: self.plan.items[last].id.clone() });
+            words.push(format!("The {} phase ends with {} instead.", phase.name, self.plan.items[last].name));
+        }
+        if item.note.is_some() {
+            words.push("Its note goes with it.".into());
+        }
+        edits.push(Edit::Remove { item: item.id.clone() });
+        Ok((edits, words))
+    }
+
     /// The items `item` could wait on, in the order of the schedule: not those that wait on it, which
     /// would make a circle.
     pub fn waits_order(&self, item: usize) -> Vec<usize> {
@@ -419,6 +460,7 @@ impl App {
                 }
                 Ok((edits, format!("what {} waits on", it.name)))
             }
+            Form::Remove { item } => Ok((self.removal(*item)?.0, format!("removed {}", self.plan.items[*item].name))),
         }
     }
 
@@ -496,11 +538,22 @@ impl App {
             Ok((edits, _)) if edits.is_empty() => self.form = None,
             Ok((edits, label)) => {
                 let added = matches!(self.form, Some(Form::Add(_)));
+                let next = match self.form {
+                    Some(Form::Remove { item }) => {
+                        let id = &self.plan.items[item].id;
+                        self.plan.items.iter().find(|other| other.after.contains(id)).or_else(|| self.plan.items[item].after.first().and_then(|before| self.plan.item(before)).map(|before| &self.plan.items[before])).map(|other| other.id.clone())
+                    }
+                    _ => None,
+                };
                 match self.apply_all(&edits, label) {
                     Ok(()) => {
                         if added {
                             self.selected = self.plan.items.len() - 1;
                         }
+                        if let Some(id) = next {
+                            self.selected = self.plan.item(&id).unwrap_or(0);
+                        }
+                        self.selected = self.selected.min(self.plan.items.len() - 1);
                         self.form = None;
                     }
                     Err(err) => self.message = Some(err),

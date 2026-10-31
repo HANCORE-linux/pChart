@@ -35,6 +35,8 @@ pub enum Edit {
     Important { item: String, important: bool },
     /// The note at a date in a lane; none or an empty one removes it.
     NoteAt { lane: String, date: Date, note: Option<String> },
+    /// The phase called `phase` ends with `until`.
+    Phase { phase: String, until: String },
 }
 
 impl Edit {
@@ -126,6 +128,11 @@ impl Edit {
                     next.notes.push(Note { lane: lane.clone(), date: *date, text });
                     next.notes.sort_by(|a, b| (a.date, &a.lane).cmp(&(b.date, &b.lane)));
                 }
+            }
+            Edit::Phase { phase, until } => {
+                find(until)?;
+                let target = next.phases.iter_mut().find(|other| &other.name == phase).ok_or_else(|| Error::Plan(format!("there is no phase \"{phase}\"")))?;
+                target.until = until.clone();
             }
         }
         next.check()?;
@@ -228,5 +235,14 @@ mod tests {
         let plan = apply_all(&sample(), &plan).unwrap();
         let api = &plan.items[plan.item("api").unwrap()];
         assert_eq!((api.on, api.no_later_than), (Some(jiff::civil::date(2026, 12, 14)), None));
+    }
+
+    #[test]
+    fn a_phase_can_end_with_another_item() {
+        let list = edits(r#"[{"op": "phase", "phase": "Development", "until": "integration"}, {"op": "unlink", "from": "feature-freeze", "to": "beta-test"}, {"op": "unlink", "from": "feature-freeze", "to": "security-review"}, {"op": "remove", "item": "feature-freeze"}]"#);
+        let plan = apply_all(&sample(), &list).unwrap();
+        assert!(plan.item("feature-freeze").is_none() && plan.phases[2].until == "integration");
+        assert!(Edit::Phase { phase: "Testing".into(), until: "api".into() }.apply(&sample()).is_err());
+        assert!(Edit::Phase { phase: "Development".into(), until: "nothing".into() }.apply(&sample()).is_err());
     }
 }

@@ -9,7 +9,7 @@ use crate::app::{App, Spot};
 use crate::ui::day;
 
 /// `text` broken at spaces into lines of at most `count` characters; a longer word is broken where it must.
-fn lines(text: &str, count: usize) -> Vec<String> {
+pub(crate) fn lines(text: &str, count: usize) -> Vec<String> {
     let mut out = vec![String::new()];
     for word in text.split(' ') {
         let line = out.last_mut().expect("there is always a line");

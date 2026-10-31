@@ -12,6 +12,7 @@ pub enum Action {
     AddItem,
     Rename,
     WaitsOn,
+    Remove,
     TryLength,
     AddNote,
     Important,
@@ -33,7 +34,7 @@ pub type Found = (Action, Option<usize>);
 
 impl Action {
     fn all(app: &App) -> Vec<Action> {
-        let mut all = vec![Action::ChangeDate, Action::AddItem, Action::Rename, Action::WaitsOn, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
+        let mut all = vec![Action::ChangeDate, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
         all.push(Action::Export(app.export.view));
         all.extend(View::ALL.into_iter().filter(|&view| view != app.export.view).map(Action::Export));
         all.extend([Action::Help, Action::Quit]);
@@ -41,7 +42,7 @@ impl Action {
     }
 
     fn on_item(self) -> bool {
-        matches!(self, Action::ChangeDate | Action::AddItem | Action::Rename | Action::WaitsOn | Action::TryLength | Action::AddNote | Action::Important | Action::Show)
+        matches!(self, Action::ChangeDate | Action::AddItem | Action::Rename | Action::WaitsOn | Action::Remove | Action::TryLength | Action::AddNote | Action::Important | Action::Show)
     }
 
     fn fits(self, app: &App, item: usize) -> bool {
@@ -58,6 +59,7 @@ impl Action {
             Action::AddItem => &["add", "new", "item", "task", "create", "insert", "work", "milestone"],
             Action::Rename => &["rename", "name", "call", "title"],
             Action::WaitsOn => &["waits", "wait", "depends", "dependency", "dependencies", "link", "after", "before", "predecessor"],
+            Action::Remove => &["remove", "delete", "drop", "cancel"],
             Action::TryLength => &["what", "if", "try", "longer", "shorter", "length", "duration", "extend", "days"],
             Action::AddNote => &["note", "notes", "comment", "remark", "add", "write"],
             Action::Important => &["important", "star", "mark", "key"],
@@ -88,6 +90,7 @@ impl Action {
             Action::AddItem => "Add an item".into(),
             Action::Rename => "Rename".into(),
             Action::WaitsOn => "What it waits on".into(),
+            Action::Remove => "Remove".into(),
             Action::TryLength => "Try longer or shorter".into(),
             Action::AddNote => "Add a note".into(),
             Action::Important if item.is_some_and(|index| app.plan.items[index].important) => "Not important".into(),
@@ -125,6 +128,7 @@ impl Action {
                 let on: Vec<&str> = item_of(index).after.iter().filter_map(|id| app.plan.item(id)).map(|other| app.plan.items[other].name.as_str()).collect();
                 if on.is_empty() { format!("{} waits on nothing", item_of(index).name) } else { format!("{} waits on {}", item_of(index).name, on.join(", ")) }
             }
+            (Action::Remove, Some(index)) => format!("{} leaves the plan; u brings it back", item_of(index).name),
             (Action::TryLength, Some(index)) => format!("{} on trial, nothing is saved · now {} wd", item_of(index).name, item_of(index).duration),
             (Action::AddNote, Some(index)) => match item_of(index).note.as_deref() {
                 Some(note) => format!("{}: {note}", item_of(index).name),
@@ -202,6 +206,7 @@ impl Action {
             Action::AddItem => "a",
             Action::Rename => "r",
             Action::WaitsOn => "w",
+            Action::Remove => "x",
             Action::TryLength => "←→",
             Action::AddNote => "n",
             Action::Important => "n i",
@@ -245,6 +250,10 @@ impl Action {
             Action::WaitsOn => {
                 roadmap(app);
                 app.start_waits();
+            }
+            Action::Remove => {
+                roadmap(app);
+                app.start_remove();
             }
             Action::TryLength => {
                 roadmap(app);

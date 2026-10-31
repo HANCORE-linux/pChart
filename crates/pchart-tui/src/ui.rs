@@ -384,6 +384,8 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if app.form.is_some() => match &app.form {
             Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
             Some(Form::Rename { .. }) => vec![("Enter", "rename"), ("Esc", "keep as it is")],
+            Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
+            Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
             _ => vec![("↑↓", "item"), ("Space", "waits on it or not"), ("Enter", "keep"), ("Esc", "keep as it is")],
         },
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
@@ -590,6 +592,11 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let w = l.chart.width.saturating_sub(4).min(94);
             let h = l.chart.height.min(match app.form {
                 Some(Form::Rename { .. }) => 9,
+                Some(Form::Remove { item }) => match app.removal(item) {
+                    Ok((_, words)) => (255.0 + 28.0 * words.len().max(1) as f32) / 21.0,
+                    Err(_) => 8.0,
+                }
+                .ceil() as u16,
                 Some(Form::Add(_)) => 20,
                 _ => 32,
             });
@@ -1095,6 +1102,36 @@ mod tests {
         assert!(app.plan.items[sdk].after.contains(&"api".to_string()) && app.message.is_none());
         app.undo();
         assert_eq!(app.message.as_deref(), Some("Undone: what SDK integration waits on"));
+    }
+
+    #[test]
+    fn removing_an_item_keeps_the_chain_and_its_phase_whole() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let frontend = app.plan.item("frontend").unwrap();
+        app.selected = frontend;
+        app.start_remove();
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, "Enter remove") && svg.contains("Remove Frontend?") && svg.contains("Integration waits on Design sign-off instead of Frontend.") && svg.contains("with 23 working days to spare."));
+        app.keep_form();
+        let integration = app.plan.item("integration").unwrap();
+        assert!(app.plan.item("frontend").is_none() && app.selected == integration && app.plan.items[integration].after == ["api", "sdk-integration", "design-sign-off"]);
+        app.undo();
+        assert!(app.plan.item("frontend").is_some() && app.message.as_deref() == Some("Undone: removed Frontend"));
+
+        app.selected = app.plan.item("feature-freeze").unwrap();
+        let (_, words) = app.removal(app.selected).unwrap();
+        assert_eq!(words, ["Beta test waits on Integration instead of Feature freeze.", "Security review waits on Integration instead of Feature freeze.", "The Development phase ends with Integration instead."]);
+        app.start_remove();
+        app.keep_form();
+        assert!(app.plan.item("feature-freeze").is_none() && app.plan.phases[2].until == "integration");
+
+        app.selected = app.plan.item("requirements").unwrap();
+        app.start_remove();
+        assert!(has(&screen(&app, 170, 50).0, "Esc back"));
+        app.keep_form();
+        assert!(app.plan.item("requirements").is_some() && app.form.is_some() && app.message.as_deref() == Some("Requirements cannot be removed: the Requirements phase ends with it, and nothing comes before it."));
     }
 
     #[test]

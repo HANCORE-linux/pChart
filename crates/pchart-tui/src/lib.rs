@@ -252,6 +252,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (Screen::Roadmap, KeyCode::Char('a')) if app.level != pchart_draw::Level::Overview => app.start_add(),
                 (Screen::Roadmap, KeyCode::Char('r')) if app.level != pchart_draw::Level::Overview => app.start_rename(),
                 (Screen::Roadmap, KeyCode::Char('w')) if app.level != pchart_draw::Level::Overview => app.start_waits(),
+                (Screen::Roadmap, KeyCode::Char('x') | KeyCode::Delete) if app.level != pchart_draw::Level::Overview => app.start_remove(),
                 (Screen::Roadmap, KeyCode::Left) if app.level != pchart_draw::Level::Overview => app.try_length(-1),
                 (Screen::Roadmap, KeyCode::Right) if app.level != pchart_draw::Level::Overview => app.try_length(1),
                 _ => {}

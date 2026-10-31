@@ -110,6 +110,30 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
             bits::runs(s, left, top + 64.0 * u, 15.0 * u, &[(&fit("What waits on it, its dates and its notes stay as they are.", 15.0 * u, room), p.dim, false)]);
             return;
         }
+        Form::Remove { item } => {
+            let name = &app.plan.items[*item].name;
+            head(app, s, x, y, width, height, u, &format!("REMOVE · {}", name.to_uppercase()), &format!("Remove {name}?"));
+            match app.removal(*item) {
+                Ok((_, words)) if words.is_empty() => {
+                    bits::runs(s, left, top + 20.0 * u, 16.6 * u, &[("Nothing waits on it.", p.ink, false)]);
+                    top += 32.0 * u;
+                }
+                Ok((_, words)) => {
+                    for line in words {
+                        bits::runs(s, left, top + 20.0 * u, 16.6 * u, &[(&fit(&line, 16.6 * u, room), p.ink, false)]);
+                        top += 28.0 * u;
+                    }
+                    top += 4.0 * u;
+                }
+                Err(err) => {
+                    for line in crate::note::lines(&err, (room / (16.6 * u * ADVANCE)).floor() as usize) {
+                        bits::runs(s, left, top + 20.0 * u, 16.6 * u, &[(&line, p.ink, false)]);
+                        top += 28.0 * u;
+                    }
+                    return;
+                }
+            }
+        }
         Form::WaitsOn { item, on, at } => {
             let it = &app.plan.items[*item];
             head(app, s, x, y, width, height, u, &format!("WAITS ON · {}", it.name.to_uppercase()), &format!("What does {} wait on?", it.name));

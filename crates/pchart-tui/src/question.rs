@@ -126,13 +126,15 @@ pub fn follows(app: &App, s: &mut Scene, edits: &[pchart_core::Edit], left: f32,
         let parts: Vec<(&str, pchart_draw::scene::Color, bool)> = parts.iter().map(|(text, color)| (text.as_str(), *color, true)).collect();
         bits::runs(s, left + 50.0 * u, top + 32.0 * u, size, &parts);
     }
-    let old = app.plan.items.len();
-    let moved = (0..old).filter(|&index| Some(index) != schedule.target && schedule.slots[index].planned != app.schedule.slots[index].planned).max_by_key(|&index| schedule.slots[index].planned.finish);
+    let before = |index: usize| app.plan.item(&plan.items[index].id);
+    let moved = (0..plan.items.len())
+        .filter(|&index| Some(index) != schedule.target && before(index).is_some_and(|old| schedule.slots[index].planned != app.schedule.slots[old].planned))
+        .max_by_key(|&index| schedule.slots[index].planned.finish);
     let moves = match moved {
         Some(index) => format!("{} moves to {}", plan.items[index].name, day(schedule.slots[index].planned.finish)),
         None => "Nothing else moves.".to_string(),
     };
-    let words = match (old..plan.items.len()).next() {
+    let words = match (0..plan.items.len()).find(|&index| before(index).is_none()) {
         Some(new) if plan.items[new].milestone => format!("{} on {} · {moves}", plan.items[new].name, day(schedule.slots[new].planned.finish)),
         Some(new) => format!("{} {} – {} · {moves}", plan.items[new].name, day(schedule.slots[new].planned.start), day(schedule.slots[new].planned.finish)),
         None => moves,
