@@ -1,6 +1,6 @@
 //! Dates typed loosely, as the date question takes them: "4 jan", "jan 4", "04 Jan 2027", "2027-01-04",
 //! "friday", "next friday", "W1", "3w", "10d", "today", "tomorrow". A date without a year is the next
-//! one from `today` on.
+//! one from `today` on. Lengths too, as adding an item takes them: "5", "2w", "3 weeks".
 
 use jiff::civil::{Date, Weekday};
 
@@ -55,6 +55,18 @@ pub fn date(text: &str, today: Date) -> Option<Date> {
     }
 }
 
+/// The working days `text` names: "5", "5d", "5 days", "5wd", "2w", "2 weeks"; None when it names none.
+pub fn length(text: &str) -> Option<u32> {
+    let text = text.trim().to_lowercase();
+    let split = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
+    let count: u32 = text[..split].parse().ok().filter(|&count| count > 0)?;
+    match text[split..].trim() {
+        "" | "d" | "wd" | "day" | "days" | "working day" | "working days" => Some(count),
+        "w" | "week" | "weeks" => Some(count * 5),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +94,16 @@ mod tests {
         }
         for text in ["", "soon", "31 feb", "4", "jan"] {
             assert_eq!(date(text, today), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn loose_lengths_are_working_days() {
+        for (text, want) in [("5", 5), ("5d", 5), ("5 days", 5), ("1 day", 1), ("12wd", 12), ("2w", 10), ("3 weeks", 15), (" 1 week ", 5)] {
+            assert_eq!(length(text), Some(want), "{text}");
+        }
+        for text in ["", "0", "w", "five", "2 months", "-3"] {
+            assert_eq!(length(text), None, "{text}");
         }
     }
 }

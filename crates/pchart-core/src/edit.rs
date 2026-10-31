@@ -144,7 +144,7 @@ pub fn apply_all(plan: &Plan, edits: &[Edit]) -> Result<Plan, (usize, Error)> {
 }
 
 /// Whether `item` waits on `other`, directly or through others.
-fn waits_on(plan: &Plan, item: usize, other: usize) -> bool {
+pub fn waits_on(plan: &Plan, item: usize, other: usize) -> bool {
     let mut stack = vec![item];
     let mut seen = vec![false; plan.items.len()];
     while let Some(index) = stack.pop() {

@@ -77,6 +77,36 @@ pub struct Finder {
     pub chosen: usize,
 }
 
+/// Adding an item (picture 51): its name, work or a milestone, its length as typed, its lane by its
+/// index, where it goes among the places `places` offers, and the question `↑↓` is on.
+pub struct Adding {
+    pub from: usize,
+    pub name: String,
+    pub milestone: bool,
+    pub length: String,
+    pub lane: usize,
+    pub place: usize,
+    pub at: usize,
+}
+
+/// Where a new item goes beside the item it was added from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// After it, and what waited on it waits on the new item.
+    Between,
+    After,
+    /// Before it: the new item waits on what it waited on, and it waits on the new item.
+    Before,
+}
+
+/// A change to the plan's items asked in a dialog over the roadmap (picture 51).
+pub enum Form {
+    Add(Adding),
+    Rename { item: usize, typed: String },
+    /// What `item` waits on: one box for each item, and the one `↑↓` is on.
+    WaitsOn { item: usize, on: Vec<bool>, at: usize },
+}
+
 /// The plan as it was before a what-if, which Esc goes back to.
 pub struct Before {
     pub plan: Plan,
@@ -117,13 +147,14 @@ pub struct App {
     /// The help of this screen is open (`?`).
     pub help: bool,
     pub finder: Option<Finder>,
+    pub form: Option<Form>,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None }
     }
 
     /// The colours of the screen under the help or the finder: dimmed while one of them is open.
@@ -280,6 +311,191 @@ impl App {
                 self.message = Some(format!("Undone: {label}"));
             }
             Err(err) => self.message = Some(err.to_string()),
+        }
+    }
+
+    /// Makes `edits` as one change, which `u` takes back at once.
+    pub fn apply_all(&mut self, edits: &[Edit], label: String) -> Result<(), String> {
+        let plan = pchart_core::apply_all(&self.plan, edits).map_err(|(_, err)| err.to_string())?;
+        let schedule = pchart_core::schedule(&plan, &self.calendars, self.today).map_err(|err| err.to_string())?;
+        let before = self.plan.clone();
+        self.take(plan, schedule);
+        self.history.push((before, label));
+        self.message = None;
+        Ok(())
+    }
+
+    /// `a` on the roadmap: adds an item after the selected one, in its lane.
+    pub fn start_add(&mut self) {
+        let lane = self.plan.lane(&self.plan.items[self.selected].lane).unwrap_or(0);
+        self.form = Some(Form::Add(Adding { from: self.selected, name: String::new(), milestone: false, length: "5".into(), lane, place: 0, at: 0 }));
+    }
+
+    /// `r` on the roadmap: renames the selected item.
+    pub fn start_rename(&mut self) {
+        self.form = Some(Form::Rename { item: self.selected, typed: self.plan.items[self.selected].name.clone() });
+    }
+
+    /// `w` on the roadmap: what the selected item waits on, starting at the first it waits on.
+    pub fn start_waits(&mut self) {
+        let item = &self.plan.items[self.selected];
+        let on: Vec<bool> = self.plan.items.iter().map(|other| item.after.contains(&other.id)).collect();
+        let order = self.waits_order(self.selected);
+        let at = order.iter().position(|&index| on[index]).unwrap_or(0);
+        self.form = Some(Form::WaitsOn { item: self.selected, on, at });
+    }
+
+    /// The items `item` could wait on, in the order of the schedule: not those that wait on it, which
+    /// would make a circle.
+    pub fn waits_order(&self, item: usize) -> Vec<usize> {
+        self.schedule.order.iter().copied().filter(|&index| index != item && !pchart_core::edit::waits_on(&self.plan, index, item)).collect()
+    }
+
+    /// Where an item added from `from` can go, in words.
+    pub fn places(&self, from: usize) -> Vec<(Place, String)> {
+        let name = |index: usize| self.plan.items[index].name.clone();
+        let then: Vec<String> = self.plan.items.iter().filter(|other| other.after.contains(&self.plan.items[from].id)).map(|other| other.name.clone()).collect();
+        let mut places = Vec::new();
+        if !then.is_empty() {
+            places.push((Place::Between, format!("after {}, before {}", name(from), then.join(", "))));
+        }
+        places.push((Place::After, if then.is_empty() { format!("after {}", name(from)) } else { format!("after {}, nothing waits on it", name(from)) }));
+        places.push((Place::Before, format!("before {}", name(from))));
+        places
+    }
+
+    /// The changes the open dialog would make and what to call them for `u`; an error says what is
+    /// still missing.
+    pub fn form_edits(&self) -> Result<(Vec<Edit>, String), String> {
+        match self.form.as_ref().ok_or_else(String::new)? {
+            Form::Add(adding) => {
+                let name = adding.name.trim();
+                if name.is_empty() {
+                    return Err("Type a name".into());
+                }
+                let duration = if adding.milestone { 0 } else { pchart_core::input::length(&adding.length).ok_or("Type a length, such as 5 or 2w")? };
+                let from = &self.plan.items[adding.from];
+                let id = self.plan.new_id(name);
+                let place = self.places(adding.from).get(adding.place).map_or(Place::After, |(place, _)| *place);
+                let after = if place == Place::Before { from.after.clone() } else { vec![from.id.clone()] };
+                let item = pchart_core::model::Item { id: id.clone(), lane: self.plan.lanes[adding.lane].id.clone(), name: name.to_string(), duration, after, milestone: adding.milestone, ..Default::default() };
+                let mut edits = vec![Edit::Add { item }];
+                match place {
+                    Place::Between => {
+                        for other in self.plan.items.iter().filter(|other| other.after.contains(&from.id)) {
+                            edits.push(Edit::Unlink { from: from.id.clone(), to: other.id.clone() });
+                            edits.push(Edit::Link { from: id.clone(), to: other.id.clone() });
+                        }
+                    }
+                    Place::After => {}
+                    Place::Before => {
+                        for before in &from.after {
+                            edits.push(Edit::Unlink { from: before.clone(), to: from.id.clone() });
+                        }
+                        edits.push(Edit::Link { from: id.clone(), to: from.id.clone() });
+                    }
+                }
+                Ok((edits, format!("added {name}")))
+            }
+            Form::Rename { item, typed } => {
+                let name = typed.trim();
+                if name.is_empty() {
+                    return Err("Type a name".into());
+                }
+                let old = &self.plan.items[*item];
+                Ok((if name == old.name { Vec::new() } else { vec![Edit::Rename { item: old.id.clone(), name: name.to_string() }] }, format!("{} renamed", old.name)))
+            }
+            Form::WaitsOn { item, on, .. } => {
+                let it = &self.plan.items[*item];
+                let mut edits = Vec::new();
+                for (index, other) in self.plan.items.iter().enumerate() {
+                    match (it.after.contains(&other.id), on[index]) {
+                        (false, true) => edits.push(Edit::Link { from: other.id.clone(), to: it.id.clone() }),
+                        (true, false) => edits.push(Edit::Unlink { from: other.id.clone(), to: it.id.clone() }),
+                        _ => {}
+                    }
+                }
+                Ok((edits, format!("what {} waits on", it.name)))
+            }
+        }
+    }
+
+    /// `↑↓` in a dialog: the question or the item above or below.
+    pub fn form_move(&mut self, step: isize) {
+        let count = match &self.form {
+            Some(Form::Add(_)) => 5,
+            Some(Form::WaitsOn { item, .. }) => self.waits_order(*item).len(),
+            _ => return,
+        };
+        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. }) = self.form.as_mut() {
+            *at = (*at as isize + step).rem_euclid(count.max(1) as isize) as usize;
+        }
+    }
+
+    /// `←→` in the add dialog: work or a milestone, the lane, or where it goes.
+    pub fn form_change(&mut self, step: isize) {
+        let lanes = self.plan.lanes.len() as isize;
+        let places = match &self.form {
+            Some(Form::Add(adding)) => self.places(adding.from).len() as isize,
+            _ => return,
+        };
+        if let Some(Form::Add(adding)) = self.form.as_mut() {
+            match adding.at {
+                1 => adding.milestone ^= true,
+                3 => adding.lane = (adding.lane as isize + step).rem_euclid(lanes) as usize,
+                4 => adding.place = (adding.place as isize + step).rem_euclid(places) as usize,
+                _ => {}
+            }
+        }
+    }
+
+    /// A key typed in a dialog: a letter of the name or the length; Space in "waits on" switches the
+    /// item it is on.
+    pub fn form_type(&mut self, c: char) {
+        let order = match &self.form {
+            Some(Form::WaitsOn { item, .. }) => self.waits_order(*item),
+            _ => Vec::new(),
+        };
+        match self.form.as_mut() {
+            Some(Form::Add(adding)) if adding.at == 0 => adding.name.push(c),
+            Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
+            Some(Form::Rename { typed, .. }) => typed.push(c),
+            Some(Form::WaitsOn { on, at, .. }) if c == ' ' => {
+                if let Some(&other) = order.get(*at) {
+                    on[other] ^= true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Backspace in a dialog.
+    pub fn form_back(&mut self) {
+        match self.form.as_mut() {
+            Some(Form::Add(adding)) if adding.at == 0 => drop(adding.name.pop()),
+            Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
+            Some(Form::Rename { typed, .. }) => drop(typed.pop()),
+            _ => {}
+        }
+    }
+
+    /// Enter in a dialog: makes its changes as one and closes it, or says what is missing.
+    pub fn keep_form(&mut self) {
+        match self.form_edits() {
+            Ok((edits, _)) if edits.is_empty() => self.form = None,
+            Ok((edits, label)) => {
+                let added = matches!(self.form, Some(Form::Add(_)));
+                match self.apply_all(&edits, label) {
+                    Ok(()) => {
+                        if added {
+                            self.selected = self.plan.items.len() - 1;
+                        }
+                        self.form = None;
+                    }
+                    Err(err) => self.message = Some(err),
+                }
+            }
+            Err(err) => self.message = Some(err),
         }
     }
 

@@ -4,6 +4,7 @@ mod checks;
 mod export;
 mod finder;
 mod help;
+mod item;
 mod note;
 mod pictures;
 mod question;
@@ -144,6 +145,18 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 KeyCode::Esc | KeyCode::Char('?') => app.help = false,
                 _ => {}
             },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.form.is_some() => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Esc => app.form = None,
+                KeyCode::Enter => app.keep_form(),
+                KeyCode::Up | KeyCode::BackTab => app.form_move(-1),
+                KeyCode::Down | KeyCode::Tab => app.form_move(1),
+                KeyCode::Left => app.form_change(-1),
+                KeyCode::Right => app.form_change(1),
+                KeyCode::Backspace => app.form_back(),
+                KeyCode::Char(c) => app.form_type(c),
+                _ => {}
+            },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.question.is_some() => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Esc => app.question = None,
@@ -235,6 +248,9 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('u')) => app.undo(),
                 (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
                 (Screen::Roadmap, KeyCode::Char('n')) if app.level != pchart_draw::Level::Overview => app.add_notes(),
+                (Screen::Roadmap, KeyCode::Char('a')) if app.level != pchart_draw::Level::Overview => app.start_add(),
+                (Screen::Roadmap, KeyCode::Char('r')) if app.level != pchart_draw::Level::Overview => app.start_rename(),
+                (Screen::Roadmap, KeyCode::Char('w')) if app.level != pchart_draw::Level::Overview => app.start_waits(),
                 (Screen::Roadmap, KeyCode::Left) if app.level != pchart_draw::Level::Overview => app.try_length(-1),
                 (Screen::Roadmap, KeyCode::Right) if app.level != pchart_draw::Level::Overview => app.try_length(1),
                 _ => {}

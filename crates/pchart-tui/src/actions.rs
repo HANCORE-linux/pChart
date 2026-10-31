@@ -9,6 +9,9 @@ use crate::ui::day;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     ChangeDate,
+    AddItem,
+    Rename,
+    WaitsOn,
     TryLength,
     AddNote,
     Important,
@@ -29,7 +32,7 @@ pub type Found = (Action, Option<usize>);
 
 impl Action {
     fn all(app: &App) -> Vec<Action> {
-        let mut all = vec![Action::ChangeDate, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
+        let mut all = vec![Action::ChangeDate, Action::AddItem, Action::Rename, Action::WaitsOn, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
         all.push(Action::Export(app.export.view));
         all.extend(View::ALL.into_iter().filter(|&view| view != app.export.view).map(Action::Export));
         all.extend([Action::Help, Action::Quit]);
@@ -37,7 +40,7 @@ impl Action {
     }
 
     fn on_item(self) -> bool {
-        matches!(self, Action::ChangeDate | Action::TryLength | Action::AddNote | Action::Important | Action::Show)
+        matches!(self, Action::ChangeDate | Action::AddItem | Action::Rename | Action::WaitsOn | Action::TryLength | Action::AddNote | Action::Important | Action::Show)
     }
 
     fn fits(self, app: &App, item: usize) -> bool {
@@ -51,6 +54,9 @@ impl Action {
     fn words(self) -> &'static [&'static str] {
         match self {
             Action::ChangeDate => &["move", "date", "start", "when", "shift", "later", "earlier", "fix", "fixed", "change", "reschedule", "postpone"],
+            Action::AddItem => &["add", "new", "item", "task", "create", "insert", "work", "milestone"],
+            Action::Rename => &["rename", "name", "call", "title"],
+            Action::WaitsOn => &["waits", "wait", "depends", "dependency", "dependencies", "link", "after", "before", "predecessor"],
             Action::TryLength => &["what", "if", "try", "longer", "shorter", "length", "duration", "extend", "days"],
             Action::AddNote => &["note", "notes", "comment", "remark", "add", "write"],
             Action::Important => &["important", "star", "mark", "key"],
@@ -77,6 +83,9 @@ impl Action {
     pub fn name(self, app: &App, item: Option<usize>) -> String {
         match self {
             Action::ChangeDate => "Change a date".into(),
+            Action::AddItem => "Add an item".into(),
+            Action::Rename => "Rename".into(),
+            Action::WaitsOn => "What it waits on".into(),
             Action::TryLength => "Try longer or shorter".into(),
             Action::AddNote => "Add a note".into(),
             Action::Important if item.is_some_and(|index| app.plan.items[index].important) => "Not important".into(),
@@ -105,6 +114,12 @@ impl Action {
                 let slot = app.schedule.slots[index].planned;
                 let fixed = if it.on.is_some() { ", fixed" } else if it.no_earlier_than.is_some() { ", no earlier" } else if it.no_later_than.is_some() { ", no later" } else { "" };
                 if it.milestone { format!("when {} is · now {}{fixed}", it.name, day(slot.finish)) } else { format!("when {} starts · now {}{fixed}", it.name, day(slot.start)) }
+            }
+            (Action::AddItem, Some(index)) => format!("after {}, in its lane", item_of(index).name),
+            (Action::Rename, Some(index)) => format!("{} gets another name", item_of(index).name),
+            (Action::WaitsOn, Some(index)) => {
+                let on: Vec<&str> = item_of(index).after.iter().filter_map(|id| app.plan.item(id)).map(|other| app.plan.items[other].name.as_str()).collect();
+                if on.is_empty() { format!("{} waits on nothing", item_of(index).name) } else { format!("{} waits on {}", item_of(index).name, on.join(", ")) }
             }
             (Action::TryLength, Some(index)) => format!("{} on trial, nothing is saved · now {} wd", item_of(index).name, item_of(index).duration),
             (Action::AddNote, Some(index)) => match item_of(index).note.as_deref() {
@@ -179,6 +194,9 @@ impl Action {
     pub fn key(self) -> &'static str {
         match self {
             Action::ChangeDate => "Enter",
+            Action::AddItem => "a",
+            Action::Rename => "r",
+            Action::WaitsOn => "w",
             Action::TryLength => "←→",
             Action::AddNote => "n",
             Action::Important => "n i",
@@ -209,6 +227,18 @@ impl Action {
             Action::ChangeDate => {
                 roadmap(app);
                 app.ask();
+            }
+            Action::AddItem => {
+                roadmap(app);
+                app.start_add();
+            }
+            Action::Rename => {
+                roadmap(app);
+                app.start_rename();
+            }
+            Action::WaitsOn => {
+                roadmap(app);
+                app.start_waits();
             }
             Action::TryLength => {
                 roadmap(app);
@@ -278,7 +308,7 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
     if typed_words.is_empty() {
         let selected = Some(app.selected);
         let mut found: Vec<Found> = match app.screen {
-            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None)],
+            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None)],
             Screen::Checks => vec![(Action::Holidays, None), (Action::Undo, None)],
             Screen::Export => vec![(Action::Export(app.export.view), None)],
             Screen::Situation => vec![(Action::Undo, None)],

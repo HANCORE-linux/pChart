@@ -11,7 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::app::{App, Screen, Spot};
+use crate::app::{App, Form, Screen, Spot};
 use crate::pictures::Placement;
 
 /// The smallest window pChart draws in; below it says how much it needs.
@@ -103,7 +103,7 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
         Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
         Screen::Roadmap => {
-            let palette = if app.question.is_some() || writing(app) || app.overlay() { app.palette.dimmed() } else { app.palette };
+            let palette = if app.question.is_some() || app.form.is_some() || writing(app) || app.overlay() { app.palette.dimmed() } else { app.palette };
             let under = Inks::of(palette);
             let top = if area.width >= 120 && area.height >= 44 {
                 tiles(app, &palette, frame, &under, area, &mut placements);
@@ -374,6 +374,11 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         _ if app.help => vec![("Esc", "close"), ("Ctrl+P", "find an action")],
         Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
+        Screen::Roadmap if app.form.is_some() => match &app.form {
+            Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
+            Some(Form::Rename { .. }) => vec![("Enter", "rename"), ("Esc", "keep as it is")],
+            _ => vec![("↑↓", "item"), ("Space", "waits on it or not"), ("Enter", "keep"), ("Esc", "keep as it is")],
+        },
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
@@ -473,6 +478,16 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let h = l.chart.height.min(24);
             let x = (l.chart.width - w) / 2;
             crate::question::dialog(app, &mut scene, f32::from(x) * f32::from(cw), 0.0, f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), f32::from(ch) / 21.0);
+        }
+        if app.form.is_some() {
+            let w = l.chart.width.saturating_sub(4).min(94);
+            let h = l.chart.height.min(match app.form {
+                Some(Form::Rename { .. }) => 9,
+                Some(Form::Add(_)) => 20,
+                _ => 32,
+            });
+            let x = (l.chart.width - w) / 2;
+            crate::item::dialog(app, &mut scene, f32::from(x) * f32::from(cw), 0.0, f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), f32::from(ch) / 21.0);
         }
         if writing(app) {
             let w = l.chart.width.saturating_sub(4).min(94);
@@ -916,6 +931,63 @@ mod tests {
         assert_eq!(app.screen, Screen::Checks);
         app.choose_check(1);
         assert_eq!(app.check, 0);
+    }
+
+    #[test]
+    fn items_are_added_renamed_and_linked_each_as_one_change() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let (frontend, integration) = (app.plan.item("frontend").unwrap(), app.plan.item("integration").unwrap());
+        app.selected = frontend;
+        app.start_add();
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, "Enter add") && svg.contains("ADD AFTER FRONTEND") && svg.contains("after Frontend, before Integration") && svg.contains("Type a name to see what follows."));
+        "Code review".chars().for_each(|c| app.form_type(c));
+        app.form_move(2);
+        app.form_back();
+        app.form_type('3');
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("3 working days") && svg.contains("Launch stays on track, ") && svg.contains("with 9 working days to spare."));
+        app.keep_form();
+        let review = app.plan.item("code-review").unwrap();
+        assert!(app.form.is_none() && app.selected == review && app.plan.items[review].duration == 3 && app.plan.items[review].after == ["frontend"]);
+        assert!(app.plan.items[integration].after.contains(&"code-review".to_string()) && !app.plan.items[integration].after.contains(&"frontend".to_string()));
+        app.undo();
+        assert!(app.plan.item("code-review").is_none() && app.plan.items[integration].after.contains(&"frontend".to_string()));
+
+        app.selected = frontend;
+        app.start_add();
+        "Review".chars().for_each(|c| app.form_type(c));
+        app.form_move(1);
+        app.form_change(1);
+        app.form_move(3);
+        app.form_change(-1);
+        app.keep_form();
+        let review = app.plan.item("review").unwrap();
+        assert!(app.plan.items[review].milestone && app.plan.items[review].after == ["design-sign-off"] && app.plan.items[frontend].after == ["review"]);
+
+        app.selected = frontend;
+        app.start_rename();
+        app.form_back();
+        "ds".chars().for_each(|c| app.form_type(c));
+        app.keep_form();
+        assert!(app.plan.items[frontend].name == "Frontends" && app.plan.items[frontend].id == "frontend");
+
+        let sdk = app.plan.item("sdk-integration").unwrap();
+        app.selected = sdk;
+        app.start_waits();
+        assert!(!app.waits_order(sdk).contains(&integration) && app.waits_order(sdk).contains(&app.plan.item("api").unwrap()));
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("What does SDK integration wait on?") && svg.contains("Integration and 5 more wait on SDK integration, so they are not offered.") && svg.contains("Nothing changes."));
+        let api = app.waits_order(sdk).iter().position(|&index| app.plan.items[index].id == "api").unwrap();
+        let Some(crate::app::Form::WaitsOn { at, .. }) = app.form.as_mut() else { panic!() };
+        *at = api;
+        app.form_type(' ');
+        app.keep_form();
+        assert!(app.plan.items[sdk].after.contains(&"api".to_string()) && app.message.is_none());
+        app.undo();
+        assert_eq!(app.message.as_deref(), Some("Undone: what SDK integration waits on"));
     }
 
     #[test]

@@ -82,6 +82,14 @@ pub struct Item {
 }
 
 impl Plan {
+    /// An id for a new item called `name`: its words in small letters joined by "-", numbered when the id
+    /// is taken.
+    pub fn new_id(&self, name: &str) -> String {
+        let words: Vec<String> = name.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_string).collect();
+        let base = if words.is_empty() { "item".to_string() } else { words.join("-") };
+        (1..).map(|number| if number == 1 { base.clone() } else { format!("{base}-{number}") }).find(|id| self.item(id).is_none()).unwrap_or(base)
+    }
+
     pub fn parse(text: &str) -> Result<Plan, Error> {
         let plan: Plan = toml::from_str(text).map_err(|err| Error::File(err.to_string()))?;
         if plan.format > FORMAT {
@@ -287,6 +295,15 @@ mod tests {
         changed.items[3].note = Some("Client signs the design in a workshop in New York.".into());
         changed.notes.push(Note { lane: "backend".into(), date: jiff::civil::date(2027, 1, 21), text: "Server move".into() });
         assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);
+    }
+
+    #[test]
+    fn a_new_item_gets_an_id_from_its_name_that_is_not_taken() {
+        let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+        assert_eq!(plan.new_id("Code review"), "code-review");
+        assert_eq!(plan.new_id("Frontend"), "frontend-2");
+        assert_eq!(plan.new_id("Beta & acceptance!"), "beta-acceptance");
+        assert_eq!(plan.new_id("…"), "item");
     }
 
     #[test]

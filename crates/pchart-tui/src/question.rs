@@ -87,7 +87,19 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
         bits::runs(s, left, top + 28.0 * u, 16.6 * u, &[(words, p.muted, false)]);
         return;
     };
-    let tried = edit.apply(&app.plan).map_err(|err| err.to_string()).and_then(|plan| pchart_core::schedule(&plan, &app.calendars, app.today).map(|schedule| (plan, schedule)).map_err(|err| err.to_string()));
+    follows(app, s, &[edit], left, top, room, u);
+}
+
+/// What would follow from `edits`, under a dialog at `left`, `top`: the verdict as it would be, and what
+/// moves, or where a new item would lie.
+#[allow(clippy::too_many_arguments)]
+pub fn follows(app: &App, s: &mut Scene, edits: &[pchart_core::Edit], left: f32, top: f32, room: f32, u: f32) {
+    let p = app.palette;
+    let fit = |text: &str, size: f32, room: f32| {
+        let count = (room / (size * ADVANCE)).floor().max(0.0) as usize;
+        if text.chars().count() <= count { text.to_string() } else { text.chars().take(count.saturating_sub(1)).collect::<String>() + "…" }
+    };
+    let tried = pchart_core::apply_all(&app.plan, edits).map_err(|(_, err)| err.to_string()).and_then(|plan| pchart_core::schedule(&plan, &app.calendars, app.today).map(|schedule| (plan, schedule)).map_err(|err| err.to_string()));
     let (plan, schedule) = match tried {
         Ok(tried) => tried,
         Err(err) => {
@@ -114,10 +126,16 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
         let parts: Vec<(&str, pchart_draw::scene::Color, bool)> = parts.iter().map(|(text, color)| (text.as_str(), *color, true)).collect();
         bits::runs(s, left + 50.0 * u, top + 32.0 * u, size, &parts);
     }
-    let moved = (0..plan.items.len()).filter(|&index| Some(index) != schedule.target && schedule.slots[index].planned != app.schedule.slots[index].planned).max_by_key(|&index| schedule.slots[index].planned.finish);
-    let words = match moved {
+    let old = app.plan.items.len();
+    let moved = (0..old).filter(|&index| Some(index) != schedule.target && schedule.slots[index].planned != app.schedule.slots[index].planned).max_by_key(|&index| schedule.slots[index].planned.finish);
+    let moves = match moved {
         Some(index) => format!("{} moves to {}", plan.items[index].name, day(schedule.slots[index].planned.finish)),
         None => "Nothing else moves.".to_string(),
+    };
+    let words = match (old..plan.items.len()).next() {
+        Some(new) if plan.items[new].milestone => format!("{} on {} · {moves}", plan.items[new].name, day(schedule.slots[new].planned.finish)),
+        Some(new) => format!("{} {} – {} · {moves}", plan.items[new].name, day(schedule.slots[new].planned.start), day(schedule.slots[new].planned.finish)),
+        None => moves,
     };
     bits::runs(s, left + 50.0 * u, top + 58.0 * u, 16.0 * u, &[(&fit(&words, 16.0 * u, room - 50.0 * u), p.dim, false)]);
 }
