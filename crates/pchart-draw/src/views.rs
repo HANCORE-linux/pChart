@@ -24,6 +24,11 @@ impl Audience {
     }
 
     /// Whether the page says what single items have to spare.
+    /// Notes under the milestones: the client does not see them.
+    pub fn notes(self) -> bool {
+        self != Audience::Client
+    }
+
     pub fn spare(self) -> bool {
         self != Audience::Client
     }
@@ -82,7 +87,7 @@ impl View {
     pub fn page(self, plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], audience: Audience) -> Scene {
         match self {
             View::Gantt => crate::gantt(plan, schedule, today, checks, audience),
-            View::Milestones => crate::milestones(plan, schedule, today),
+            View::Milestones => crate::milestones(plan, schedule, today, audience),
             View::Roadmap => crate::swimlanes(plan, schedule, today, checks, audience),
             View::Phases => crate::phase_plan(plan, schedule, today),
             View::NowNextLater => crate::now_next_later(plan, schedule, today),

@@ -55,6 +55,21 @@ pub struct Question {
     pub typed: String,
 }
 
+/// What the notes cursor stands on: an item, or a lane on a day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spot {
+    Item(usize),
+    Place(usize, Date),
+}
+
+/// The notes mode (picture 43): the cursor's lane by its index in the plan, its day, and the note being
+/// written (picture 40).
+pub struct Notes {
+    pub lane: usize,
+    pub day: Date,
+    pub typed: Option<String>,
+}
+
 /// The plan as it was before a what-if, which Esc goes back to.
 pub struct Before {
     pub plan: Plan,
@@ -88,6 +103,7 @@ pub struct App {
     /// The plan changed and is still to be written.
     pub unsaved: bool,
     pub question: Option<Question>,
+    pub notes: Option<Notes>,
     /// Set while a what-if is tried: the plan, schedule and analysis hold the tried plan, which is not
     /// written until Enter keeps it.
     pub before: Option<Before>,
@@ -97,7 +113,7 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, before: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None }
     }
 
     /// The roadmap picture for `rect`.
@@ -108,9 +124,10 @@ impl App {
             height: f32::from(rect.height) * f32::from(ch),
             unit: f32::from(ch) / 21.0,
             today: self.today,
-            selected: Some(self.selected),
+            selected: if matches!(self.spot(), Some(Spot::Place(..))) { None } else { Some(self.selected) },
             level: self.level,
             palette: self.palette,
+            cursor: self.notes.as_ref().map(|notes| (notes.lane, notes.day)),
         }
     }
 
@@ -357,6 +374,92 @@ impl App {
             self.plan = before.plan;
             self.schedule = before.schedule;
             self.analysis = before.analysis;
+        }
+    }
+
+    /// `n` on the roadmap: the notes cursor on the selected item.
+    pub fn add_notes(&mut self) {
+        let item = &self.plan.items[self.selected];
+        let slot = &self.schedule.slots[self.selected];
+        let day = if item.milestone { slot.planned.finish } else { slot.planned.start };
+        self.notes = Some(Notes { lane: self.plan.lane(&item.lane).unwrap_or(0), day, typed: None });
+    }
+
+    /// What the notes cursor stands on: a milestone on its day first, then an item running that day.
+    pub fn spot(&self) -> Option<Spot> {
+        let notes = self.notes.as_ref()?;
+        let here = |index: &usize| self.plan.lane(&self.plan.items[*index].lane) == Some(notes.lane);
+        let span = |index: usize| self.schedule.slots[index].planned;
+        let milestone = (0..self.plan.items.len()).filter(here).find(|&index| self.plan.items[index].milestone && span(index).finish == notes.day);
+        let running = (0..self.plan.items.len()).filter(here).find(|&index| span(index).start <= notes.day && notes.day <= span(index).finish);
+        Some(milestone.or(running).map_or(Spot::Place(notes.lane, notes.day), Spot::Item))
+    }
+
+    fn follow(&mut self) {
+        if let Some(Spot::Item(index)) = self.spot() {
+            self.selected = index;
+        }
+    }
+
+    /// `←→` in the notes mode: the cursor by days, within the roadmap.
+    pub fn move_cursor(&mut self, days: i64) {
+        let first = self.schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(self.today).min(self.today);
+        let last = self.schedule.slots.iter().map(|slot| slot.planned.finish).max().unwrap_or(self.today);
+        let Some(notes) = self.notes.as_mut() else { return };
+        let day = notes.day.checked_add(jiff::Span::new().days(days)).unwrap_or(notes.day);
+        let end = last.checked_add(jiff::Span::new().days(28)).unwrap_or(last);
+        notes.day = day.clamp(first, end);
+        self.follow();
+    }
+
+    /// `↑↓` in the notes mode: the cursor to the lane above or below.
+    pub fn cursor_lane(&mut self, step: isize) {
+        let lanes = self.plan.lanes.len();
+        let Some(notes) = self.notes.as_mut() else { return };
+        notes.lane = notes.lane.saturating_add_signed(step).min(lanes.saturating_sub(1));
+        self.follow();
+    }
+
+    /// The note where the cursor stands, as written.
+    pub fn note_here(&self) -> Option<&str> {
+        match self.spot()? {
+            Spot::Item(index) => self.plan.items[index].note.as_deref(),
+            Spot::Place(lane, day) => self.plan.notes.iter().find(|note| self.plan.lane(&note.lane) == Some(lane) && note.date == day).map(|note| note.text.as_str()),
+        }
+    }
+
+    /// Enter in the notes mode: writes the note where the cursor stands, starting from the one there.
+    pub fn write(&mut self) {
+        let typed = self.note_here().unwrap_or_default().to_string();
+        if let Some(notes) = self.notes.as_mut() {
+            notes.typed = Some(typed);
+        }
+    }
+
+    /// Enter while writing: keeps the note; an empty one removes it.
+    pub fn keep_note(&mut self) {
+        let (Some(spot), Some(typed)) = (self.spot(), self.notes.as_ref().and_then(|notes| notes.typed.clone())) else { return };
+        let note = Some(typed).filter(|text| !text.trim().is_empty());
+        let (edit, label) = match spot {
+            Spot::Item(index) => (Edit::Note { item: self.plan.items[index].id.clone(), note }, format!("note on {}", self.plan.items[index].name)),
+            Spot::Place(lane, day) => (Edit::NoteAt { lane: self.plan.lanes[lane].id.clone(), date: day, note }, format!("note on {} {}", self.plan.lanes[lane].name, day.strftime("%a %d %b"))),
+        };
+        match self.apply(&edit, label) {
+            Ok(()) => self.notes.iter_mut().for_each(|notes| notes.typed = None),
+            Err(err) => self.message = Some(err),
+        }
+    }
+
+    /// `i` in the notes mode: marks the milestone under the cursor important, or no longer.
+    pub fn toggle_important(&mut self) {
+        let Some(Spot::Item(index)) = self.spot() else { return };
+        let item = &self.plan.items[index];
+        if !item.milestone {
+            return;
+        }
+        let (important, label) = (!item.important, format!("{} {}", item.name, if item.important { "not important" } else { "important" }));
+        if let Err(err) = self.apply(&Edit::Important { item: item.id.clone(), important }, label) {
+            self.message = Some(err);
         }
     }
 

@@ -1,6 +1,7 @@
 mod app;
 mod checks;
 mod export;
+mod note;
 mod pictures;
 mod question;
 mod situation;
@@ -115,6 +116,32 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 KeyCode::Char(c) => app.question.as_mut().into_iter().for_each(|question| question.typed.push(c)),
                 _ => {}
             },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.notes.as_ref().is_some_and(|notes| notes.typed.is_some()) => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Esc => app.notes.iter_mut().for_each(|notes| notes.typed = None),
+                KeyCode::Enter => app.keep_note(),
+                KeyCode::Backspace => app.notes.iter_mut().filter_map(|notes| notes.typed.as_mut()).for_each(|typed| {
+                    typed.pop();
+                }),
+                KeyCode::Char(c) => app.notes.iter_mut().filter_map(|notes| notes.typed.as_mut()).for_each(|typed| typed.push(c)),
+                _ => {}
+            },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.notes.is_some() => {
+                let week = if key.modifiers.contains(KeyModifiers::SHIFT) { 7 } else { 1 };
+                match key.code {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                    KeyCode::Char('q') => break Ok(()),
+                    KeyCode::Esc => app.notes = None,
+                    KeyCode::Left => app.move_cursor(-week),
+                    KeyCode::Right => app.move_cursor(week),
+                    KeyCode::Up => app.cursor_lane(-1),
+                    KeyCode::Down => app.cursor_lane(1),
+                    KeyCode::Enter => app.write(),
+                    KeyCode::Char('i') => app.toggle_important(),
+                    KeyCode::Char('u') => app.undo(),
+                    _ => {}
+                }
+            }
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.before.is_some() => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Char('q') => break Ok(()),
@@ -164,6 +191,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('d')) => app.detail(),
                 (_, KeyCode::Char('u')) => app.undo(),
                 (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
+                (Screen::Roadmap, KeyCode::Char('n')) if app.level != pchart_draw::Level::Overview => app.add_notes(),
                 (Screen::Roadmap, KeyCode::Left) if app.level != pchart_draw::Level::Overview => app.try_length(-1),
                 (Screen::Roadmap, KeyCode::Right) if app.level != pchart_draw::Level::Overview => app.try_length(1),
                 _ => {}

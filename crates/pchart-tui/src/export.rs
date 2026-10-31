@@ -232,7 +232,7 @@ pub fn write(job: &Job) -> Result<Vec<PathBuf>, String> {
     }
     if job.formats[3] {
         let picture = format!("{}-milestones.svg", job.stem);
-        save(&picture, pchart_draw::milestones(&job.plan, &job.schedule, job.today).svg().as_bytes())?;
+        save(&picture, pchart_draw::milestones(&job.plan, &job.schedule, job.today, job.audience).svg().as_bytes())?;
         save(&format!("{}.md", job.stem), markdown(&job.plan, &job.schedule, &job.analysis, &job.source, job.today, &picture, job.audience).as_bytes())?;
     }
     Ok(names.into_iter().map(|name| job.folder.join(name)).collect())

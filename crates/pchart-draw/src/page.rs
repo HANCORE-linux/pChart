@@ -102,7 +102,11 @@ impl Page {
             Some(target) => format!("Dates scheduled backwards from the fixed {} date", common(&plan.items[target].name)),
             None => "Dates scheduled forwards from the start of the plan".to_string(),
         };
-        page.text(X0, height - 30.0, &source, 14.0, GRAY, false, Anchor::Start, None);
+        let end = page.text(X0, height - 30.0, &source, 14.0, GRAY, false, Anchor::Start, None);
+        if plan.items.iter().any(|item| item.important) {
+            page.star(end + 30.0, height - 35.0, 7.0, GRAY, None, None);
+            page.text(end + 42.0, height - 30.0, "important", 14.0, GRAY, false, Anchor::Start, None);
+        }
         page.text(X1, height - 30.0, "pChart", 14.0, GRAY, true, Anchor::End, None);
         page
     }
@@ -170,17 +174,34 @@ impl Page {
         self.shape([x - r, y - r, x + r, y + r], item);
     }
 
+    /// A star `r` across from its centre to a point, as an important milestone is drawn (picture 41).
+    pub fn star(&mut self, x: f32, y: f32, r: f32, fill: Color, stroke: Option<(Color, f32)>, item: Option<usize>) {
+        let stroke = stroke.map(|(color, width)| Stroke { color, width, dash: None });
+        self.scene.marks.push(Mark { shape: Shape::Path { points: crate::bits::star(x, y, r), closed: true, fill: Fill::Color(fill), stroke }, opacity: 1.0, item });
+        self.shape([x - r, y - r, x + r, y + r], item);
+    }
+
     /// A milestone in the accent, or red when late (picture 45, B): with room around it so it stands
-    /// apart from a bar or line it sits on, open when it has time to spare, and with a pin on a fixed date.
+    /// apart from a bar or line it sits on, open when it has time to spare, with a pin on a fixed date,
+    /// and a star when it is important (picture 41).
     #[allow(clippy::too_many_arguments)]
-    pub fn milestone(&mut self, x: f32, y: f32, r: f32, late: bool, open: bool, fixed: bool, item: Option<usize>) {
+    pub fn milestone(&mut self, x: f32, y: f32, r: f32, late: bool, open: bool, fixed: bool, important: bool, item: Option<usize>) {
         let color = if late { LATE } else { FIXED };
         let room = r + 3.0;
-        self.scene.add(Shape::Path { points: vec![(x, y - room), (x + room, y), (x, y + room), (x - room, y)], closed: true, fill: Fill::Color(PAPER), stroke: None });
-        if open {
-            self.diamond(x, y, r, PAPER, Some((color, 1.4)), item);
+        if important {
+            self.scene.add(Shape::Path { points: crate::bits::star(x, y, room + 2.0), closed: true, fill: Fill::Color(PAPER), stroke: None });
+            if open {
+                self.star(x, y, r + 2.0, PAPER, Some((color, 1.4)), item);
+            } else {
+                self.star(x, y, r + 2.0, color, None, item);
+            }
         } else {
-            self.diamond(x, y, r, color, None, item);
+            self.scene.add(Shape::Path { points: vec![(x, y - room), (x + room, y), (x, y + room), (x - room, y)], closed: true, fill: Fill::Color(PAPER), stroke: None });
+            if open {
+                self.diamond(x, y, r, PAPER, Some((color, 1.4)), item);
+            } else {
+                self.diamond(x, y, r, color, None, item);
+            }
         }
         if fixed {
             self.scene.add(Shape::Line { x1: x, y1: y - r - 2.0, x2: x, y2: y - r - 9.0, stroke: Stroke { color, width: 1.4, dash: None } });
@@ -276,7 +297,7 @@ impl Page {
                     x += 21.0;
                 }
                 Key::Fixed => {
-                    self.milestone(x + 7.0, y - 1.0, 6.0, false, false, true, None);
+                    self.milestone(x + 7.0, y - 1.0, 6.0, false, false, true, false, None);
                     x += 22.0;
                 }
                 Key::Today => {

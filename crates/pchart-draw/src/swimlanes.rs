@@ -95,9 +95,9 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
         if !item.milestone {
             page.bar(x0 + 1.0, x1 - 1.5, y(index), 9.0, if late { LATE } else if chain.contains(&index) { INK } else { SOFT }, 2.0, Some(index));
         } else if item.on.is_some() {
-            page.milestone(x0, y(index), 7.0, late, false, true, Some(index));
+            page.milestone(x0, y(index), 7.0, late, false, true, item.important, Some(index));
         } else {
-            page.milestone(x0, y(index), 6.0, late, !chain.contains(&index) && !late, false, Some(index));
+            page.milestone(x0, y(index), 6.0, late, !chain.contains(&index) && !late, false, item.important, Some(index));
         }
     }
 

@@ -89,6 +89,21 @@ pub enum Icon {
     Folder,
     /// A short bar, as the legend draws an item.
     Bar,
+    /// An important milestone.
+    Star,
+    /// A page with a folded corner: a note.
+    Note,
+}
+
+/// A five-pointed star around `x`, `y`, `r` from its centre to a point, standing on its two lower points.
+pub fn star(x: f32, y: f32, r: f32) -> Vec<(f32, f32)> {
+    (0..10)
+        .map(|step| {
+            let angle = -std::f32::consts::FRAC_PI_2 + step as f32 * std::f32::consts::PI / 5.0;
+            let reach = if step % 2 == 0 { r } else { r * 0.46 };
+            (x + reach * angle.cos(), y + r * 0.1 + reach * angle.sin())
+        })
+        .collect()
 }
 
 fn ring(x: f32, y: f32, r: f32) -> Vec<(f32, f32)> {
@@ -138,6 +153,15 @@ pub fn draw_icon(s: &mut Scene, icon: Icon, x: f32, y: f32, size: f32, color: Co
             s.add(open(vec![(x - r, y - r * 0.25), (x + r, y - r * 0.25)], width));
         }
         Icon::Bar => s.add(Shape::Rect { x: x - r * 1.5, y: y - r * 0.55, w: r * 3.0, h: r * 1.1, radius: r * 0.25, fill: Fill::Color(color), stroke: None }),
+        Icon::Star => s.add(Shape::Path { points: star(x, y, r), closed: true, fill: Fill::Color(color), stroke: None }),
+        Icon::Note => {
+            let (width, w, h, fold) = ((r / 8.0).max(1.4), r * 1.5, r * 1.9, r * 0.55);
+            let (x0, y0) = (x - w / 2.0, y - h / 2.0);
+            s.add(Shape::Path { points: vec![(x0, y0), (x0 + w - fold, y0), (x0 + w, y0 + fold), (x0 + w, y0 + h), (x0, y0 + h)], closed: true, fill: Fill::None, stroke: line(width) });
+            for k in [0.48, 0.72] {
+                s.add(open(vec![(x0 + w * 0.24, y0 + h * k), (x0 + w * 0.76, y0 + h * k)], width * 0.85));
+            }
+        }
         Icon::Folder => s.add(Shape::Path { points: vec![(x - r, y - r * 0.6), (x - r * 0.2, y - r * 0.6), (x, y - r * 0.3), (x + r, y - r * 0.3), (x + r, y + r * 0.7), (x - r, y + r * 0.7)], closed: true, fill: Fill::None, stroke: line((r / 8.0).max(1.4)) }),
     }
 }

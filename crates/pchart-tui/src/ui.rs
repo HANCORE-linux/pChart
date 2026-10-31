@@ -11,7 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::app::{App, Screen};
+use crate::app::{App, Screen, Spot};
 use crate::pictures::Placement;
 
 /// The smallest window pChart draws in; below it says how much it needs.
@@ -102,7 +102,7 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
         Screen::Checks => crate::checks::draw(app, frame, &inks, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &inks, area, &mut placements),
         Screen::Roadmap => {
-            let palette = if app.question.is_some() { app.palette.dimmed() } else { app.palette };
+            let palette = if app.question.is_some() || writing(app) { app.palette.dimmed() } else { app.palette };
             let under = Inks::of(palette);
             let top = if area.width >= 120 && area.height >= 44 {
                 tiles(app, &palette, frame, &under, area, &mut placements);
@@ -161,6 +161,8 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         x += w + 1;
     }
     let modes: Vec<String> = match (app.screen, &app.question, &app.before) {
+        (Screen::Roadmap, None, None) if writing(app) => vec!["NOTE · nothing changed yet".into(), "NOTE".into()],
+        (Screen::Roadmap, None, None) if app.notes.is_some() => vec!["ADD NOTES".into()],
         (Screen::Roadmap, Some(_), _) if area.width >= 100 => vec!["CHANGE A DATE · nothing changed yet".into()],
         (Screen::Roadmap, Some(_), _) => vec!["CHANGE A DATE".into()],
         (Screen::Roadmap, None, Some(_)) => {
@@ -343,16 +345,32 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
 
 fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
-    let hints: &[(&str, &str)] = match app.screen {
-        Screen::Situation => &[("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
-        Screen::Roadmap if app.question.is_some() => &[("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
-        Screen::Roadmap if app.before.is_some() => &[("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
-        Screen::Roadmap => &[("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
-        Screen::Checks => &[("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
-        Screen::Export => &[("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
+    let notes = |spot: Option<Spot>| {
+        let milestone = matches!(spot, Some(Spot::Item(index)) if app.plan.items[index].milestone);
+        let enter = match (spot, app.note_here()) {
+            (_, Some(_)) => "change the note",
+            (Some(Spot::Place(..)), None) => "write a note here",
+            _ => "write a note",
+        };
+        let mut hints = vec![("←→", "day"), ("Shift ←→", "week"), ("↑↓", "lane"), ("Enter", enter)];
+        if milestone {
+            hints.push(("i", "important"));
+        }
+        hints.push(("Esc", "done"));
+        hints
+    };
+    let hints: Vec<(&str, &str)> = match app.screen {
+        Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
+        Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
+        Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
+        Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
+        Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
+        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+        Screen::Checks => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
+        Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
     };
     let mut spans = Vec::new();
-    for &(key, label) in hints {
+    for (key, label) in hints {
         let next = [Span::styled(key, bold(inks.ink)), Span::styled(format!(" {label}"), inks.dim), Span::raw("    ")];
         if width(&spans) + width(&next) > area.width.saturating_sub(1) {
             break;
@@ -439,11 +457,21 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let x = (l.chart.width - w) / 2;
             crate::question::dialog(app, &mut scene, f32::from(x) * f32::from(cw), 0.0, f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), f32::from(ch) / 21.0);
         }
+        if writing(app) {
+            let w = l.chart.width.saturating_sub(4).min(94);
+            let h = l.chart.height.min(if matches!(app.spot(), Some(Spot::Item(index)) if app.plan.items[index].milestone) { 14 } else { 12 });
+            let x = (l.chart.width - w) / 2;
+            crate::note::dialog(app, &mut scene, f32::from(x) * f32::from(cw), f32::from(ch) * 3.0_f32.min(f32::from(l.chart.height - h)), f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), f32::from(ch) / 21.0);
+        }
         placements.push(Placement { rect: l.chart, svg: scene.svg(), paper: false });
     }
     let rect = Rect { x: l.panel.x + 2, y: l.line, width: l.panel.width.saturating_sub(4), height: 1 };
     let (w, h, u) = (f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0);
-    let line = if app.before.is_some() { bits::line_of_runs(&trial(app, palette), w, h, u, palette) } else { bits::line(&selection(app, level, palette), w, h, u, palette) };
+    let line = match app.spot() {
+        _ if app.before.is_some() => bits::line_of_runs(&trial(app, palette), w, h, u, palette),
+        Some(Spot::Place(lane, date)) => bits::line(&place(app, lane, date, palette), w, h, u, palette),
+        _ => bits::line(&selection(app, level, palette), w, h, u, palette),
+    };
     placements.push(Placement { rect, svg: line.svg(), paper: false });
 }
 
@@ -510,7 +538,16 @@ fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
     let item = &app.plan.items[app.selected];
     let slot = &app.schedule.slots[app.selected];
     let dates = if item.milestone { day(slot.planned.finish) } else { format!("{} – {}", day(slot.planned.start), day(slot.planned.finish)) };
-    let mut parts = vec![(None, item.name.clone(), p.bright, true), (Some((Icon::Person, p.dim)), team, p.dim, false), (Some((Icon::Calendar, p.dim)), dates, p.ink, false)];
+    let star = item.important.then_some((Icon::Star, p.ink));
+    let mut parts = vec![(star, item.name.clone(), p.bright, true)];
+    if !item.milestone {
+        parts.push((Some((Icon::Person, p.dim)), team, p.dim, false));
+    }
+    parts.push((Some((Icon::Calendar, p.dim)), dates, p.ink, false));
+    let note = item.note.clone().map(|note| (Some((Icon::Note, p.dim)), note, p.ink, false));
+    if app.notes.is_some() {
+        return parts.into_iter().chain(note).collect();
+    }
     if !item.milestone {
         parts.push((Some((Icon::Clock, p.dim)), format!("{} wd", item.duration), p.ink, false));
     }
@@ -521,7 +558,23 @@ fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
     } else {
         parts.push((Some((Icon::Bar, p.muted)), format!("{} wd to spare", slot.spare), p.ink, false));
     }
+    parts.into_iter().chain(note).collect()
+}
+
+/// The line under the notes cursor on an empty place (picture 43): the lane and its city, the day and
+/// its week, and the note there.
+fn place(app: &App, lane: usize, date: Date, palette: &Palette) -> Vec<Part> {
+    let p = *palette;
+    let lane_of = &app.plan.lanes[lane];
+    let team = [Some(lane_of.name.as_str()), lane_of.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    let mut parts = vec![(Some((Icon::Person, p.dim)), team, p.bright, true), (Some((Icon::Calendar, p.dim)), format!("{} · W{:02}", date.strftime("%a %d %b %Y"), date.iso_week_date().week()), p.ink, false)];
+    parts.extend(app.note_here().map(|note| (Some((Icon::Note, p.dim)), note.to_string(), p.ink, false)));
     parts
+}
+
+/// A note is being written.
+fn writing(app: &App) -> bool {
+    app.notes.as_ref().is_some_and(|notes| notes.typed.is_some())
 }
 
 pub(crate) fn day(date: Date) -> String {
@@ -779,5 +832,51 @@ mod tests {
         app.selected = app.plan.item("launch").unwrap();
         app.try_length(1);
         assert!(app.before.is_none() && app.message.as_deref() == Some("Launch is a milestone; it has no duration"));
+    }
+
+    #[test]
+    fn notes_go_on_items_and_places_and_a_milestone_takes_a_star() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let (frontend, sign_off) = (app.plan.item("frontend").unwrap(), app.plan.item("design-sign-off").unwrap());
+        app.selected = frontend;
+        app.add_notes();
+        assert_eq!(app.spot(), Some(Spot::Item(frontend)));
+        app.cursor_lane(2);
+        let qa = app.plan.lane("qa").unwrap();
+        assert_eq!(app.spot(), Some(Spot::Place(qa, jiff::civil::date(2026, 12, 21))));
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, "ADD NOTES") && has(&rows, "Enter write a note here") && !has(&rows, "i important"));
+        assert!(svg.contains("Test/QA · Bangalore") && svg.contains("Mon 21 Dec 2026 · W52"));
+        app.write();
+        app.notes.as_mut().unwrap().typed = Some("Meet QA".into());
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, "NOTE · nothing changed yet") && has(&rows, "Enter keep the note") && svg.contains("What should people know about Mon 21 Dec?") && svg.contains("Meet QA"));
+        app.keep_note();
+        assert!(app.plan.notes.len() == 1 && app.plan.notes[0].text == "Meet QA" && app.unsaved && app.notes.as_ref().is_some_and(|notes| notes.typed.is_none()));
+
+        let svg = |app: &App| screen(app, 170, 50).1.iter().map(|placement| placement.svg.clone()).collect::<String>();
+        assert!(svg(&app).contains(">Meet QA<"));
+        app.cursor_lane(1);
+        app.move_cursor(-3);
+        assert_eq!(app.spot(), Some(Spot::Item(sign_off)));
+        assert!(has(&screen(&app, 170, 50).0, "i important"));
+        app.toggle_important();
+        app.write();
+        app.notes.as_mut().unwrap().typed = Some("Client signs the design in a workshop in New York.".into());
+        app.keep_note();
+        let item = &app.plan.items[sign_off];
+        assert!(item.important && item.note.as_deref() == Some("Client signs the design in a workshop in New York.") && app.history.len() == 3);
+
+        assert_eq!(svg(&app).matches("Client signs the design").count(), 2);
+        app.notes = None;
+        assert!(svg(&app).matches("Client signs the design").count() == 1 && !svg(&app).contains(">Meet QA<"));
+        let (rows, placements) = screen(&app, 170, 50);
+        let line = &placements.last().unwrap().svg;
+        assert!(has(&rows, "n add notes") && line.contains("Design sign-off") && line.contains("Client signs the design in a workshop in New York."));
+        app.undo();
+        assert!(app.plan.items[sign_off].note.is_none() && app.message.as_deref() == Some("Undone: note on Design sign-off"));
     }
 }

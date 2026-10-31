@@ -13,7 +13,7 @@ fn pages() -> Vec<(String, Scene)> {
         let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
         let schedule: Schedule = schedule(&plan, &calendars, today).unwrap();
         let checks = analyse(&plan, &calendars, &schedule, today).checks;
-        out.push((format!("{} milestones", plan.name), milestones(&plan, &schedule, today)));
+        out.push((format!("{} milestones", plan.name), milestones(&plan, &schedule, today, Audience::Team)));
         for audience in [Audience::Team, Audience::Client] {
             out.push((format!("{} gantt for {audience:?}", plan.name), gantt(&plan, &schedule, today, &checks, audience)));
             out.push((format!("{} swimlanes for {audience:?}", plan.name), swimlanes(&plan, &schedule, today, &checks, audience)));
@@ -62,3 +62,19 @@ fn names_on_pages_are_whole() {
         }
     }
 }
+
+#[test]
+fn notes_show_for_the_team_and_not_for_the_client() {
+    let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
+    let mut plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+    let sign_off = plan.item("design-sign-off").unwrap();
+    plan.items[sign_off].important = true;
+    plan.items[sign_off].note = Some("Client signs the design in a workshop in New York.".into());
+    let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+    let today = jiff::civil::date(2026, 10, 29);
+    let schedule: Schedule = schedule(&plan, &calendars, today).unwrap();
+    let team = milestones(&plan, &schedule, today, Audience::Team).svg();
+    let client = milestones(&plan, &schedule, today, Audience::Client).svg();
+    assert!(team.contains("workshop in New York.") && !client.contains("workshop") && team.contains(">important<") && client.contains(">important<"));
+}
+

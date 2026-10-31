@@ -28,6 +28,8 @@ pub struct Settings {
     pub selected: Option<usize>,
     pub level: Level,
     pub palette: Palette,
+    /// The place of the notes cursor (picture 43): a lane by its index in the plan, and a day.
+    pub cursor: Option<(usize, Date)>,
 }
 
 /// A part of the roadmap: the days from `start` to `end`, and the lanes in `lanes` by their index in the plan.
@@ -123,6 +125,9 @@ struct Chart<'a> {
     height: f32,
     selected: Option<usize>,
     level: Level,
+    /// The lane of the notes cursor, by its index in the plan; it lies on the raised colour, and while
+    /// there is one the notes show (picture 47).
+    band: Option<usize>,
 }
 
 impl Chart<'_> {
@@ -227,6 +232,9 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         let xt = c.g.x(schedule.slots[target].planned.finish);
         s.add(Shape::Line { x1: xt, y1: c.g.lane_y(0) + 2.0 * u, x2: xt, y2: c.g.bottom(), stroke: Stroke { color: p.bright, width: u, dash: Some((4.0 * u, 4.0 * u)) } });
     }
+    if let Some((lane, day)) = settings.cursor.filter(|_| c.level != Level::Overview) {
+        cursor(&mut s, &c, lane, day);
+    }
     if c.level == Level::Overview {
         folded(&mut s, &c);
     } else {
@@ -241,6 +249,7 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         bars(&mut s, &c);
         buffers(&mut s, &c, &analyse(plan, calendars, schedule, today).checks, &mut taken);
         labels(&mut s, &c, &mut taken);
+        notes(&mut s, &c, &mut taken);
     }
 
     if (c.g.start..=c.g.end).contains(&today) {
@@ -294,6 +303,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         height: height.unwrap_or(f32::MAX),
         selected: settings.selected,
         level: settings.level,
+        band: settings.cursor.map(|(lane, _)| lane),
     };
     if c.level != Level::Overview {
         c.rows = rows(&c);
@@ -532,21 +542,33 @@ fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule) {
 }
 
 /// A milestone in the theme's accent, or red when it is late, with room around it so it stands apart
-/// from the bar it ends (picture 45, B).
+/// from the bar it ends (picture 45, B); an important one is a star (picture 39, A).
 fn milestone(s: &mut Scene, c: &Chart, index: usize) {
     let (p, u) = (c.p, c.u);
     let (x, _, y) = c.bar(index);
-    let fixed = c.plan.items[index].on.is_some();
-    diamond(s, index, x, y, if fixed { 11.0 } else { 10.0 } * u, Fill::Color(p.page), None);
+    let item = &c.plan.items[index];
+    let fixed = item.on.is_some();
+    let ground = if c.band.is_some_and(|lane| c.visible.get(c.lanes[index]) == Some(&lane)) { p.raised } else { p.page };
+    let mark = |s: &mut Scene, r: f32, fill: Fill, stroke: Option<Stroke>| {
+        if item.important {
+            s.add_for(index, 1.0, Shape::Path { points: crate::bits::star(x, y, r + 2.0 * u), closed: true, fill, stroke });
+        } else {
+            diamond(s, index, x, y, r, fill, stroke);
+        }
+    };
+    mark(s, if fixed { 11.0 } else { 10.0 } * u, Fill::Color(ground), None);
+    if c.selected == Some(index) {
+        corners(s, c, x - 10.0 * u, x + 10.0 * u, y, 14.0 * u);
+    }
     let tone = if c.late(index) { p.alert } else { p.accent };
     if fixed {
-        diamond(s, index, x, y, 8.0 * u, Fill::Color(tone), None);
+        mark(s, 8.0 * u, Fill::Color(tone), None);
         s.add_for(index, 1.0, Shape::Line { x1: x, y1: y - 10.0 * u, x2: x, y2: y - 20.0 * u, stroke: c.rule(tone, 1.6) });
         s.add_for(index, 1.0, Shape::Circle { x, y: y - 23.0 * u, r: 4.0 * u, fill: tone });
     } else if c.late(index) || c.chain.contains(&index) {
-        diamond(s, index, x, y, 7.0 * u, Fill::Color(tone), None);
+        mark(s, 7.0 * u, Fill::Color(tone), None);
     } else {
-        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.page), Some(c.rule(p.accent, 1.5)));
+        mark(s, 7.0 * u, Fill::Color(ground), Some(c.rule(p.accent, 1.5)));
     }
 }
 
@@ -557,21 +579,69 @@ fn labels(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
     let u = c.u;
     let size = 13.5;
     let mut order: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.shown(index)).collect();
-    order.sort_by(|&a, &b| (c.plan.items[a].on.is_none(), c.bar(a).0).partial_cmp(&(c.plan.items[b].on.is_none(), c.bar(b).0)).unwrap_or(std::cmp::Ordering::Equal));
+    let rank = |index: usize| (c.plan.items[index].on.is_none(), !c.plan.items[index].important, c.bar(index).0);
+    order.sort_by(|&a, &b| rank(a).partial_cmp(&rank(b)).unwrap_or(std::cmp::Ordering::Equal));
     for index in order {
         let item = &c.plan.items[index];
         let (x0, x1, y) = c.bar(index);
         let (text, places) = if item.milestone {
             let day = c.schedule.slots[index].planned.finish;
             let text = if item.on.is_some() || c.level == Level::Full { format!("{}  {}", item.name, day.strftime("%d %b")) } else { item.name.clone() };
-            (text, [(x0 + 12.0 * u, y + 5.0 * u, Anchor::Start), (x0 - 12.0 * u, y - 12.0 * u, Anchor::End), (x0 - 12.0 * u, y + 5.0 * u, Anchor::End), (x0 - 12.0 * u, y + 24.0 * u, Anchor::End), (x0 + 12.0 * u, y + 24.0 * u, Anchor::Start)])
+            let off = if item.important { 15.0 * u } else { 12.0 * u };
+            (text, [(x0 + off, y + 5.0 * u, Anchor::Start), (x0 - off, y - 12.0 * u, Anchor::End), (x0 - off, y + 5.0 * u, Anchor::End), (x0 - off, y + 24.0 * u, Anchor::End), (x0 + off, y + 24.0 * u, Anchor::Start)])
         } else {
             (item.name.clone(), [(x0, y - 13.0 * u, Anchor::Start), (x0, y + 24.0 * u, Anchor::Start), (x1 + 6.0 * u, y + 5.0 * u, Anchor::Start), (x1, y - 13.0 * u, Anchor::End), (x1, y + 24.0 * u, Anchor::End)])
         };
         if let Some((x, y, anchor, area)) = c.place(c.lanes[index], &text, size, &places, taken) {
             taken.push(area);
             s.add_for(index, 1.0, Shape::Text { x, y, text, size: size * u, color: c.ink(index), bold: c.selected == Some(index), anchor });
+            if let Some(note) = item.note.as_deref().filter(|_| c.band.is_some()) {
+                let start = [34.0, 24.0, 16.0].into_iter().map(|count| fit(note, 12.5 * u, count * 12.5 * u * ADVANCE)).find_map(|line| c.place(c.lanes[index], &line, 12.5, &[(x, y + 16.0 * u, anchor), (x, y - 15.0 * u, anchor)], taken).map(|placed| (line, placed)));
+                if let Some((line, (nx, ny, nanchor, narea))) = start {
+                    taken.push(narea);
+                    s.add(Shape::Text { x: nx, y: ny, text: line, size: 12.5 * u, color: c.p.dim, bold: false, anchor: nanchor });
+                }
+            }
         }
+    }
+}
+
+/// Notes at a place, shown in the notes mode (picture 47): a stroke at their day and the start of their
+/// text where it finds room.
+fn notes(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
+    let u = c.u;
+    for note in c.plan.notes.iter().filter(|_| c.band.is_some()) {
+        let Some(lane) = c.plan.lane(&note.lane).and_then(|lane| c.visible.iter().position(|&shown| shown == lane)) else { continue };
+        if !(c.g.start..=c.g.end).contains(&note.date) {
+            continue;
+        }
+        let (x, y) = (c.g.x(note.date) + c.g.px / 2.0, c.g.lane_y(lane) + c.g.bar);
+        s.add(Shape::Line { x1: x, y1: y - 9.0 * u, x2: x, y2: y + 9.0 * u, stroke: c.rule(c.p.dim, 1.4) });
+        taken.push([x - 2.0 * u, y - 10.0 * u, x + 4.0 * u, y + 10.0 * u]);
+        let start = [24.0, 18.0, 12.0, 8.0].into_iter().map(|count| fit(&note.text, 13.5 * u, count * 13.5 * u * ADVANCE)).find_map(|text| c.place(lane, &text, 13.5, &[(x + 8.0 * u, y + 5.0 * u, Anchor::Start)], taken).map(|placed| (text, placed)));
+        if let Some((text, (tx, ty, anchor, area))) = start {
+            taken.push(area);
+            s.add(Shape::Text { x: tx, y: ty, text, size: 13.5 * u, color: c.p.dim, bold: false, anchor });
+        }
+    }
+}
+
+/// The notes cursor (picture 43): its lane on a raised band, its day as a dashed line, and the day
+/// itself in brackets when no item is there.
+fn cursor(s: &mut Scene, c: &Chart, lane: usize, day: Date) {
+    let (p, u) = (c.p, c.u);
+    let Some(row) = c.visible.iter().position(|&shown| shown == lane) else { return };
+    s.add(Shape::Rect { x: c.g.x0, y: c.g.lane_y(row) + 2.0 * u, w: c.g.x1 - c.g.x0, h: c.g.lane_h(row) - 4.0 * u, radius: 0.0, fill: Fill::Color(p.raised), stroke: None });
+    if !(c.g.start..=c.g.end).contains(&day) {
+        return;
+    }
+    let (x0, y) = (c.g.x(day), c.g.lane_y(row) + c.g.bar);
+    let x = x0 + c.g.px / 2.0;
+    s.add(Shape::Line { x1: x, y1: c.g.top + 42.0 * u, x2: x, y2: c.g.bottom(), stroke: Stroke { color: p.muted, width: u, dash: Some((3.0 * u, 4.0 * u)) } });
+    let taken = (0..c.plan.items.len()).any(|index| c.shown(index) && c.lanes[index] == row && { let span = c.schedule.slots[index].planned; span.start <= day && day <= span.finish });
+    if !taken {
+        s.marks.push(Mark { shape: Shape::Rect { x: x0, y: y - 9.0 * u, w: c.g.px, h: 18.0 * u, radius: 0.0, fill: Fill::Color(p.bright), stroke: None }, opacity: 0.25, item: None });
+        corners(s, c, x0, x0 + c.g.px, y, 13.0 * u);
     }
 }
 

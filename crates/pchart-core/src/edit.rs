@@ -2,7 +2,7 @@ use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::Error;
-use crate::model::{Item, Plan};
+use crate::model::{Item, Note, Plan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,6 +30,11 @@ pub enum Edit {
     Done { item: String, done: bool },
     Buffer { item: String, buffer: bool },
     Who { item: String, who: Option<String> },
+    /// The note of an item; none or an empty one removes it.
+    Note { item: String, note: Option<String> },
+    Important { item: String, important: bool },
+    /// The note at a date in a lane; none or an empty one removes it.
+    NoteAt { lane: String, date: Date, note: Option<String> },
 }
 
 impl Edit {
@@ -104,10 +109,33 @@ impl Edit {
             Edit::Done { item, done } => next.items[find(item)?].done = *done,
             Edit::Buffer { item, buffer } => next.items[find(item)?].buffer = *buffer,
             Edit::Who { item, who } => next.items[find(item)?].who = who.clone(),
+            Edit::Note { item, note } => next.items[find(item)?].note = written(note),
+            Edit::Important { item, important } => {
+                let target = &mut next.items[find(item)?];
+                if !target.milestone {
+                    return Err(Error::Plan(format!("\"{item}\" is not a milestone; only milestones are marked important")));
+                }
+                target.important = *important;
+            }
+            Edit::NoteAt { lane, date, note } => {
+                if plan.lane(lane).is_none() {
+                    return Err(Error::Plan(format!("there is no lane \"{lane}\"")));
+                }
+                next.notes.retain(|other| (&other.lane, other.date) != (lane, *date));
+                if let Some(text) = written(note) {
+                    next.notes.push(Note { lane: lane.clone(), date: *date, text });
+                    next.notes.sort_by(|a, b| (a.date, &a.lane).cmp(&(b.date, &b.lane)));
+                }
+            }
         }
         next.check()?;
         Ok(next)
     }
+}
+
+/// A note as written, without the spaces around it; None when nothing is left.
+fn written(note: &Option<String>) -> Option<String> {
+    note.as_deref().map(str::trim).filter(|text| !text.is_empty()).map(String::from)
 }
 
 /// Applies edits in order; all of them or none.
@@ -172,6 +200,26 @@ mod tests {
         let (index, err) = apply_all(&sample(), &list).unwrap_err();
         assert_eq!(index, 1);
         assert_eq!(err.to_string(), "\"data-model\" cannot be removed: api, sdk-integration wait on it");
+    }
+
+    #[test]
+    fn notes_and_important_milestones() {
+        let list = edits(
+            r#"[{"op": "note", "item": "design-sign-off", "note": "  Client signs the design in a workshop in New York.  "},
+                {"op": "important", "item": "design-sign-off", "important": true},
+                {"op": "note_at", "lane": "backend", "date": "2027-01-21", "note": "Server move"},
+                {"op": "note_at", "lane": "backend", "date": "2027-01-21", "note": "Server move, no deploys"},
+                {"op": "note_at", "lane": "client", "date": "2027-01-13", "note": ""}]"#,
+        );
+        let plan = apply_all(&sample(), &list).unwrap();
+        let sign_off = &plan.items[plan.item("design-sign-off").unwrap()];
+        assert_eq!((sign_off.note.as_deref(), sign_off.important), (Some("Client signs the design in a workshop in New York."), true));
+        assert_eq!(plan.notes, [Note { lane: "backend".into(), date: jiff::civil::date(2027, 1, 21), text: "Server move, no deploys".into() }]);
+        let plan = apply_all(&plan, &edits(r#"[{"op": "note", "item": "design-sign-off", "note": null}, {"op": "note_at", "lane": "backend", "date": "2027-01-21", "note": null}]"#)).unwrap();
+        assert!(plan.items[plan.item("design-sign-off").unwrap()].note.is_none() && plan.notes.is_empty());
+        let err = Edit::Important { item: "frontend".into(), important: true }.apply(&sample()).unwrap_err();
+        assert_eq!(err.to_string(), "\"frontend\" is not a milestone; only milestones are marked important");
+        assert!(Edit::NoteAt { lane: "nowhere".into(), date: jiff::civil::date(2027, 1, 4), note: Some("x".into()) }.apply(&sample()).is_err());
     }
 
     #[test]

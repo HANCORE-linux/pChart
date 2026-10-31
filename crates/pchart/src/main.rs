@@ -135,7 +135,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         return Ok(0);
     }
     let known: &[&str] = match args.command {
-        "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who"],
+        "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who", "--note"],
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
         "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--audience"],
         "bench" => &["--frames", "--out"],
@@ -296,6 +296,12 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
             }
             if args.flag("--buffer") || args.flag("--no-buffer") {
                 list.push(Edit::Buffer { item: item.clone(), buffer: args.flag("--buffer") });
+            }
+            if args.flag("--important") || args.flag("--not-important") {
+                list.push(Edit::Important { item: item.clone(), important: args.flag("--important") });
+            }
+            if let Some(note) = args.option("--note") {
+                list.push(Edit::Note { item: item.clone(), note: Some(note.into()) });
             }
             if let Some(name) = args.option("--name") {
                 list.push(Edit::Rename { item: item.clone(), name: name.into() });
@@ -481,7 +487,7 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
                 "full" => Level::Full,
                 other => return Err(Failure::usage(format!("\"{other}\" is not a detail level; use overview, standard or full"), args)),
             };
-            let mut settings = Settings { width: size.map_or(1220.0, |(width, _)| width), height: 0.0, unit: 1.0, today: ctx.today, selected: None, level, palette: Palette::labra() };
+            let mut settings = Settings { width: size.map_or(1220.0, |(width, _)| width), height: 0.0, unit: 1.0, today: ctx.today, selected: None, level, palette: Palette::labra(), cursor: None };
             settings.height = size.map_or_else(|| pchart_draw::natural_height(&ctx.plan, &ctx.schedule, &settings), |(_, height)| height);
             pchart_draw::roadmap(&ctx.plan, &ctx.schedule, &ctx.calendars, &settings)
         }
@@ -508,7 +514,7 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
     if let Some(path) = args.option("--md") {
         let stem = ctx.path.file_stem().map_or("plan".into(), |stem| stem.to_string_lossy());
         let picture = format!("{stem}-milestones.svg");
-        write(&Path::new(path).with_file_name(&picture), pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today).svg().as_bytes())?;
+        write(&Path::new(path).with_file_name(&picture), pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today, audience).svg().as_bytes())?;
         let analysis = analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today);
         let source = ctx.path.file_name().map_or("plan".into(), |name| name.to_string_lossy());
         write(Path::new(path), pchart_draw::markdown(&ctx.plan, &ctx.schedule, &analysis, &source, ctx.today, &picture, audience).as_bytes())?;

@@ -17,6 +17,17 @@ pub struct Plan {
     pub phases: Vec<Phase>,
     pub lanes: Vec<Lane>,
     pub items: Vec<Item>,
+    #[serde(default)]
+    pub notes: Vec<Note>,
+}
+
+/// A note at a date in a lane; it stays there when the plan moves (picture 43).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Note {
+    pub lane: String,
+    #[serde(deserialize_with = "day")]
+    pub date: Date,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -60,6 +71,9 @@ pub struct Item {
     pub no_later_than: Option<Date>,
     #[serde(default)]
     pub done: bool,
+    /// A milestone drawn as a star and never left out (pictures 39 and 41).
+    #[serde(default)]
+    pub important: bool,
     /// The person or team doing the item; two items of the same `who` must not overlap.
     #[serde(default)]
     pub who: Option<String>,
@@ -121,11 +135,17 @@ impl Plan {
             if item.done {
                 out.push_str("done = true\n");
             }
+            if item.important {
+                out.push_str("important = true\n");
+            }
             for (key, value) in [("who", &item.who), ("note", &item.note)] {
                 if let Some(value) = value {
                     let _ = writeln!(out, "{key} = {}", quote(value));
                 }
             }
+        }
+        for note in &self.notes {
+            let _ = write!(out, "\n[[notes]]\nlane = {}\ndate = {}\ntext = {}\n", quote(&note.lane), note.date, quote(&note.text));
         }
         out
     }
@@ -158,6 +178,12 @@ impl Plan {
             if item.milestone && item.buffer {
                 return Err(Error::Plan(format!("the milestone \"{}\" cannot be a buffer; a buffer takes time", item.id)));
             }
+            if item.important && !item.milestone {
+                return Err(Error::Plan(format!("\"{}\" is not a milestone; only milestones are marked important", item.id)));
+            }
+        }
+        if let Some(note) = self.notes.iter().find(|note| self.lane(&note.lane).is_none()) {
+            return Err(Error::Plan(format!("the note on {} is in the unknown lane \"{}\"", note.date, note.lane)));
         }
         for phase in &self.phases {
             if self.item(&phase.until).is_none() {
@@ -189,6 +215,10 @@ fn date<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Date>, D::E
             _ => Err(not_a_date(value.to_string())),
         },
     }
+}
+
+fn day<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Date, D::Error> {
+    date(deserializer)?.ok_or_else(|| serde::de::Error::custom("a note needs a date"))
 }
 
 fn workdays<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
@@ -253,6 +283,9 @@ mod tests {
         changed.items[1].no_later_than = Some(jiff::civil::date(2026, 12, 1));
         changed.start = Some(jiff::civil::date(2026, 11, 2));
         changed.phases[0].short = Some("Reqs".into());
+        changed.items[3].important = true;
+        changed.items[3].note = Some("Client signs the design in a workshop in New York.".into());
+        changed.notes.push(Note { lane: "backend".into(), date: jiff::civil::date(2027, 1, 21), text: "Server move".into() });
         assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);
     }
 

@@ -15,7 +15,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "holidays", usage: "pchart holidays PLAN LANE", about: "The days off of a lane while the plan runs." },
     Command {
         name: "set",
-        usage: "pchart set PLAN ITEM [--duration DAYS] [--on DATE | --no-earlier-than DATE | --no-later-than DATE | --calculated] [--done | --not-done] [--buffer | --no-buffer] [--name NAME] [--lane LANE] [--who WHO]",
+        usage: "pchart set PLAN ITEM [--duration DAYS] [--on DATE | --no-earlier-than DATE | --no-later-than DATE | --calculated] [--done | --not-done] [--buffer | --no-buffer] [--important | --not-important] [--name NAME] [--lane LANE] [--who WHO] [--note TEXT]",
         about: "Change an item.",
     },
     Command { name: "add", usage: "pchart add PLAN ID --lane LANE --name NAME (--duration DAYS [--buffer] | --milestone) [--after ID,ID] [--on DATE] [--who WHO]", about: "Add an item." },
@@ -54,9 +54,12 @@ pub const EDITS: &[(&str, &str)] = &[
     ("done", r#"{"op": "done", "item": ID, "done": true}"#),
     ("buffer", r#"{"op": "buffer", "item": ID, "buffer": true}"#),
     ("who", r#"{"op": "who", "item": ID, "who": NAME | null}"#),
+    ("note", r#"{"op": "note", "item": ID, "note": TEXT | null}"#),
+    ("important", r#"{"op": "important", "item": MILESTONE, "important": true}"#),
+    ("note_at", r#"{"op": "note_at", "lane": LANE, "date": "YYYY-MM-DD", "note": TEXT | null}"#),
 ];
 
-const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer"];
+const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important"];
 
 pub struct Args {
     pub command: &'static str,

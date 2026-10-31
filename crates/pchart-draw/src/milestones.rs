@@ -1,13 +1,14 @@
 use jiff::civil::Date;
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{Axis, FIXED, GRAY, HEIGHT, INK, LATE, MID, Page, SHADES, X0, X1};
+use crate::page::{Axis, FIXED, GRAY, HEIGHT, INK, LATE, MID, Page, SHADES, X0, X1, wrap};
 use crate::scene::{Anchor, Color, Fill, Scene, Shape};
 use crate::style::{phase_label, sans_width};
+use crate::views::Audience;
 
 /// The milestone chart for export: phases on a time line and every milestone with its date, on a
 /// light page for slides and print.
-pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
+pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date, audience: Audience) -> Scene {
     let mut page = Page::new(plan, schedule, today, "Milestone chart", HEIGHT);
     let axis = Axis::new(schedule, today, 13, X0, X1);
     let ty = 190.0;
@@ -34,18 +35,25 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         let late = slot.spare < 0;
         let target = Some(index) == schedule.target;
         let (r, name_size, color) = if target { (13.0, 19.0, if late { LATE } else { FIXED }) } else { (10.0, 17.0, if late { LATE } else { INK }) };
-        page.milestone(xm, my, r, late, false, false, Some(index));
+        page.milestone(xm, my, r, late, false, false, item.important, Some(index));
         let date = format!("{}{}", slot.planned.finish.strftime("%d %b %Y"), if item.on.is_some() { " · fixed" } else { "" });
         let w = sans_width(&item.name, name_size, true).max(sans_width(&date, 15.0, false));
         let cx = if target { xm + 4.0 } else { xm };
-        let below = [cx - w / 2.0, my + 40.0 - name_size, cx + w / 2.0, my + 66.0];
-        let above = [cx - w / 2.0, my - 46.0 - name_size, cx + w / 2.0, my - 20.0];
+        let note = item.note.as_deref().filter(|_| audience.notes()).map_or_else(Vec::new, |note| wrap(note, 13.5, false, w.max(200.0)));
+        let w = note.iter().map(|line| sans_width(line, 13.5, false)).fold(w, f32::max);
+        let extra = 18.0 * note.len() as f32 + if note.is_empty() { 0.0 } else { 4.0 };
+        let below = [cx - w / 2.0, my + 40.0 - name_size, cx + w / 2.0, my + 66.0 + extra];
+        let above = [cx - w / 2.0, my - 46.0 - name_size - extra, cx + w / 2.0, my - 20.0];
         let fits = |area: &[f32; 4]| area[0] >= 8.0 && area[2] <= page.scene.width - 8.0 && !taken.iter().any(|other| area[0] < other[2] && other[0] < area[2] && area[1] < other[3] && other[1] < area[3]);
         let Some((area, name_y)) = [(below, my + 40.0), (above, my - 46.0)].into_iter().find(|(area, _)| fits(area)) else { continue };
         let name_y = if target { name_y + 6.0 } else { name_y };
         taken.push([area[0] - 6.0, area[1], area[2] + 6.0, area[3]]);
         page.text(cx, name_y, &item.name, name_size, color, true, Anchor::Middle, Some(index));
         page.text(cx, name_y + 22.0, &date, 15.0, if target || late { color } else { GRAY }, false, Anchor::Middle, Some(index));
+        let first = if area[1] < my { name_y - name_size - 4.0 - 18.0 * (note.len() as f32 - 1.0) } else { name_y + 46.0 };
+        for (line, text) in note.iter().enumerate() {
+            page.text(cx, first + 18.0 * line as f32, text, 13.5, GRAY, false, Anchor::Middle, Some(index));
+        }
     }
     page.finish()
 }

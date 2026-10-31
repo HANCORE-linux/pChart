@@ -165,9 +165,9 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], au
                 if !item.milestone {
                     page.bar(x0 + 0.5, x1 - 0.5, yc, 10.0, if late { LATE } else if on_chain { INK } else { SOFT }, 2.0, Some(index));
                 } else if fixed {
-                    page.milestone(x0, yc, 7.0, late, false, true, Some(index));
+                    page.milestone(x0, yc, 7.0, late, false, true, item.important, Some(index));
                 } else {
-                    page.milestone(x0, yc, 6.0, late, !on_chain && !late, false, Some(index));
+                    page.milestone(x0, yc, 6.0, late, !on_chain && !late, false, item.important, Some(index));
                 }
             }
         }

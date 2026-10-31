@@ -63,7 +63,12 @@ pub fn phase_plan(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         }
     };
     for &index in &gates {
-        page.diamond(axis.milestone(plan, schedule, index), yc, 11.0, if schedule.slots[index].spare < 0 { LATE } else { FIXED }, Some((PAPER, 2.5)), Some(index));
+        let (x, color) = (axis.milestone(plan, schedule, index), if schedule.slots[index].spare < 0 { LATE } else { FIXED });
+        if plan.items[index].important {
+            page.star(x, yc, 13.0, color, Some((PAPER, 2.5)), Some(index));
+        } else {
+            page.diamond(x, yc, 11.0, color, Some((PAPER, 2.5)), Some(index));
+        }
     }
     let bounds = [X0, top + h, X1, HEIGHT - 70.0];
     for &index in &gates {

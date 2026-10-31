@@ -21,7 +21,7 @@ fn names(plan: &Plan, calendars: &[Calendar], level: Level, unit: f32, size: (f3
     let today = date(2026, 10, 29);
     let schedule = schedule(plan, calendars, today).unwrap();
     let (width, height) = size;
-    let mut settings = Settings { width: width * unit, height: 0.0, unit, today, selected: Some(0), level, palette: Palette::labra() };
+    let mut settings = Settings { width: width * unit, height: 0.0, unit, today, selected: Some(0), level, palette: Palette::labra(), cursor: None };
     settings.height = height.unwrap_or_else(|| natural_height(plan, &schedule, &settings));
     roadmap(plan, &schedule, calendars, &settings)
         .marks
@@ -73,7 +73,7 @@ fn a_small_picture_shows_less_detail_and_keeps_the_fixed_target_in_view() {
     let schedule = schedule(&plan, &calendars, today).unwrap();
     let frontend = plan.item("frontend").unwrap();
     let client = plan.lane("client").unwrap();
-    let at = |height: f32| shown(&plan, &schedule, &Settings { width: 1220.0, height, unit: 1.0, today, selected: Some(frontend), level: Level::Full, palette: Palette::labra() });
+    let at = |height: f32| shown(&plan, &schedule, &Settings { width: 1220.0, height, unit: 1.0, today, selected: Some(frontend), level: Level::Full, palette: Palette::labra(), cursor: None });
     assert_eq!(at(756.0), (Level::Full, (0..plan.lanes.len()).collect()));
     assert_eq!(at(560.0), (Level::Standard, (0..plan.lanes.len()).collect()));
     let (level, lanes) = at(330.0);
@@ -91,7 +91,7 @@ fn names_in_the_roadmap_around_a_check_stay_apart_and_inside() {
         for (what, items) in around {
             let cut = Cut::around(&plan, &schedule, &items).unwrap();
             for (width, height) in [(658.0, 416.0), (900.0, 300.0)] {
-                let settings = Settings { width, height, unit: 0.76, today, selected: None, level: Level::Full, palette: Palette::labra() };
+                let settings = Settings { width, height, unit: 0.76, today, selected: None, level: Level::Full, palette: Palette::labra(), cursor: None };
                 let names: Vec<(String, [f32; 4])> = part(&plan, &schedule, &calendars, &settings, &cut)
                     .marks
                     .into_iter()
