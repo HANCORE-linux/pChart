@@ -20,6 +20,8 @@ pub struct App {
     pub schedule: Schedule,
     pub analysis: Analysis,
     pub screen: Screen,
+    /// The statement chosen in "What is burning next".
+    pub statement: usize,
     pub selected: usize,
     /// The detail level the user picked; a small picture may show less.
     pub level: Level,
@@ -32,7 +34,7 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Roadmap, selected, level: Level::Standard, cell, message: None, palette: Palette::labra() }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, selected, level: Level::Standard, cell, message: None, palette: Palette::labra() }
     }
 
     /// The roadmap picture for `rect`.
@@ -72,6 +74,27 @@ impl App {
         let count = order.len() as isize;
         let position = order.iter().position(|&index| index == self.selected).unwrap_or(0) as isize;
         self.selected = order[(position + step).rem_euclid(count) as usize];
+    }
+
+    /// The next or previous statement in "What is burning next".
+    pub fn choose(&mut self, step: isize) {
+        let count = self.analysis.next.len() as isize;
+        if count > 0 {
+            self.statement = (self.statement as isize + step).rem_euclid(count) as usize;
+        }
+    }
+
+    /// The roadmap, with the item of the chosen statement selected.
+    pub fn show_in_roadmap(&mut self) {
+        use pchart_core::analysis::Next;
+        let item = self.analysis.next.get(self.statement).and_then(|next| match next {
+            Next::StartBy { item, .. } | Next::Due { item, .. } => Some(*item),
+            Next::Check(index) => self.analysis.checks[*index].items().first().copied(),
+        });
+        if let Some(item) = item {
+            self.selected = item;
+        }
+        self.screen = Screen::Roadmap;
     }
 
     /// Overview, Standard, Full, and round again.

@@ -8,6 +8,7 @@ pub mod page;
 pub mod phases;
 pub mod roadmap;
 pub mod scene;
+pub mod situation;
 pub mod style;
 pub mod swimlanes;
 

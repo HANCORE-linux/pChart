@@ -1,5 +1,6 @@
 mod app;
 mod pictures;
+mod situation;
 mod sixel;
 mod ui;
 
@@ -15,7 +16,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui_image::picker::cap_parser::QueryStdioOptions;
 use ratatui_image::picker::{Picker, ProtocolType};
 
-use crate::app::App;
+use crate::app::{App, Screen};
 use crate::pictures::{Painter, Pictures};
 
 fn picker() -> io::Result<Picker> {
@@ -58,12 +59,18 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         let read = event::read();
         note(format!("event {read:?}"));
         match read {
-            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break Ok(()),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
-                KeyCode::Up => app.select(-1),
-                KeyCode::Down => app.select(1),
-                KeyCode::Char('d') => app.detail(),
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match (app.screen, key.code) {
+                (_, KeyCode::Char('q')) => break Ok(()),
+                (_, KeyCode::Char('c')) if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                (_, KeyCode::Char('1')) => app.screen = Screen::Situation,
+                (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
+                (Screen::Situation, KeyCode::Up) => app.choose(-1),
+                (Screen::Situation, KeyCode::Down) => app.choose(1),
+                (Screen::Situation, KeyCode::Enter) => app.show_in_roadmap(),
+                (_, KeyCode::Esc) => app.screen = Screen::Situation,
+                (_, KeyCode::Up) => app.select(-1),
+                (_, KeyCode::Down) => app.select(1),
+                (_, KeyCode::Char('d')) => app.detail(),
                 _ => {}
             },
             Ok(_) => {}
@@ -82,6 +89,7 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
     let mut painter = Painter::new(picker, &pchart_draw::Palette::labra());
     let mut app = App::new(plan, calendars, today, "bench".into(), schedule, painter.cell());
     app.level = pchart_draw::Level::Full;
+    app.screen = Screen::Roadmap;
     let protocol_name = painter.protocol_name();
     let id = std::process::id() << 8;
     let (bytes, input) = mpsc::channel::<u8>();

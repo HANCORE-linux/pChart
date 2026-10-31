@@ -23,16 +23,16 @@ fn color(ink: Ink) -> Color {
     Color::Rgb(ink.0, ink.1, ink.2)
 }
 
-struct Inks {
-    ink: Style,
-    bright: Style,
-    dim: Style,
-    muted: Style,
-    rule: Style,
-    warn: Style,
-    alert: Style,
-    accent: Color,
-    raised: Color,
+pub(crate) struct Inks {
+    pub ink: Style,
+    pub bright: Style,
+    pub dim: Style,
+    pub muted: Style,
+    pub rule: Style,
+    pub warn: Style,
+    pub alert: Style,
+    pub accent: Color,
+    pub raised: Color,
 }
 
 impl Inks {
@@ -43,15 +43,15 @@ impl Inks {
     }
 }
 
-fn bold(style: Style) -> Style {
+pub(crate) fn bold(style: Style) -> Style {
     style.add_modifier(Modifier::BOLD)
 }
 
-fn width(spans: &[Span]) -> u16 {
+pub(crate) fn width(spans: &[Span]) -> u16 {
     spans.iter().map(|span| span.content.chars().count() as u16).sum()
 }
 
-fn put(frame: &mut Frame, x: u16, y: u16, room: u16, spans: Vec<Span<'static>>) {
+pub(crate) fn put(frame: &mut Frame, x: u16, y: u16, room: u16, spans: Vec<Span<'static>>) {
     let area = frame.area();
     if y >= area.height || x >= area.width {
         return;
@@ -61,7 +61,7 @@ fn put(frame: &mut Frame, x: u16, y: u16, room: u16, spans: Vec<Span<'static>>) 
 }
 
 /// `text` cut to `room` characters, ending in "…" when it was cut.
-fn cut(text: &str, room: usize) -> String {
+pub(crate) fn cut(text: &str, room: usize) -> String {
     if text.chars().count() <= room {
         return text.to_string();
     }
@@ -69,7 +69,7 @@ fn cut(text: &str, room: usize) -> String {
 }
 
 /// A panel: a thin frame with its title; the panel with the focus gets brighter corners.
-fn panel(frame: &mut Frame, inks: &Inks, rect: Rect, title: &str, focus: bool) {
+pub(crate) fn panel(frame: &mut Frame, inks: &Inks, rect: Rect, title: &str, focus: bool) {
     if rect.width < 4 || rect.height < 3 {
         return;
     }
@@ -96,16 +96,18 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     }
     let mut placements = Vec::new();
     title_bar(app, frame, &inks, area);
-    let top = if area.width >= 120 && area.height >= 44 {
-        tiles(app, frame, &inks, area, &mut placements);
-        1 + TILES
-    } else {
-        summary(app, frame, &inks, area);
-        2
-    };
-    let body = Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top };
     match app.screen {
-        Screen::Situation | Screen::Roadmap | Screen::Checks | Screen::Export => roadmap(app, frame, &inks, body, &mut placements),
+        Screen::Situation => crate::situation::draw(app, frame, &inks, area, &mut placements),
+        Screen::Roadmap | Screen::Checks | Screen::Export => {
+            let top = if area.width >= 120 && area.height >= 44 {
+                tiles(app, frame, &inks, area, &mut placements);
+                1 + TILES
+            } else {
+                summary(app, frame, &inks, area);
+                2
+            };
+            roadmap(app, frame, &inks, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }, &mut placements);
+        }
     }
     keys(app, frame, &inks, area);
     placements
@@ -164,7 +166,7 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
 }
 
 /// The verdict word and its colour: neutral for holds, yellow for tight, red for does not hold.
-fn state(app: &App, inks: &Inks) -> Option<(&'static str, Style)> {
+pub(crate) fn state(app: &App, inks: &Inks) -> Option<(&'static str, Style)> {
     app.analysis.verdict.as_ref().map(|verdict| match verdict.state {
         State::Holds => ("holds", inks.bright),
         State::Tight => ("tight", inks.warn),
@@ -298,9 +300,12 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
 
 fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
-    let hints = [("↑↓", item), ("d", "detail"), ("q", "quit")];
+    let hints: &[(&str, &str)] = match app.screen {
+        Screen::Situation => &[("↑↓", "statement"), ("Enter", "show in roadmap"), ("2", "roadmap"), ("q", "quit")],
+        _ => &[("↑↓", item), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+    };
     let mut spans = Vec::new();
-    for (key, label) in hints {
+    for &(key, label) in hints {
         let next = [Span::styled(key, bold(inks.ink)), Span::styled(format!(" {label}"), inks.dim), Span::raw("    ")];
         if width(&spans) + width(&next) > area.width.saturating_sub(1) {
             break;
@@ -492,7 +497,7 @@ fn chain(app: &App, inks: &Inks, room: u16) -> Vec<Span<'static>> {
     spans(&keep)
 }
 
-fn lane_label(app: &App, index: usize) -> String {
+pub(crate) fn lane_label(app: &App, index: usize) -> String {
     let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[index].lane).unwrap_or(0)];
     [Some(lane.name.as_str()), lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ")
 }
@@ -519,7 +524,7 @@ fn selection_bar(app: &App, frame: &mut Frame, inks: &Inks, x: u16, row: u16, ro
     put(frame, x, row + 1, room, line);
 }
 
-fn day(date: Date) -> String {
+pub(crate) fn day(date: Date) -> String {
     date.strftime("%a %d %b").to_string()
 }
 
@@ -640,6 +645,15 @@ fn checks_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect) {
     }
 }
 
+/// A name inside a sentence: "Launch" becomes "launch", "SAP cutover" stays as it is.
+pub(crate) fn common(name: &str) -> String {
+    let mut chars = name.chars();
+    match (chars.next(), chars.next()) {
+        (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first.to_lowercase().chain(name.chars().skip(1)).collect(),
+        _ => name.to_string(),
+    }
+}
+
 /// A check as picture 8 says it: a general title, then what it is about.
 fn check_words(app: &App, check: &Check) -> (String, Vec<String>) {
     let name = |index: usize| app.plan.items[index].name.clone();
@@ -647,11 +661,7 @@ fn check_words(app: &App, check: &Check) -> (String, Vec<String>) {
     match *check {
         Check::NoBuffer { before, target } => {
             let target_name = name(target);
-            let mut chars = target_name.chars();
-            let lower = match (chars.next(), chars.next()) {
-                (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first.to_lowercase().chain(target_name.chars().skip(1)).collect(),
-                _ => target_name.clone(),
-            };
+            let lower = common(&target_name);
             ("No buffer before a fixed date".into(), vec![format!("{} {} → {} {}", name(before), date(before), target_name, date(target)), format!("Add a buffer block before {lower}?")])
         }
         _ => {
@@ -687,7 +697,8 @@ mod tests {
 
     #[test]
     fn small_windows_give_way_in_the_approved_order() {
-        let app = app();
+        let mut app = app();
+        app.screen = Screen::Roadmap;
         let (rows, placements) = screen(&app, 242, 61);
         assert!(rows[2].contains(":: TARGET · FIXED") && rows.iter().any(|row| row.contains(":: SELECTION")) && rows.iter().any(|row| row.contains(":: CHECKS · 1 WARNING")));
         assert!(rows.iter().any(|row| row.contains("decides the date  Requirements → UX concept")));
@@ -700,5 +711,34 @@ mod tests {
         assert!(!rows.iter().any(|row| row.contains("decides the date  Requirements")));
         let (rows, placements) = screen(&app, 50, 14);
         assert!(placements.is_empty() && rows.iter().any(|row| row.contains("Terminal size too small:")) && rows.iter().any(|row| row.contains("Width = 60 Height = 16")));
+    }
+
+    #[test]
+    fn enter_on_a_statement_shows_its_item_in_the_roadmap() {
+        let mut app = app();
+        app.choose(1);
+        app.show_in_roadmap();
+        assert_eq!((app.screen, app.plan.items[app.selected].id.as_str()), (Screen::Roadmap, "acceptance"));
+        app.screen = Screen::Situation;
+        app.choose(1);
+        app.show_in_roadmap();
+        assert_eq!(app.plan.items[app.selected].id, "requirements");
+    }
+
+    #[test]
+    fn the_situation_answers_the_three_questions_at_every_size() {
+        let app = app();
+        let (rows, _) = screen(&app, 170, 50);
+        let text = rows.join("\n");
+        assert!(text.contains("12 working days to spare, with Requirements starting by Mon 16 Nov."), "{text}");
+        assert!(text.contains("Frontend in Bangalore waits on the client in New York") && text.contains("in 7 weeks"), "{text}");
+        assert!(text.contains("Start Requirements by Mon 16 Nov") && text.contains("No buffer before the fixed launch"), "{text}");
+        assert!(text.contains("Everything else has time to spare:  Data model 11 wd") && text.contains("NEXT 6 WEEKS"), "{text}");
+        let (rows, _) = screen(&app, 120, 36);
+        let text = rows.join("\n");
+        assert!(text.contains("THIS CHAIN DECIDES THE DATE") && text.contains("Design sign-off Fri 18 Dec") && text.contains("+ 6 more with time to spare"), "{text}");
+        let (rows, _) = screen(&app, 80, 24);
+        let text = rows.join("\n");
+        assert!(!text.contains("THIS CHAIN DECIDES THE DATE") && text.contains("WHO IS WAITING ON WHOM") && text.contains("more on the chain"), "{text}");
     }
 }
