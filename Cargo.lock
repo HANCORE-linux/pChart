@@ -1280,6 +1280,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "resvg",
+ "serde_json",
 ]
 
 [[package]]

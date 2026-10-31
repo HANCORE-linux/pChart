@@ -139,6 +139,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
         "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--audience"],
         "bench" => &["--frames", "--out"],
+        "open" => &["--theme"],
         _ => &[],
     };
     if let Some(option) = args.unknown_options(known) {
@@ -244,7 +245,8 @@ fn run(args: &Args) -> Result<u8, Failure> {
             Ok(0)
         }
         _ => {
-            pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path).map_err(|err| Failure::file(err.to_string()))?;
+            let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
+            pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme).map_err(|err| Failure::file(err.to_string()))?;
             Ok(0)
         }
     }

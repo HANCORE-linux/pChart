@@ -5,6 +5,7 @@ mod pictures;
 mod question;
 mod situation;
 mod sixel;
+pub mod theme;
 mod ui;
 
 use std::fmt::Write as _;
@@ -21,6 +22,7 @@ use ratatui_image::picker::{Picker, ProtocolType};
 
 use crate::app::{App, Screen};
 use crate::pictures::{Painter, Pictures};
+pub use crate::theme::Theme;
 
 fn picker() -> io::Result<Picker> {
     let picker = Picker::from_query_stdio_with_options(QueryStdioOptions { kitty_compression: true, ..QueryStdioOptions::default() }).map_err(|err| io::Error::other(err.to_string()))?;
@@ -30,11 +32,12 @@ fn picker() -> io::Result<Picker> {
     Ok(picker)
 }
 
-pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io::Result<()> {
+pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut theme: Theme) -> io::Result<()> {
     let picker = picker()?;
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
-    let mut pictures = Pictures::start(Painter::new(picker, &pchart_draw::Palette::labra()));
+    let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
     let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
+    (app.palette, app.ground) = (theme.palette, theme.ground);
     let (written, results) = mpsc::channel();
     let (save, saves) = mpsc::channel::<Plan>();
     let (failed, failures) = mpsc::channel::<String>();
@@ -61,6 +64,11 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         }
     };
     let result = loop {
+        if theme.refresh(Instant::now()) {
+            app.palette = theme.palette;
+            pictures.set_palette(theme.palette);
+            note("theme changed".into());
+        }
         if pictures.receive() {
             note("pictures done".into());
         }
@@ -85,7 +93,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         }) {
             break Err(err);
         }
-        match event::poll(if waiting || app.export.busy { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
+        let idle = if theme.live() { Duration::from_secs(1) } else { Duration::from_secs(60) };
+        match event::poll(if waiting || app.export.busy { Duration::from_millis(8) } else { idle }) {
             Ok(false) => continue,
             Ok(true) => {}
             Err(err) => break Err(err),

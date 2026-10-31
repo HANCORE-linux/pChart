@@ -81,6 +81,8 @@ pub struct App {
     pub cell: (u16, u16),
     pub message: Option<String>,
     pub palette: Palette,
+    /// The theme's page is painted under everything, as a theme named with --theme needs.
+    pub ground: bool,
     /// The plans before each change, newest last, with what the change was; `u` goes back one.
     pub history: Vec<(Plan, String)>,
     /// The plan changed and is still to be written.
@@ -95,7 +97,7 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), history: Vec::new(), unsaved: false, question: None, before: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, before: None }
     }
 
     /// The roadmap picture for `rect`.

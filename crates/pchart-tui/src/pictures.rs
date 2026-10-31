@@ -29,13 +29,21 @@ pub struct Cost {
 pub struct Painter {
     picker: Picker,
     output: Output,
+    palette: Palette,
     sixel: Encoder,
     paper: Encoder,
 }
 
 impl Painter {
     pub fn new(picker: Picker, palette: &Palette) -> Self {
-        Painter { picker, output: Output::default(), sixel: Encoder::new(palette), paper: Encoder::paper(palette) }
+        Painter { picker, output: Output::default(), palette: *palette, sixel: Encoder::new(palette), paper: Encoder::paper(palette) }
+    }
+
+    /// The sixel colours of another theme.
+    pub fn set_palette(&mut self, palette: &Palette) {
+        if *palette != self.palette {
+            (self.palette, self.sixel, self.paper) = (*palette, Encoder::new(palette), Encoder::paper(palette));
+        }
     }
 
     pub fn cell(&self) -> (u16, u16) {
@@ -112,6 +120,7 @@ struct Job {
     id: u32,
     svg: String,
     paper: bool,
+    palette: Palette,
 }
 
 struct Done {
@@ -131,24 +140,31 @@ pub struct Pictures {
     ids: HashMap<Rect, u32>,
     free: Vec<u32>,
     next: u32,
+    palette: Palette,
     jobs: Sender<Job>,
     done: Receiver<Done>,
 }
 
 impl Pictures {
     pub fn start(mut painter: Painter) -> Self {
-        let cell = painter.cell();
+        let (cell, palette) = (painter.cell(), painter.palette);
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
         thread::spawn(move || {
             for job in inbox {
+                painter.set_palette(&job.palette);
                 let protocol = painter.paint(&job.svg, job.rect, job.id, job.paper).map(|(protocol, _)| protocol);
                 if outbox.send(Done { rect: job.rect, key: job.key, protocol }).is_err() {
                     return;
                 }
             }
         });
-        Pictures { cell, slots: HashMap::new(), pending: HashMap::new(), waiting: HashMap::new(), ids: HashMap::new(), free: Vec::new(), next: std::process::id() << 8, jobs, done }
+        Pictures { cell, slots: HashMap::new(), pending: HashMap::new(), waiting: HashMap::new(), ids: HashMap::new(), free: Vec::new(), next: std::process::id() << 8, palette, jobs, done }
+    }
+
+    /// Paints the pictures still to come for another theme.
+    pub fn set_palette(&mut self, palette: Palette) {
+        self.palette = palette;
     }
 
     pub fn cell(&self) -> (u16, u16) {
@@ -181,7 +197,7 @@ impl Pictures {
                 self.waiting.remove(&placement.rect);
                 continue;
             }
-            let job = Job { rect: placement.rect, key, id: self.id(placement.rect), svg: placement.svg, paper: placement.paper };
+            let job = Job { rect: placement.rect, key, id: self.id(placement.rect), svg: placement.svg, paper: placement.paper, palette: self.palette };
             if self.pending.contains_key(&placement.rect) {
                 self.waiting.insert(placement.rect, job);
             } else {

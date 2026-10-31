@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::scene::Color;
 
 /// Colours of a drawing. Colour is a signal only: `alert` means too late, `warn` means look.
@@ -40,6 +42,33 @@ impl Palette {
             Color(mix(color.0, self.page.0), mix(color.1, self.page.1), mix(color.2, self.page.2))
         };
         Palette { page: self.page, ink: dim(self.ink), bright: dim(self.bright), dim: dim(self.dim), muted: dim(self.muted), raised: dim(self.raised), rule: dim(self.rule), accent: dim(self.accent), warn: dim(self.warn), alert: dim(self.alert), alert_ground: dim(self.alert_ground) }
+    }
+
+    /// The palette of an Omarchy theme from its colours (picture 44): each role keeps the contrast it
+    /// has against the page in Labra. Neutrals are mixed between the theme's background and text;
+    /// accent, yellow and red start from the theme's own colour and move towards the text until they
+    /// read. None without a background and a text colour.
+    pub fn from_theme(colors: &HashMap<String, String>) -> Option<Palette> {
+        let color = |key: &str| colors.get(key).and_then(|value| Color::parse(value));
+        let page = color("background")?;
+        let ink = color("light_foreground").or(color("foreground"))?;
+        let bright = color("bright_foreground").or(color("foreground")).unwrap_or(ink);
+        let neutral = |target: f64| (0..=100).map(|step| page.mix(ink, f64::from(step) / 100.0)).find(|&mixed| mixed.contrast(page) >= target).unwrap_or(ink);
+        let readable = |from: Color, target: f64| (0..=40).map(|step| from.mix(ink, f64::from(step) / 40.0)).find(|&mixed| mixed.contrast(page) >= target).unwrap_or(ink);
+        let alert = readable(color("red").unwrap_or(ink), 5.97);
+        Some(Palette {
+            page,
+            ink,
+            bright,
+            dim: neutral(7.62),
+            muted: neutral(3.01),
+            raised: color("selection").filter(|selection| (1.1..=1.6).contains(&selection.contrast(page))).unwrap_or_else(|| neutral(1.23)),
+            rule: neutral(1.47),
+            accent: readable(color("accent").or(color("blue")).unwrap_or(ink), 5.08),
+            warn: readable(color("yellow").unwrap_or(ink), 4.5),
+            alert,
+            alert_ground: page.mix(alert, 0.15),
+        })
     }
 
     pub fn colors(&self) -> [Color; 11] {
@@ -104,6 +133,21 @@ pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harbor_gives_the_colours_of_picture_44() {
+        let colors: HashMap<String, String> = [("background", "#dfe4c4"), ("foreground", "#1c2d28"), ("light_foreground", "#253631"), ("bright_foreground", "#1c2d28"), ("accent", "#5e81ac"), ("selection", "#c8d4a8"), ("red", "#b14752"), ("yellow", "#dc8164")]
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        let hex = |color: Color| color.hex();
+        let p = Palette::from_theme(&colors).unwrap();
+        assert_eq!(
+            p.colors().map(hex),
+            ["#dfe4c4", "#253631", "#1c2d28", "#36463e", "#778372", "#c8d4a8", "#b6bea4", "#445f75", "#805c4a", "#794045", "#d0cbb1"].map(String::from)
+        );
+        assert!(Palette::from_theme(&HashMap::new()).is_none());
+    }
 
     #[test]
     fn a_phase_name_shrinks_then_breaks_then_takes_its_short_name() {

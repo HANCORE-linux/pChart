@@ -88,6 +88,9 @@ pub(crate) fn panel(frame: &mut Frame, inks: &Inks, rect: Rect, title: &str, foc
 pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     let area = frame.area();
     let inks = Inks::of(app.palette);
+    if app.ground {
+        frame.buffer_mut().set_style(area, Style::new().bg(color(app.palette.page)).fg(color(app.palette.ink)));
+    }
     if area.width < MIN.0 || area.height < MIN.1 {
         too_small(frame, &inks, area);
         return Vec::new();

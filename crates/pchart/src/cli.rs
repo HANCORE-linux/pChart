@@ -5,7 +5,7 @@ pub struct Command {
 }
 
 pub const COMMANDS: &[Command] = &[
-    Command { name: "open", usage: "pchart PLAN", about: "Open the plan in the terminal." },
+    Command { name: "open", usage: "pchart PLAN [--theme NAME]", about: "Open the plan in the terminal, in the colours of the current Omarchy theme, which it follows while it changes, or in Labra without Omarchy. --theme NAME takes a theme by name instead, such as labra or harbor." },
     Command { name: "situation", usage: "pchart situation PLAN", about: "Where the plan stands: does the date hold, who waits on whom, what is next." },
     Command { name: "why", usage: "pchart why PLAN ITEM", about: "The chain of items that sets the date of ITEM." },
     Command { name: "waits", usage: "pchart waits PLAN", about: "Every lane that waits on another lane, and for what." },

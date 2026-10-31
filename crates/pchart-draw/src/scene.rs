@@ -4,6 +4,32 @@ use std::fmt::Write;
 pub struct Color(pub u8, pub u8, pub u8);
 
 impl Color {
+    /// "#rrggbb".
+    pub fn parse(text: &str) -> Option<Color> {
+        let digits = text.trim().strip_prefix('#').filter(|digits| digits.len() == 6)?;
+        let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+        Some(Color(byte(0)?, byte(2)?, byte(4)?))
+    }
+
+    /// The colour `t` of the way to `other`.
+    pub fn mix(self, other: Color, t: f64) -> Color {
+        let channel = |from: u8, to: u8| (f64::from(from) + (f64::from(to) - f64::from(from)) * t).round_ties_even() as u8;
+        Color(channel(self.0, other.0), channel(self.1, other.1), channel(self.2, other.2))
+    }
+
+    /// The contrast ratio with `other`, as WCAG measures it.
+    pub fn contrast(self, other: Color) -> f64 {
+        let luminance = |color: Color| {
+            let channel = |value: u8| {
+                let s = f64::from(value) / 255.0;
+                if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * channel(color.0) + 0.7152 * channel(color.1) + 0.0722 * channel(color.2)
+        };
+        let (a, b) = (luminance(self), luminance(other));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
     pub fn hex(self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
     }
