@@ -173,12 +173,12 @@ pub(crate) fn home(path: &str) -> String {
     }
 }
 
-/// The verdict word and its colour: neutral for holds, yellow for tight, red for does not hold.
+/// The verdict words and their colour: neutral for on track, yellow for at risk, red for late.
 pub(crate) fn state(app: &App, inks: &Inks) -> Option<(&'static str, Style)> {
     app.analysis.verdict.as_ref().map(|verdict| match verdict.state {
-        State::Holds => ("holds", inks.bright),
-        State::Tight => ("tight", inks.warn),
-        State::DoesNotHold => ("does not hold", inks.alert),
+        State::Holds => ("on track", inks.bright),
+        State::Tight => ("at risk", inks.warn),
+        State::DoesNotHold => ("late", inks.alert),
     })
 }
 
@@ -204,8 +204,8 @@ fn tiles(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut
     let warnings = app.analysis.checks.iter().filter(|check| check.severity() == Severity::Warning).count();
     let problems = app.analysis.checks.iter().filter(|check| check.severity() == Severity::Problem).count();
     let tone = state(app, inks).map_or(p.bright, |(word, _)| match word {
-        "tight" => p.warn,
-        "does not hold" => p.alert,
+        "at risk" => p.warn,
+        "late" => p.alert,
         _ => p.bright,
     });
     let end = app.schedule.slots.iter().enumerate().max_by_key(|(_, slot)| slot.planned.finish).map(|(index, slot)| (index, slot.planned.finish));
@@ -309,7 +309,7 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
 fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
     let hints: &[(&str, &str)] = match app.screen {
-        Screen::Situation => &[("↑↓", "statement"), ("Enter", "show in roadmap"), ("2", "roadmap"), ("q", "quit")],
+        Screen::Situation => &[("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
         Screen::Roadmap => &[("↑↓", item), ("d", "detail"), ("1", "situation"), ("q", "quit")],
         Screen::Checks => &[("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
         Screen::Export => &[("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
@@ -727,7 +727,7 @@ mod tests {
         assert!(has(&rows, ":: HOLIDAYS ACCOUNTED FOR · 5") && has(&rows, "Frontend      Tue 26 Jan  Republic Day"));
         assert!(has(&rows, ":: IN THE ROADMAP · 18 JAN – 12 MAR 2027") && has(&rows, "starting by Mon 09 Nov.") && placements.len() == 1);
         let (rows, placements) = screen(&app, 80, 24);
-        assert!(has(&rows, "If Acceptance slips by a day, Launch does not hold.") && has(&rows, "A 5 wd buffer before it leaves 7 wd to spare."));
+        assert!(has(&rows, "If Acceptance slips by a day, Launch is late.") && has(&rows, "A 5 wd buffer before it leaves 7 wd to spare."));
         assert!(placements.is_empty() && !has(&rows, "IN THE ROADMAP"));
         app.choose_check(1);
         let (rows, _) = screen(&app, 170, 50);
@@ -769,7 +769,7 @@ mod tests {
         let svg = String::from_utf8(read("portal-gantt.svg")).unwrap();
         assert!(svg.contains("Gantt chart") && !svg.contains("To spare") && !svg.contains("no buffer"));
         let md = String::from_utf8(read("portal.md")).unwrap();
-        assert!(md.contains("**Launch on Mon 01 Mar holds.**\n") && !md.contains("to spare, with") && md.contains("![Milestone chart](portal-milestones.svg)"));
+        assert!(md.contains("**Launch on Mon 01 Mar is on track.**\n") && !md.contains("to spare, with") && md.contains("![Milestone chart](portal-milestones.svg)"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -782,7 +782,7 @@ mod tests {
         assert!(rows.iter().any(|row| row.contains("decides the date  Requirements → UX concept")));
         assert!(placements.len() > 5);
         let (rows, _) = screen(&app, 120, 36);
-        assert!(rows[1].contains("holds · 12 wd to spare") && !rows.iter().any(|row| row.contains(":: SELECTION")));
+        assert!(rows[1].contains("on track · 12 wd to spare") && !rows.iter().any(|row| row.contains(":: SELECTION")));
         assert!(rows.iter().any(|row| row.contains("Frontend  Lane Frontend · Bangalore · IN-KA")));
         let (rows, _) = screen(&app, 80, 24);
         assert!(rows.iter().any(|row| row.contains("ROADMAP · LANES") && row.contains("OF 7")));
@@ -815,19 +815,16 @@ mod tests {
     }
 
     #[test]
-    fn the_situation_answers_the_three_questions_at_every_size() {
+    fn the_situation_says_where_we_stand_what_is_next_and_what_decides_the_date() {
         let app = app();
-        let (rows, _) = screen(&app, 170, 50);
-        let text = rows.join("\n");
-        assert!(text.contains("12 working days to spare, with Requirements starting by Mon 16 Nov."), "{text}");
-        assert!(text.contains("Frontend in Bangalore waits on the client in New York") && text.contains("in 7 weeks"), "{text}");
-        assert!(text.contains("Start Requirements by Mon 16 Nov") && text.contains("No buffer before the fixed launch"), "{text}");
-        assert!(text.contains("Everything else has time to spare:  Data model 11 wd") && text.contains("NEXT 6 WEEKS"), "{text}");
-        let (rows, _) = screen(&app, 120, 36);
-        let text = rows.join("\n");
-        assert!(text.contains("THIS CHAIN DECIDES THE DATE") && text.contains("Design sign-off Fri 18 Dec") && text.contains("+ 6 more with time to spare"), "{text}");
-        let (rows, _) = screen(&app, 80, 24);
-        let text = rows.join("\n");
-        assert!(!text.contains("THIS CHAIN DECIDES THE DATE") && text.contains("WHO IS WAITING ON WHOM") && text.contains("more on the chain"), "{text}");
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, ":: WHERE DO WE STAND") && has(&rows, ":: NEXT") && has(&rows, ":: THIS CHAIN DECIDES THE DATE") && placements.len() == 4);
+        for text in ["Launch on Mon 01 Mar is ", "on track.", "working days to spare", "Start Requirements by Mon 16 Nov", "in 12 working days", "Product · Berlin", "Add a buffer before Launch", "Acceptance Fri 26 Feb  →  Launch Mon 01 Mar"] {
+            assert!(svg.contains(text), "{text}");
+        }
+        assert!(!has(&rows, "WHO IS WAITING") && !svg.contains("NEXT 6 WEEKS") && !svg.contains("does not hold"));
+        let (rows, placements) = screen(&app, 80, 24);
+        assert!(has(&rows, ":: NEXT") && !has(&rows, "THIS CHAIN DECIDES THE DATE") && placements.len() == 3);
     }
 }

@@ -1,10 +1,10 @@
-//! The pictures of the situation screen: the chain that decides the date, the next six weeks, and the
-//! scale from "does not hold" to "holds". `unit` is one pixel of a 21 px tall cell.
+//! The pictures of the situation screen (picture 32): the verdict, the steps of "Next" and the chain
+//! that decides the date. `unit` is one pixel of a 21 px tall cell.
 
-use jiff::civil::{Date, Weekday};
-use pchart_core::calendar::next;
+use pchart_core::analysis::{State, Verdict};
 use pchart_core::{Plan, Schedule};
 
+use crate::bits::{Icon, draw_icon, runs};
 use crate::scene::{Anchor, Color, Fill, Mark, Scene, Shape, Stroke};
 use crate::style::{ADVANCE, FONT, Palette};
 
@@ -27,12 +27,75 @@ fn fit(text: &str, size: f32, room: f32) -> String {
     text.chars().take(keep).collect::<String>() + "…"
 }
 
-/// One segment of the scale; the one that applies is filled.
-pub fn segment(on: bool, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
-    let mut s = scene(width, height, palette);
-    let (h, y) = (6.0 * unit, height / 2.0 - 3.0 * unit);
-    let (fill, stroke) = if on { (Fill::Color(palette.ink), None) } else { (Fill::Color(palette.raised), Some(Stroke { color: palette.muted, width: unit, dash: None })) };
-    s.add(Shape::Rect { x: unit, y, w: width - 2.0 * unit, h, radius: 1.5 * unit, fill, stroke });
+/// What the verdict says: on track, at risk, late.
+pub fn state_words(state: State) -> &'static str {
+    match state {
+        State::Holds => "on track",
+        State::Tight => "at risk",
+        State::DoesNotHold => "late",
+    }
+}
+
+/// The verdict as picture 32 shows it: a symbol, "Launch on Mon 01 Mar is on track." and under it the
+/// number once. Text that does not fit `width` gets smaller.
+pub fn verdict(plan: &Plan, verdict: &Verdict, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let (p, u) = (palette, unit);
+    let mut s = scene(width, height, p);
+    let k = (height / (8.0 * 21.0 * u)).min(1.0);
+    let (icon, tone) = match verdict.state {
+        State::Holds => (Icon::Check, p.bright),
+        State::Tight => (Icon::Clock, p.warn),
+        State::DoesNotHold => (Icon::Cross, p.alert),
+    };
+    draw_icon(&mut s, icon, 26.0 * u * k, 47.0 * u * k, 52.0 * u * k, tone, p.page);
+    let lead = format!("{} on {} is ", plan.items[verdict.target].name, verdict.date.strftime("%a %d %b"));
+    let words = format!("{}.", state_words(verdict.state));
+    let x = 74.0 * u * k;
+    let room = width - x - 4.0 * u;
+    let size = (46.0 * u * k).min(room / ((lead.chars().count() + words.chars().count()) as f32 * ADVANCE));
+    runs(&mut s, x, 63.0 * u * k, size, &[(&lead, p.bright, true), (&words, tone, true)]);
+    let (number, rest) = if verdict.spare < 0 { (-verdict.spare, "working days late") } else { (verdict.spare, "working days to spare") };
+    let rest = if number == 1 { rest.replacen("days", "day", 1) } else { rest.to_string() };
+    let number = number.to_string();
+    let end = runs(&mut s, x, 147.0 * u * k, size, &[(&number, if verdict.state == State::Holds { p.bright } else { tone }, true)]);
+    runs(&mut s, end + 16.0 * u * k, 143.0 * u * k, (22.0 * u * k).min(size), &[(&rest, p.dim, false)]);
+    s
+}
+
+/// One step of "Next": a symbol, a title, and one line of symbols and words under it.
+pub struct Statement {
+    pub icon: Icon,
+    pub tone: Color,
+    pub title: String,
+    pub strong: bool,
+    pub line: Vec<(Option<Icon>, String)>,
+}
+
+/// `statement` in a picture four cells high, as in picture 32; the chosen one lies on a raised band
+/// with a pink edge, as the chosen row of a list (picture 36, B). Its symbol stands 40 units in.
+pub fn statement(statement: &Statement, chosen: bool, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    let (p, u) = (palette, unit);
+    let mut s = scene(width, height, p);
+    let ground = if chosen { p.raised } else { p.page };
+    if chosen {
+        s.add(Shape::Rect { x: 0.0, y: 2.0 * u, w: width, h: 68.0 * u, radius: 0.0, fill: Fill::Color(p.raised), stroke: None });
+        s.add(Shape::Rect { x: 0.0, y: 2.0 * u, w: 4.0 * u, h: 68.0 * u, radius: 0.0, fill: Fill::Color(p.accent), stroke: None });
+    }
+    let x0 = 40.0 * u;
+    let size = if statement.strong { 24.0 } else { 20.0 } * u;
+    draw_icon(&mut s, statement.icon, x0 + 26.0 * u, 21.0 * u, if statement.strong { 28.0 } else { 26.0 } * u, statement.tone, ground);
+    let room = width - x0 - 78.0 * u;
+    let title = fit(&statement.title, size, room);
+    runs(&mut s, x0 + 74.0 * u, 29.0 * u, size, &[(&title, if statement.strong { p.bright } else { p.ink }, statement.strong)]);
+    let mut x = x0 + 74.0 * u;
+    for (icon, text) in &statement.line {
+        if let Some(icon) = icon {
+            draw_icon(&mut s, *icon, x + 8.0 * u, 57.0 * u, 16.0 * u, p.dim, ground);
+            x += 24.0 * u;
+        }
+        let text = fit(text, 16.0 * u, (width - x).max(0.0));
+        x = runs(&mut s, x, 62.0 * u, 16.0 * u, &[(&text, p.dim, false)]) + 32.0 * u;
+    }
     s
 }
 
@@ -111,48 +174,6 @@ pub fn chain(plan: &Plan, schedule: &Schedule, width: f32, height: f32, unit: f3
         let middle = (xa + xb) / 2.0;
         let span = (last - first + 1) as f32 * step.max(124.0 * u) - 2.0 * u;
         s.add(text(middle, by + 20.0 * u, fit(&label, 13.5 * u, span.min(2.0 * middle.min(width - middle))), 13.5 * u, p.dim, false, Anchor::Middle));
-    }
-    s
-}
-
-/// The next six weeks from `today`: week marks, the today line, the first step of the deciding chain
-/// in the window with its dates above it, and the step after it, fading out, below.
-pub fn weeks(plan: &Plan, schedule: &Schedule, today: Date, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
-    let (p, u) = (palette, unit);
-    let mut s = scene(width, height, p);
-    let end = (0..42).fold(today, |day, _| next(day));
-    let span = 42.0;
-    let x = |day: Date| today.until(day).map_or(0.0, |gap| gap.get_days() as f32) / span * width;
-    let ly = 63.0 * u;
-    s.add(Shape::Line { x1: 0.0, y1: ly, x2: width, y2: ly, stroke: Stroke { color: p.muted, width: 1.5 * u, dash: None } });
-    let mut monday = today;
-    while monday.weekday() != Weekday::Monday {
-        monday = next(monday);
-    }
-    while monday <= end {
-        let xm = x(monday);
-        s.add(Shape::Line { x1: xm, y1: ly - 4.0 * u, x2: xm, y2: ly + 4.0 * u, stroke: Stroke { color: p.muted, width: u, dash: None } });
-        s.add(text(xm + 3.0 * u, ly + 20.0 * u, format!("W{:02}", monday.iso_week_date().week()), 12.5 * u, p.muted, false, Anchor::Start));
-        monday = (0..7).fold(monday, |day, _| next(day));
-    }
-    s.add(Shape::Line { x1: 0.75 * u, y1: ly - 14.0 * u, x2: 0.75 * u, y2: ly + 8.0 * u, stroke: Stroke { color: p.ink, width: 1.5 * u, dash: None } });
-    s.add(text(4.0 * u, ly - 18.0 * u, "today".into(), 13.0 * u, p.bright, true, Anchor::Start));
-    let window: Vec<usize> = schedule.chain.iter().copied().filter(|&index| !plan.items[index].milestone && schedule.slots[index].planned.finish >= today && schedule.slots[index].planned.start <= end).collect();
-    if let Some(&first) = window.first() {
-        let slot = &schedule.slots[first].planned;
-        let (xs, xe) = (x(slot.start.max(today)), x(next(slot.finish).min(end)));
-        s.marks.push(Mark { shape: Shape::Rect { x: xs, y: ly - 5.0 * u, w: xe - xs, h: 10.0 * u, radius: 2.0 * u, fill: Fill::Color(p.ink), stroke: None }, opacity: 0.95, item: Some(first) });
-        let label = format!("{} {} – {}", plan.items[first].name, slot.start.strftime("%d %b"), slot.finish.strftime("%d %b"));
-        let w = label.chars().count() as f32 * 13.0 * u * ADVANCE;
-        s.add_for(first, 1.0, text(xs.min(width - w).max(0.0), ly - 12.0 * u, label, 13.0 * u, p.ink, false, Anchor::Start));
-        if let Some(&then) = window.get(1) {
-            let start = schedule.slots[then].planned.start;
-            let xu = x(start);
-            s.marks.push(Mark { shape: Shape::Rect { x: xu, y: ly - 5.0 * u, w: width - xu, h: 10.0 * u, radius: 2.0 * u, fill: Fill::Color(p.ink), stroke: None }, opacity: 0.35, item: Some(then) });
-            let label = format!("{} from {}", plan.items[then].name, start.strftime("%d %b"));
-            let w = label.chars().count() as f32 * 13.0 * u * ADVANCE;
-            s.add_for(then, 1.0, text((xu + 4.0 * u).min(width - w).max(0.0), ly + 40.0 * u, label, 13.0 * u, p.dim, false, Anchor::Start));
-        }
     }
     s
 }

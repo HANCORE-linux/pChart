@@ -67,3 +67,79 @@ pub fn sheet(page: &Scene, width: f32, height: f32, unit: f32) -> String {
         page.nested(x, y, w, h)
     )
 }
+
+/// Symbols that stand for words. They are drawn, not taken from a font, so every terminal shows them
+/// the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Icon {
+    Check,
+    Clock,
+    Cross,
+    Play,
+    Warn,
+    Info,
+    Person,
+    Calendar,
+    Folder,
+}
+
+fn ring(x: f32, y: f32, r: f32) -> Vec<(f32, f32)> {
+    (0..40).map(|step| step as f32 / 40.0 * std::f32::consts::TAU).map(|angle| (x + r * angle.cos(), y + r * angle.sin())).collect()
+}
+
+/// `icon` centred at `x`, `y`, `size` pixels across, in `color`; `ground` is what shows through it.
+pub fn draw_icon(s: &mut Scene, icon: Icon, x: f32, y: f32, size: f32, color: Color, ground: Color) {
+    let r = size / 2.0;
+    let line = |width: f32| Some(Stroke { color, width, dash: None });
+    let open = |points: Vec<(f32, f32)>, width: f32| Shape::Path { points, closed: false, fill: Fill::None, stroke: line(width) };
+    let circle = |s: &mut Scene, width: f32| s.add(Shape::Path { points: ring(x, y, r - width / 2.0), closed: true, fill: Fill::None, stroke: line(width) });
+    match icon {
+        Icon::Check => {
+            circle(s, r / 8.0);
+            s.add(open(vec![(x - r * 0.45, y + r * 0.02), (x - r * 0.1, y + r * 0.36), (x + r * 0.5, y - r * 0.32)], r / 7.0));
+        }
+        Icon::Clock => {
+            circle(s, (r / 8.0).max(1.4));
+            s.add(open(vec![(x, y - r * 0.6), (x, y), (x + r * 0.45, y)], (r / 7.0).max(1.4)));
+        }
+        Icon::Cross => {
+            circle(s, r / 8.0);
+            let k = r * 0.38;
+            s.add(open(vec![(x - k, y - k), (x + k, y + k)], r / 7.0));
+            s.add(open(vec![(x + k, y - k), (x - k, y + k)], r / 7.0));
+        }
+        Icon::Play => s.add(Shape::Path { points: vec![(x - r * 0.5, y - r * 0.7), (x + r * 0.7, y), (x - r * 0.5, y + r * 0.7)], closed: true, fill: Fill::Color(color), stroke: None }),
+        Icon::Warn => {
+            s.add(Shape::Path { points: vec![(x, y - r), (x + r * 1.1, y + r * 0.85), (x - r * 1.1, y + r * 0.85)], closed: true, fill: Fill::Color(color), stroke: None });
+            s.add(Shape::Rect { x: x - r * 0.1, y: y - r * 0.4, w: r * 0.2, h: r * 0.7, radius: r * 0.05, fill: Fill::Color(ground), stroke: None });
+            s.add(Shape::Circle { x, y: y + r * 0.55, r: r * 0.12, fill: ground });
+        }
+        Icon::Info => {
+            circle(s, (r / 8.0).max(1.4));
+            s.add(Shape::Rect { x: x - r * 0.1, y: y - r * 0.15, w: r * 0.2, h: r * 0.75, radius: 0.0, fill: Fill::Color(color), stroke: None });
+            s.add(Shape::Circle { x, y: y - r * 0.5, r: r * 0.14, fill: color });
+        }
+        Icon::Person => {
+            s.add(Shape::Circle { x, y: y - r * 0.45, r: r * 0.38, fill: color });
+            let body: Vec<(f32, f32)> = (0..=16).map(|step| step as f32 / 16.0 * std::f32::consts::PI).map(|angle| (x - r * 0.75 * angle.cos(), y + r - r * 0.9 * angle.sin())).collect();
+            s.add(Shape::Path { points: body, closed: true, fill: Fill::Color(color), stroke: None });
+        }
+        Icon::Calendar => {
+            let width = (r / 8.0).max(1.4);
+            s.add(Shape::Rect { x: x - r, y: y - r * 0.8, w: 2.0 * r, h: 1.8 * r, radius: r * 0.15, fill: Fill::None, stroke: line(width) });
+            s.add(open(vec![(x - r, y - r * 0.25), (x + r, y - r * 0.25)], width));
+        }
+        Icon::Folder => s.add(Shape::Path { points: vec![(x - r, y - r * 0.6), (x - r * 0.2, y - r * 0.6), (x, y - r * 0.3), (x + r, y - r * 0.3), (x + r, y + r * 0.7), (x - r, y + r * 0.7)], closed: true, fill: Fill::None, stroke: line((r / 8.0).max(1.4)) }),
+    }
+}
+
+/// Runs of text one after the other on one baseline: `(text, color, bold)` at `size` pixels in the
+/// monospaced font, starting at `x`. Returns where the last run ends.
+pub fn runs(s: &mut Scene, x: f32, y: f32, size: f32, parts: &[(&str, Color, bool)]) -> f32 {
+    let mut at = x;
+    for &(text, color, bold) in parts {
+        s.add(Shape::Text { x: at, y, text: text.to_string(), size, color, bold, anchor: Anchor::Start });
+        at += text.chars().count() as f32 * size * crate::style::ADVANCE;
+    }
+    at
+}

@@ -39,9 +39,9 @@ pub fn verdict(plan: &Plan, verdict: &Verdict) -> (String, String) {
     let target = format!("{} on {}", name(plan, verdict.target), day(verdict.date));
     let first = name(plan, verdict.first);
     match verdict.state {
-        State::Holds => (format!("{target} holds."), format!("{} to spare, with {first} starting by {}.", working_days(verdict.spare), day(verdict.latest_start))),
-        State::Tight => (format!("{target} is tight."), format!("Only {} to spare, with {first} starting by {}.", working_days(verdict.spare), day(verdict.latest_start))),
-        State::DoesNotHold => (format!("{target} does not hold."), format!("{} late, even with {first} starting today.", working_days(-verdict.spare))),
+        State::Holds => (format!("{target} is on track."), format!("{} to spare, with {first} starting by {}.", working_days(verdict.spare), day(verdict.latest_start))),
+        State::Tight => (format!("{target} is at risk."), format!("Only {} to spare, with {first} starting by {}.", working_days(verdict.spare), day(verdict.latest_start))),
+        State::DoesNotHold => (format!("{target} is late."), format!("{} late, even with {first} starting today.", working_days(-verdict.spare))),
     }
 }
 
@@ -64,7 +64,7 @@ pub fn check(plan: &Plan, check: &Check) -> (String, String) {
         lane.city.clone().or_else(|| lane.place.clone()).unwrap_or_else(|| lane.name.clone())
     };
     match check {
-        Check::TooLate { target, late } => (format!("{} does not hold.", name(plan, *target)), format!("The plan ends {} too late.", working_days(*late))),
+        Check::TooLate { target, late } => (format!("{} is late.", name(plan, *target)), format!("The plan ends {} too late.", working_days(*late))),
         Check::MissedDeadline { item, by, finish } => (format!("{} misses its deadline {}.", name(plan, *item), day(*by)), format!("The earliest it can finish is {}.", day(*finish))),
         Check::FixedTooEarly { item, waits_on, ready } => {
             let fixed = plan.items[*item].on.map(day).unwrap_or_default();
@@ -142,22 +142,22 @@ pub fn advice(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: D
         }
         Check::NoBuffer { before, target } => {
             let (b, t) = (name(plan, before), name(plan, target));
-            let means = vec![format!("{t} is fixed on {}. {b} ends on {}, the working day before.", day(planned(target).finish), day(planned(before).finish)), format!("If {b} or anything before it slips by a day, {t} does not hold.")];
+            let means = vec![format!("{t} is fixed on {}. {b} ends on {}, the working day before.", day(planned(target).finish), day(planned(before).finish)), format!("If {b} or anything before it slips by a day, {t} is late.")];
             let mut can_do = vec![(format!("A buffer of {} before {t} takes small delays.", working_days(BUFFER as i32)), false)];
             let mut short = vec![(format!("A {BUFFER} wd buffer before it"), false)];
             match with_buffer(plan, calendars, today, before, target) {
                 Some(verdict) if verdict.state == State::DoesNotHold => {
-                    can_do.extend([(" The plan then does not hold: ".into(), false), (working_days(-verdict.spare), true), (" late.".into(), false)]);
+                    can_do.extend([(" The plan is then ".into(), false), (working_days(-verdict.spare), true), (" late.".into(), false)]);
                     short.extend([(" makes it ".into(), false), (format!("{} wd", -verdict.spare), true), (" late.".into(), false)]);
                 }
                 Some(verdict) => {
                     let first = name(plan, verdict.first);
-                    can_do.extend([(" The plan then holds with ".into(), false), (verdict.spare.to_string(), true), (format!(" working {} to spare, with {first} starting by ", if verdict.spare == 1 { "day" } else { "days" }), false), (day(verdict.latest_start), true), (".".into(), false)]);
+                    can_do.extend([(" The plan is then still on track, with ".into(), false), (verdict.spare.to_string(), true), (format!(" working {} to spare, with {first} starting by ", if verdict.spare == 1 { "day" } else { "days" }), false), (day(verdict.latest_start), true), (".".into(), false)]);
                     short.extend([(" leaves ".into(), false), (verdict.spare.to_string(), true), (" wd to spare.".into(), false)]);
                 }
                 None => short.push((" takes small delays.".into(), false)),
             }
-            Advice { means: means.into_iter().map(plain).collect(), can_do: vec![can_do], short: [plain(format!("If {b} slips by a day, {t} does not hold.")), short] }
+            Advice { means: means.into_iter().map(plain).collect(), can_do: vec![can_do], short: [plain(format!("If {b} slips by a day, {t} is late.")), short] }
         }
         Check::DayOff { item, date, ref holiday } => {
             let i = name(plan, item);
@@ -232,7 +232,7 @@ mod tests {
         let schedule = schedule(&plan, &calendars, today).unwrap();
         let analysis = analyse(&plan, &calendars, &schedule, today);
         let (headline, detail) = verdict(&plan, analysis.verdict.as_ref().unwrap());
-        assert_eq!(headline, "Launch on Mon 01 Mar holds.");
+        assert_eq!(headline, "Launch on Mon 01 Mar is on track.");
         assert_eq!(detail, "12 working days to spare, with Requirements starting by Mon 16 Nov.");
         assert_eq!(handoff(&plan, &analysis.handoffs[2]), "Frontend (Bangalore) waits on Client (New York): Design sign-off due Fri 18 Dec.");
         assert_eq!(next(&plan, &analysis, &analysis.next[0]), "Start Requirements by Mon 16 Nov: 12 working days from today.");
@@ -240,7 +240,7 @@ mod tests {
         let line = |runs: &[Run]| runs.iter().map(|(text, _)| text.as_str()).collect::<String>();
         let buffer = advice(&plan, &calendars, &schedule, today, &analysis.checks[0]);
         assert_eq!(line(&buffer.means[0]), "Launch is fixed on Mon 01 Mar. Acceptance ends on Fri 26 Feb, the working day before.");
-        assert_eq!(line(&buffer.can_do[0]), "A buffer of 5 working days before Launch takes small delays. The plan then holds with 7 working days to spare, with Requirements starting by Mon 09 Nov.");
+        assert_eq!(line(&buffer.can_do[0]), "A buffer of 5 working days before Launch takes small delays. The plan is then still on track, with 7 working days to spare, with Requirements starting by Mon 09 Nov.");
         assert_eq!(line(&buffer.short[1]), "A 5 wd buffer before it leaves 7 wd to spare.");
         assert!(buffer.can_do[0].iter().any(|(text, strong)| text == "Mon 09 Nov" && *strong));
     }
