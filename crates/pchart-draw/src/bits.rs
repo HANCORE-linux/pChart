@@ -3,6 +3,12 @@
 use crate::scene::{Anchor, Color, Fill, Mark, Scene, Shape, Stroke};
 use crate::style::{FONT, Palette};
 
+/// An empty picture of `width` × `height` without a ground of its own, for screens that compose their
+/// own pictures from these parts.
+pub fn canvas(width: f32, height: f32, palette: &Palette) -> Scene {
+    scene(width, height, palette)
+}
+
 fn scene(width: f32, height: f32, palette: &Palette) -> Scene {
     Scene { width, height, background: None, hatch: (palette.raised, palette.muted), hatch_alert: (palette.alert_ground, palette.alert), spare: palette.dim, font: FONT, marks: Vec::new() }
 }
@@ -226,4 +232,18 @@ pub fn advice(happens: &[(String, bool)], step: &str, then: &[(String, bool)], w
     runs(&mut s, 26.0 * u, 68.0 * u, size, &[(step, p.bright, true)]);
     line(&mut s, 26.0 * u, 96.0 * u, then, p.ink);
     s
+}
+
+/// A box with a word in it that is on (filled) or off (an outline), at `x` with its text on `baseline`;
+/// `cursor` rings it in pink. Returns where the box ends.
+#[allow(clippy::too_many_arguments)]
+pub fn chip(s: &mut Scene, x: f32, baseline: f32, text: &str, on: bool, cursor: bool, unit: f32, palette: &Palette) -> f32 {
+    let (p, u) = (palette, unit);
+    let size = 16.6 * u;
+    let w = text.chars().count() as f32 * size * crate::style::ADVANCE + 24.0 * u;
+    let (y, h) = (baseline - 18.0 * u, 26.0 * u);
+    let stroke = if cursor { Some(Stroke { color: p.accent, width: 2.0 * u, dash: None }) } else if on { None } else { Some(Stroke { color: p.muted, width: 1.2 * u, dash: None }) };
+    s.add(Shape::Rect { x, y, w, h, radius: 5.0 * u, fill: if on { Fill::Color(p.ink) } else { Fill::None }, stroke });
+    runs(s, x + 12.0 * u, baseline, size, &[(text, if on { p.page } else { p.dim }, on)]);
+    x + w
 }

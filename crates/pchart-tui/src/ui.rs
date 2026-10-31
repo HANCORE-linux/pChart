@@ -502,15 +502,19 @@ mod tests {
         let mut app = app();
         app.path = dir.join("portal.pchart").display().to_string();
         app.screen = Screen::Export;
+        let chosen = |svg: &str, text: &str| svg.contains(&format!("font-weight=\"700\" xml:space=\"preserve\">{text}</text>"));
         let (rows, placements) = screen(&app, 170, 50);
-        assert!(has(&rows, "› Milestone chart") && has(&rows, "› Team") && has(&rows, "[x] PDF   [x] SVG   [ ] PNG   [ ] Markdown"));
-        assert!(has(&rows, "Page       16:9 · slide") && has(&rows, "Files      portal-milestones.pdf") && placements.len() == 1);
+        let options = &placements[0].svg;
+        assert!(has(&rows, ":: EXPORT") && has(&rows, ":: PREVIEW · EXACTLY WHAT THE FILE LOOKS LIKE") && placements.len() == 2);
+        assert!(chosen(options, "Milestone chart") && chosen(options, "Team") && chosen(options, "PDF") && !chosen(options, "PNG") && options.contains("Markdown"));
+        assert!(options.contains("portal-milestones.pdf") && !options.contains("16:9"));
         app.export_change(-1);
         app.export_part(1);
         app.export_change(1);
         app.export_change(1);
-        let (rows, _) = screen(&app, 170, 50);
-        assert!(has(&rows, "› Gantt chart") && has(&rows, "› Client") && has(&rows, "hides  what items have to spare, warnings"));
+        let (_, placements) = screen(&app, 170, 50);
+        let options = &placements[0].svg;
+        assert!(chosen(options, "Gantt chart") && chosen(options, "Client") && options.contains("hides what items have to spare,") && options.contains("warnings"));
         app.export_part(1);
         app.export_change(1);
         app.export_change(1);
@@ -520,7 +524,7 @@ mod tests {
         let names: Vec<String> = crate::export::files(&app).iter().map(|file| file.file_name().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["portal-gantt.pdf", "portal-gantt.svg", "portal-gantt.png", "portal.md", "portal-milestones.svg"]);
         let (rows, placements) = screen(&app, 80, 24);
-        assert!(has(&rows, "Files      portal-gantt.pdf, .svg, .png, portal.md,") && has(&rows, "The preview needs 110 columns.") && placements.is_empty());
+        assert!(placements.len() == 1 && placements[0].svg.contains("portal-gantt.pdf, .svg, .png, portal.md") && placements[0].svg.contains("The preview needs 110 columns.") && !has(&rows, "PREVIEW"));
 
         let written = crate::export::write(&crate::export::job(&app)).unwrap();
         assert_eq!(written, crate::export::files(&app));

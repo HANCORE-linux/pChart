@@ -1,22 +1,20 @@
-//! The Export screen (pictures 24 and 25): the view, the audience and the formats on the left, and the
+//! The Export screen (pictures 33 and 35): the view, the audience and the formats on the left, and the
 //! page as the file will look on the right. Files go to `export/` next to the plan.
 
 use std::path::{Path, PathBuf};
 
 use jiff::civil::Date;
 use pchart_core::{Analysis, Plan, Schedule};
-use pchart_draw::{Audience, Output, View, bits, markdown};
+use pchart_draw::bits::{self, Icon};
+use pchart_draw::scene::{Fill, Shape};
+use pchart_draw::style::ADVANCE;
+use pchart_draw::{Audience, Output, View, markdown};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::Span;
 
 use crate::app::{App, FORMATS, Part};
 use crate::pictures::Placement;
-use crate::ui::{Inks, bold, cut, home, panel, put};
-
-/// The left column, as in picture 4.
-const LEFT: u16 = 50;
+use crate::ui::{Inks, home, panel};
 
 fn folder(path: &str) -> PathBuf {
     Path::new(path).parent().map_or(PathBuf::from("export"), |parent| parent.join("export"))
@@ -66,65 +64,87 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     let e = &app.export;
     let page = e.view.page(&app.plan, &app.schedule, app.today, &app.analysis.checks, e.audience);
     let wide = area.width >= 110;
-    let left = if wide { Rect { width: LEFT, ..body } } else { body };
+    let left = if wide { Rect { width: (area.width * 46 / 170).max(44), ..body } } else { body };
     panel(frame, inks, left, "EXPORT", true);
-    let (x, w) = (left.x, left.width);
-    let bottom = left.y + left.height - 1;
-    let compact = area.height < 30;
-    let mut y = left.y + 2;
-    let line = |frame: &mut Frame, y: &mut u16, indent: u16, spans: Vec<Span<'static>>| {
-        if *y < bottom {
-            put(frame, x + indent, *y, w.saturating_sub(indent + 2), spans);
-        }
-        *y += 1;
-    };
-    let heading = |part: Part, text: &'static str| Span::styled(text, if e.part == part { inks.ink } else { inks.muted });
-    let choice = |frame: &mut Frame, y: &mut u16, name: &'static str, on: bool| {
-        if on && *y < bottom {
-            frame.buffer_mut().set_style(Rect { x: x + 1, y: *y, width: w.saturating_sub(2), height: 1 }, Style::new().bg(inks.raised));
-            put(frame, x + 2, *y, 1, vec![Span::styled("›", bold(Style::new().fg(inks.accent)))]);
-        }
-        let style = if on { bold(inks.bright) } else { inks.ink };
-        if *y < bottom {
-            put(frame, x + 4, *y, w.saturating_sub(6), vec![Span::styled(name, style)]);
-        }
-        *y += 1;
-    };
+    let (cw, ch) = app.cell;
+    let gap = u16::from(area.height >= 30);
+    let rect = Rect { x: left.x + 1, y: left.y + 2 + gap, width: left.width.saturating_sub(2), height: left.height.saturating_sub(3 + gap) };
+    let (w, h) = (f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch));
+    placements.push(Placement { rect, svg: options(app, w, h, f32::from(ch) / 21.0, area.height < 30, wide).svg(), paper: false });
+    if !wide {
+        return;
+    }
+    let right = Rect { x: left.width, width: body.width - left.width, ..body };
+    panel(frame, inks, right, "PREVIEW · EXACTLY WHAT THE FILE LOOKS LIKE", false);
+    let rect = Rect { x: right.x + 2, y: right.y + 2, width: right.width.saturating_sub(4), height: right.height.saturating_sub(3) };
+    if rect.width >= 10 && rect.height >= 4 {
+        let (px_w, px_h) = (f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch));
+        placements.push(Placement { rect, svg: bits::sheet(&page, px_w, px_h, f32::from(ch) / 21.0), paper: true });
+    }
+}
 
-    line(frame, &mut y, 3, vec![heading(Part::View, "VIEW")]);
+/// The options of picture 35 as one picture: the views as a list with the chosen one filled like a box
+/// that is on, the audience and the formats as boxes, the folder and the files. The part `↑↓` is on has its label in brighter ink; `←→` rings a
+/// format in pink. Rows are 21 units, as cells.
+fn options(app: &App, width: f32, height: f32, unit: f32, compact: bool, wide: bool) -> pchart_draw::Scene {
+    let (p, u, e) = (app.palette, unit, &app.export);
+    let mut s = bits::canvas(width, height, &p);
+    let row = 21.0 * u;
+    let size = 16.6 * u;
+    let x = 16.0 * u;
+    let fit = |text: &str, from: f32| {
+        let count = ((width - from) / (size * ADVANCE)).floor().max(0.0) as usize;
+        if text.chars().count() <= count { text.to_string() } else { text.chars().take(count.saturating_sub(1)).collect::<String>() + "…" }
+    };
+    let mut y = 0.0;
+    let label = |s: &mut pchart_draw::Scene, y: f32, text: &str, part: Option<Part>| {
+        bits::runs(s, x, y + 15.0 * u, 15.0 * u, &[(text, if part.is_some_and(|part| part == e.part) { p.ink } else { p.muted }, false)]);
+    };
+    label(&mut s, y, "View", Some(Part::View));
+    y += row;
     for view in View::ALL {
-        choice(frame, &mut y, view.name(), view == e.view);
-    }
-    y += 1;
-    line(frame, &mut y, 3, vec![heading(Part::Audience, "AUDIENCE")]);
-    for (audience, name) in [(Audience::Team, "Team"), (Audience::Management, "Management"), (Audience::Client, "Client")] {
-        choice(frame, &mut y, name, audience == e.audience);
-    }
-    let (verb, what) = hides(e.view, e.audience);
-    line(frame, &mut y, 4, vec![Span::styled(format!("{verb:<7}"), inks.muted), Span::styled(what, inks.dim)]);
-    y += 1;
-    line(frame, &mut y, 3, vec![heading(Part::Format, "FORMAT")]);
-    let mut formats = Vec::new();
-    for (index, (name, on)) in FORMATS.into_iter().zip(e.formats).enumerate() {
-        let ground = |style: Style| if e.part == Part::Format && e.format == index { style.bg(inks.raised) } else { style };
-        if index > 0 {
-            formats.push(Span::raw("   "));
+        let on = view == e.view;
+        if on {
+            let w = view.name().chars().count() as f32 * size * ADVANCE + 24.0 * u;
+            s.add(Shape::Rect { x: x - 12.0 * u, y: y + u, w, h: row - 2.0 * u, radius: 5.0 * u, fill: Fill::Color(p.ink), stroke: None });
         }
-        formats.push(Span::styled(if on { "[x] " } else { "[ ] " }, ground(if on { bold(inks.bright) } else { inks.muted })));
-        formats.push(Span::styled(name, ground(if on { inks.ink } else { inks.dim })));
+        bits::runs(&mut s, x, y + 15.0 * u, size, &[(view.name(), if on { p.page } else { p.ink }, on)]);
+        y += row;
     }
-    line(frame, &mut y, 4, formats);
-    y += 1;
-
-    let folder_text = format!("{}/", home(&folder(&app.path).display().to_string()));
-    let size = if page.height <= 632.5 { "16:9 · slide".to_string() } else { format!("{:.0} × {:.0} px · taller than a slide", page.width, page.height) };
-    let facts = [("Page", size), ("Style", "light · Noto Sans".into()), ("Holidays", "off".into())];
-    for (key, value) in facts.into_iter().filter(|_| !compact).chain([("Folder", folder_text)]) {
-        line(frame, &mut y, 3, vec![Span::styled(format!("{key:<11}"), inks.muted), Span::styled(cut(&value, w.saturating_sub(16) as usize), inks.ink)]);
+    y += if compact { 0.0 } else { row };
+    label(&mut s, y, "For", Some(Part::Audience));
+    y += row;
+    let mut cx = x;
+    for (audience, name) in [(Audience::Team, "Team"), (Audience::Management, "Management"), (Audience::Client, "Client")] {
+        cx = bits::chip(&mut s, cx, y + 19.0 * u, name, audience == e.audience, false, u, &p) + 10.0 * u;
     }
+    y += 1.5 * row;
     if !compact {
-        y += 1;
+        let (verb, what) = hides(e.view, e.audience);
+        let room = ((width - x) / (15.0 * u * ADVANCE)).floor().max(1.0) as usize;
+        let mut lines: Vec<String> = vec![String::new()];
+        for word in format!("{verb} {what}").split(' ') {
+            let line = lines.last_mut().expect("a line");
+            if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > room {
+                lines.push(word.to_string());
+            } else {
+                *line = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            }
+        }
+        for line in &lines {
+            bits::runs(&mut s, x, y + 15.0 * u, 15.0 * u, &[(line, p.dim, false)]);
+            y += row;
+        }
+        y += row;
     }
+    label(&mut s, y, "Format", Some(Part::Format));
+    y += row;
+    let mut cx = x;
+    for (index, (name, on)) in FORMATS.into_iter().zip(e.formats).enumerate() {
+        cx = bits::chip(&mut s, cx, y + 19.0 * u, name, on, e.part == Part::Format && e.format == index, u, &p) + 10.0 * u;
+    }
+    y += if compact { 1.5 * row } else { 2.5 * row };
+
     let files = files(app);
     let names: Vec<String> = files.iter().map(|file| file.file_name().map_or(String::new(), |name| name.to_string_lossy().into_owned())).collect();
     let state = if e.busy {
@@ -132,7 +152,11 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     } else {
         e.written.as_ref().filter(|(written, _)| *written == files).map(|(_, time)| format!("written {time}"))
     };
-    let room = w.saturating_sub(16) as usize;
+    let indent = x + 24.0 * u;
+    bits::draw_icon(&mut s, Icon::Folder, x + 8.0 * u, y + 10.0 * u, 16.0 * u, p.dim, p.page);
+    let folder_text = format!("{}/", home(&folder(&app.path).display().to_string()));
+    bits::runs(&mut s, indent, y + 15.0 * u, size, &[(&fit(&folder_text, indent), p.ink, false)]);
+    y += row;
     if compact {
         let mut joined = String::new();
         let mut last = String::new();
@@ -141,37 +165,26 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
             joined += &if joined.is_empty() { name.clone() } else if base == last { format!(", .{extension}") } else { format!(", {name}") };
             last = base.to_string();
         }
-        let mut spans = vec![Span::styled("Files      ", inks.muted), Span::styled(cut(&joined, room), inks.ink)];
-        if let Some(state) = state {
-            spans.push(Span::styled(format!(" · {state}"), inks.dim));
+        if let Some(state) = &state {
+            joined += &format!(" · {state}");
         }
-        line(frame, &mut y, 3, spans);
+        bits::runs(&mut s, indent, y + 15.0 * u, size, &[(&fit(&joined, indent), p.ink, false)]);
+        y += row;
     } else {
-        line(frame, &mut y, 3, vec![Span::styled("Files", inks.muted)]);
-        y -= 1;
         for name in &names {
-            line(frame, &mut y, 14, vec![Span::styled(cut(name, room), inks.ink)]);
+            bits::runs(&mut s, indent, y + 15.0 * u, size, &[(&fit(name, indent), p.ink, false)]);
+            y += row;
         }
-        if names.is_empty() {
-            y += 1;
-        }
-        if let Some(state) = state {
-            line(frame, &mut y, 14, vec![Span::styled(state, inks.dim)]);
+        if let Some(state) = &state {
+            bits::draw_icon(&mut s, Icon::Check, x + 8.0 * u, y + 10.0 * u, 16.0 * u, p.dim, p.page);
+            bits::runs(&mut s, indent, y + 15.0 * u, size, &[(state, p.dim, false)]);
+            y += row;
         }
     }
-
     if !wide {
-        line(frame, &mut y, 3, vec![Span::styled("The preview needs 110 columns.", inks.muted)]);
-        return;
+        bits::runs(&mut s, x, y + row + 15.0 * u, 15.0 * u, &[("The preview needs 110 columns.", p.muted, false)]);
     }
-    let right = Rect { x: LEFT, width: body.width - LEFT, ..body };
-    panel(frame, inks, right, "PREVIEW · EXACTLY WHAT THE FILE LOOKS LIKE", false);
-    let rect = Rect { x: right.x + 2, y: right.y + 2, width: right.width.saturating_sub(4), height: right.height.saturating_sub(3) };
-    if rect.width >= 10 && rect.height >= 4 {
-        let (cw, ch) = app.cell;
-        let (px_w, px_h) = (f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch));
-        placements.push(Placement { rect, svg: bits::sheet(&page, px_w, px_h, f32::from(ch) / 21.0), paper: true });
-    }
+    s
 }
 
 /// Everything an export needs, so the files can be written away from the screen.
