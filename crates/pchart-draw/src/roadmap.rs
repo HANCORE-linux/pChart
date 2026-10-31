@@ -654,9 +654,11 @@ fn folded(s: &mut Scene, c: &Chart) {
     }
 }
 
+/// The brackets of the selection, at the ends of its bar and above and below it, so they stay off a bar
+/// that starts the next day (picture 46).
 fn corners(s: &mut Scene, c: &Chart, x0: f32, x1: f32, y: f32, h: f32) {
-    let (u, k) = (c.u, 6.0 * c.u);
-    for (cx, cy, dx, dy) in [(x0 - 4.0 * u, y - h, 1.0, 1.0), (x1 + 4.0 * u, y - h, -1.0, 1.0), (x0 - 4.0 * u, y + h, 1.0, -1.0), (x1 + 4.0 * u, y + h, -1.0, -1.0)] {
+    let k = 6.0 * c.u;
+    for (cx, cy, dx, dy) in [(x0, y - h, 1.0, 1.0), (x1, y - h, -1.0, 1.0), (x0, y + h, 1.0, -1.0), (x1, y + h, -1.0, -1.0)] {
         s.add(Shape::Path { points: vec![(cx + dx * k, cy), (cx, cy), (cx, cy + dy * k)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.bright, 1.6)) });
     }
 }
