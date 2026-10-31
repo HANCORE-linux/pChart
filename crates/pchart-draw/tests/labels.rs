@@ -2,7 +2,7 @@ use jiff::civil::date;
 use pchart_core::{Calendar, Holidays, Plan, schedule};
 use pchart_draw::scene::{Anchor, Shape};
 use pchart_draw::roadmap::shown;
-use pchart_draw::{Level, Palette, Settings, natural_height, roadmap};
+use pchart_draw::{Cut, Level, Palette, Settings, natural_height, part, roadmap};
 
 fn plans() -> Vec<(Plan, Vec<Calendar>)> {
     let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
@@ -79,4 +79,47 @@ fn a_small_picture_shows_less_detail_and_keeps_the_fixed_target_in_view() {
     let (level, lanes) = at(330.0);
     assert_eq!(level, Level::Standard);
     assert!(lanes.len() < plan.lanes.len() && lanes.contains(&plan.lane("frontend").unwrap()) && lanes.contains(&client), "{lanes:?}");
+}
+
+#[test]
+fn names_in_the_roadmap_around_a_check_stay_apart_and_inside() {
+    let today = date(2026, 10, 29);
+    for (plan, calendars) in plans() {
+        let schedule = schedule(&plan, &calendars, today).unwrap();
+        let checks = pchart_core::analyse(&plan, &calendars, &schedule, today).checks;
+        let around: Vec<(String, Vec<usize>)> = checks.iter().map(|check| (check.rule().to_string(), check.items())).chain((0..plan.items.len()).map(|index| (plan.items[index].id.clone(), vec![index]))).collect();
+        for (what, items) in around {
+            let cut = Cut::around(&plan, &schedule, &items).unwrap();
+            for (width, height) in [(658.0, 416.0), (900.0, 300.0)] {
+                let settings = Settings { width, height, unit: 0.76, today, selected: None, level: Level::Full, palette: Palette::labra() };
+                let names: Vec<(String, [f32; 4])> = part(&plan, &schedule, &calendars, &settings, &cut)
+                    .marks
+                    .into_iter()
+                    .filter(|mark| mark.item.is_some())
+                    .filter_map(|mark| match mark.shape {
+                        Shape::Text { x, y, text, size, anchor, .. } => {
+                            let w = text.chars().count() as f32 * size * 0.6;
+                            let left = match anchor {
+                                Anchor::Start => x,
+                                Anchor::Middle => x - w / 2.0,
+                                Anchor::End => x - w,
+                            };
+                            Some((text, [left, y - 0.78 * size, left + w, y + 0.24 * size]))
+                        }
+                        Shape::Rect { x, w, .. } => {
+                            assert!(x >= 0.0 && x + w <= width + 0.5, "{}: a bar leaves the picture", plan.name);
+                            None
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                for (index, (a, x)) in names.iter().enumerate() {
+                    assert!(x[0] >= 0.0 && x[2] <= width, "{} {what}: \"{a}\" leaves the picture", plan.name);
+                    for (b, y) in &names[index + 1..] {
+                        assert!(x[2] <= y[0] || y[2] <= x[0] || x[3] <= y[1] || y[3] <= x[1], "{} {what}: \"{a}\" covers \"{b}\"", plan.name);
+                    }
+                }
+            }
+        }
+    }
 }

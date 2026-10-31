@@ -7,6 +7,7 @@ use pchart_core::{Plan, Schedule};
 use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, LINK, MID, PAPER, Page, SHADES, SOFT, X0, X1, dates, fit};
 use crate::scene::{Anchor, Scene};
 use crate::style::sans_width;
+use crate::views::Audience;
 
 /// A phase with its dates and its items, in the order they start.
 pub struct Phase {
@@ -48,7 +49,8 @@ enum Row {
 
 /// The Gantt chart for export: one row per item under its phase, with lane, planned dates and what it
 /// has to spare in a table, bars on a time line, and who waits on whom.
-pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) -> Scene {
+pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], audience: Audience) -> Scene {
+    let checks = if audience.warnings() { checks } else { &[] };
     let chain: HashSet<usize> = schedule.chain.iter().copied().collect();
     let (phases, rest) = phase_items(plan, schedule);
     let mut rows: Vec<(Row, f32, f32)> = Vec::new();
@@ -75,7 +77,7 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) ->
     let date_x = lane_x + lane_w + 16.0;
     let date_w = (0..plan.items.len()).map(|index| sans_width(&dates(plan, schedule, index, false), 12.0, false)).fold(0.0, f32::max);
     let spare_x = date_x + date_w + 16.0;
-    let gx0 = spare_x + sans_width("To spare", 11.0, false).max(sans_width("19 wd", 12.0, false)) + 20.0;
+    let gx0 = if audience.spare() { spare_x + sans_width("To spare", 11.0, false).max(sans_width("19 wd", 12.0, false)) + 20.0 } else { spare_x + 4.0 };
     let axis = Axis::new(schedule, today, 13, gx0, X1);
     let row_y = |index: usize| rows.iter().find_map(|(row, y, h)| matches!(row, Row::Item(item) if *item == index).then_some(y + h / 2.0)).unwrap_or(0.0);
     let ends = |index: usize| {
@@ -93,7 +95,9 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) ->
     page.line(X0, 163.0, X1, 163.0, MID, 1.2);
     page.text(lane_x, 156.0, "Lane", 11.0, GRAY, false, Anchor::Start, None);
     page.text(date_x, 156.0, "Planned", 11.0, GRAY, false, Anchor::Start, None);
-    page.text(spare_x, 156.0, "To spare", 11.0, GRAY, false, Anchor::Start, None);
+    if audience.spare() {
+        page.text(spare_x, 156.0, "To spare", 11.0, GRAY, false, Anchor::Start, None);
+    }
     let xt = axis.x(today);
     page.vline(xt, 163.0, bottom, GRAY, 1.2, None, None);
     page.text(xt - 5.0, 138.0, "today", 12.0, GRAY, true, Anchor::End, None);
@@ -144,7 +148,7 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) ->
                 page.text(X0 + 12.0, yc + 4.5, &fit(&item.name, 13.0, fixed, name_w - 4.0), 13.0, ink, fixed, Anchor::Start, Some(index));
                 page.text(lane_x, yc + 4.5, &fit(lane_name(index), 12.0, false, lane_w), 12.0, GRAY, false, Anchor::Start, Some(index));
                 page.text(date_x, yc + 4.5, &dates(plan, schedule, index, false), 12.0, if fixed || late { ink } else { GRAY }, false, Anchor::Start, Some(index));
-                if !on_chain {
+                if !on_chain && audience.spare() {
                     page.text(spare_x, yc + 4.5, &format!("{} wd", slot.spare), 12.0, if late { LATE } else { GRAY }, false, Anchor::Start, Some(index));
                 }
                 let (x0, x1) = ends(index);
@@ -167,7 +171,7 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) ->
         page.tag(xv - 8.0, row_y(target) + 4.5, "no buffer", Anchor::End);
     }
 
-    let chain_label = match schedule.spare() {
+    let chain_label = match schedule.spare().filter(|_| audience.spare()) {
         Some(spare) => format!("decides the date · {spare} wd to spare"),
         None => "decides the date".to_string(),
     };

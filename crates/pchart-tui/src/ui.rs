@@ -98,7 +98,9 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     title_bar(app, frame, &inks, area);
     match app.screen {
         Screen::Situation => crate::situation::draw(app, frame, &inks, area, &mut placements),
-        Screen::Roadmap | Screen::Checks | Screen::Export => {
+        Screen::Checks => crate::checks::draw(app, frame, &inks, area, &mut placements),
+        Screen::Export => crate::export::draw(app, frame, &inks, area, &mut placements),
+        Screen::Roadmap => {
             let top = if area.width >= 120 && area.height >= 44 {
                 tiles(app, frame, &inks, area, &mut placements);
                 1 + TILES
@@ -155,13 +157,19 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         put(frame, x, 0, w, spans);
         x += w + 1;
     }
-    let home = std::env::var("HOME").ok().filter(|home| !home.is_empty() && app.path.starts_with(home.as_str()));
-    let path = home.map_or(app.path.clone(), |home| format!("~{}", &app.path[home.len()..]));
-    let right = if area.width >= 135 { format!("{path} · saved") } else { "saved".to_string() };
+    let right = if area.width >= 135 { format!("{} · saved", home(&app.path)) } else { "saved".to_string() };
     let right = if (right.chars().count() as u16) + x + 2 > area.width { "saved".to_string() } else { right };
     let w = right.chars().count() as u16;
     if x + w < area.width {
         put(frame, area.width - w - 1, 0, w, vec![Span::styled(right, inks.dim)]);
+    }
+}
+
+/// `path` with the home folder as "~".
+pub(crate) fn home(path: &str) -> String {
+    match std::env::var("HOME").ok().filter(|home| !home.is_empty() && path.starts_with(home.as_str())) {
+        Some(home) => format!("~{}", &path[home.len()..]),
+        None => path.to_string(),
     }
 }
 
@@ -174,7 +182,7 @@ pub(crate) fn state(app: &App, inks: &Inks) -> Option<(&'static str, Style)> {
     })
 }
 
-fn holidays(app: &App) -> Vec<(usize, Date, String)> {
+pub(crate) fn holidays(app: &App) -> Vec<(usize, Date, String)> {
     let weekday = |day: Date| !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday);
     let mut out = Vec::new();
     for (index, item) in app.plan.items.iter().enumerate().filter(|(_, item)| !item.milestone) {
@@ -247,7 +255,7 @@ fn tiles(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut
             let cols = ((value.chars().count() as f32 * 0.6 * big) / cw as f32).ceil() as u16 + 1;
             let rect = Rect { x: x + 2, y: 3, width: cols.min(w.saturating_sub(4)), height: 2 };
             let (px_w, px_h) = (f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch));
-            placements.push(Placement { rect, svg: bits::big(&value, big, value_ink, px_w, px_h, &app.palette).svg() });
+            placements.push(Placement { rect, svg: bits::big(&value, big, value_ink, px_w, px_h, &app.palette).svg(), paper: false });
             side_x = rect.x + rect.width + 2;
         }
         put(frame, side_x, 4, (x + w).saturating_sub(side_x + 2), vec![Span::styled(side, side_style)]);
@@ -302,7 +310,9 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
     let hints: &[(&str, &str)] = match app.screen {
         Screen::Situation => &[("↑↓", "statement"), ("Enter", "show in roadmap"), ("2", "roadmap"), ("q", "quit")],
-        _ => &[("↑↓", item), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+        Screen::Roadmap => &[("↑↓", item), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+        Screen::Checks => &[("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
+        Screen::Export => &[("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
     };
     let mut spans = Vec::new();
     for &(key, label) in hints {
@@ -403,7 +413,7 @@ fn roadmap(app: &App, frame: &mut Frame, inks: &Inks, body: Rect, placements: &m
     if l.chart.width > 0 && l.chart.height > 0 {
         let mut scene = pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings);
         scene.background = None;
-        placements.push(Placement { rect: l.chart, svg: scene.svg() });
+        placements.push(Placement { rect: l.chart, svg: scene.svg(), paper: false });
     }
     if let Some(row) = l.legend {
         legend(app, frame, inks, level, l.panel.x + 2, row, l.panel.width.saturating_sub(4), placements);
@@ -446,7 +456,7 @@ fn legend(app: &App, frame: &mut Frame, inks: &Inks, level: Level, x: u16, row: 
             Some(symbol) => {
                 let rect = Rect { x: at, y: row - 1, width: 3, height: 2 };
                 let svg = bits::symbol(symbol, f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch), unit, &app.palette).svg();
-                placements.push(Placement { rect, svg });
+                placements.push(Placement { rect, svg, paper: false });
             }
             None => put(frame, at + 1, row, 1, vec![Span::styled("▲", bold(inks.warn))]),
         }
@@ -693,6 +703,67 @@ mod tests {
         terminal.draw(|frame| placements = draw(app, frame)).unwrap();
         let buffer = terminal.backend().buffer().clone();
         ((0..height).map(|y| (0..width).map(|x| buffer[(x, y)].symbol().to_string()).collect()).collect(), placements)
+    }
+
+    fn has(rows: &[String], text: &str) -> bool {
+        rows.iter().any(|row| row.contains(text))
+    }
+
+    #[test]
+    fn the_checks_screen_lists_by_weight_and_says_what_a_check_means() {
+        let mut app = app();
+        app.screen = Screen::Checks;
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, ":: CHECKS · 1 WARNING · 1 HINT") && has(&rows, "PROBLEMS   none") && has(&rows, "› ▲ No buffer before a fixed date"));
+        assert!(has(&rows, "Acceptance Fri 26 Feb → Launch Mon 01 Mar") && has(&rows, "Its last item is Requirements, Fri 27 Nov"));
+        assert!(has(&rows, "Every fixed date holds · deadlines kept ·") && has(&rows, "Two items of one person at once: the plan names no one"));
+        assert!(has(&rows, ":: HOLIDAYS ACCOUNTED FOR · 5") && has(&rows, "Frontend      Tue 26 Jan  Republic Day"));
+        assert!(has(&rows, ":: IN THE ROADMAP · 18 JAN – 12 MAR 2027") && has(&rows, "starting by Mon 09 Nov.") && placements.len() == 1);
+        let (rows, placements) = screen(&app, 80, 24);
+        assert!(has(&rows, "If Acceptance slips by a day, Launch does not hold.") && has(&rows, "A 5 wd buffer before it leaves 7 wd to spare."));
+        assert!(placements.is_empty() && !has(&rows, "IN THE ROADMAP"));
+        app.choose_check(1);
+        let (rows, _) = screen(&app, 170, 50);
+        assert!(has(&rows, ":: IN THE ROADMAP · 12 OCT – 04 DEC 2026") && has(&rows, "Add a milestone after Requirements"));
+        app.show_check_in_roadmap();
+        assert_eq!((app.screen, app.plan.items[app.selected].id.as_str()), (Screen::Roadmap, "requirements"));
+    }
+
+    #[test]
+    fn the_export_screen_writes_what_its_preview_shows() {
+        let dir = std::env::temp_dir().join(format!("pchart-export-{}", std::process::id()));
+        let mut app = app();
+        app.path = dir.join("portal.pchart").display().to_string();
+        app.screen = Screen::Export;
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, "› Milestone chart") && has(&rows, "› Team") && has(&rows, "[x] PDF   [x] SVG   [ ] PNG   [ ] Markdown"));
+        assert!(has(&rows, "Page       16:9 · slide") && has(&rows, "Files      portal-milestones.pdf") && placements.len() == 1);
+        app.export_change(-1);
+        app.export_part(1);
+        app.export_change(1);
+        app.export_change(1);
+        let (rows, _) = screen(&app, 170, 50);
+        assert!(has(&rows, "› Gantt chart") && has(&rows, "› Client") && has(&rows, "hides  what items have to spare, warnings"));
+        app.export_part(1);
+        app.export_change(1);
+        app.export_change(1);
+        app.export_toggle();
+        app.export_change(1);
+        app.export_toggle();
+        let names: Vec<String> = crate::export::files(&app).iter().map(|file| file.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["portal-gantt.pdf", "portal-gantt.svg", "portal-gantt.png", "portal.md", "portal-milestones.svg"]);
+        let (rows, placements) = screen(&app, 80, 24);
+        assert!(has(&rows, "Files      portal-gantt.pdf, .svg, .png, portal.md,") && has(&rows, "The preview needs 110 columns.") && placements.is_empty());
+
+        let written = crate::export::write(&crate::export::job(&app)).unwrap();
+        assert_eq!(written, crate::export::files(&app));
+        let read = |name: &str| std::fs::read(dir.join("export").join(name)).unwrap();
+        assert!(read("portal-gantt.pdf").starts_with(b"%PDF") && read("portal-gantt.png").starts_with(b"\x89PNG"));
+        let svg = String::from_utf8(read("portal-gantt.svg")).unwrap();
+        assert!(svg.contains("Gantt chart") && !svg.contains("To spare") && !svg.contains("no buffer"));
+        let md = String::from_utf8(read("portal.md")).unwrap();
+        assert!(md.contains("**Launch on Mon 01 Mar holds.**\n") && !md.contains("to spare, with") && md.contains("![Milestone chart](portal-milestones.svg)"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

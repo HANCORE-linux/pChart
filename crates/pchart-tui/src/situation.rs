@@ -29,7 +29,7 @@ fn big(app: &App, placements: &mut Vec<Placement>, x: u16, y: u16, rows: u16, te
     let cols = ((text.chars().count() as f32 * 0.6 * font) / f32::from(app.cell.0)).ceil() as u16 + 1;
     let rect = Rect { x, y, width: cols.min(room), height: rows };
     let (w, h) = pixels(app, rect);
-    placements.push(Placement { rect, svg: bits::big(text, font, ink, w, h, &app.palette).svg() });
+    placements.push(Placement { rect, svg: bits::big(text, font, ink, w, h, &app.palette).svg(), paper: false });
     rect.width
 }
 
@@ -96,7 +96,7 @@ fn sentence(app: &App, inks: &Inks) -> Vec<Span<'static>> {
 }
 
 /// Words wrapped to `room` columns, keeping the style of each span.
-fn wrap(spans: Vec<Span<'static>>, room: u16) -> Vec<Vec<Span<'static>>> {
+pub(crate) fn wrap(spans: Vec<Span<'static>>, room: u16) -> Vec<Vec<Span<'static>>> {
     let mut lines: Vec<Vec<Span<'static>>> = vec![Vec::new()];
     let mut used = 0u16;
     for span in spans {
@@ -151,7 +151,7 @@ fn verdict(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &m
         for (name, cols) in [("does not hold", 13), ("tight", 9), ("holds", 13)] {
             let rect = Rect { x: at, y: rect.y + 6, width: cols, height: 1 };
             let (w, h) = pixels(app, rect);
-            placements.push(Placement { rect, svg: situation::segment(name == state, w, h, unit(app), &app.palette).svg() });
+            placements.push(Placement { rect, svg: situation::segment(name == state, w, h, unit(app), &app.palette).svg(), paper: false });
             put(frame, at, rect.y + 1, cols, vec![Span::styled(name, if name == state { bold(inks.bright) } else { inks.muted })]);
             at += cols + 1;
         }
@@ -163,7 +163,7 @@ fn verdict(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &m
     for (name, cols) in [("does not hold", 2), ("tight", 2), ("holds", 3)] {
         let bar = Rect { x: at, y: rect.y + 4, width: cols, height: 1 };
         let (w, h) = pixels(app, bar);
-        placements.push(Placement { rect: bar, svg: situation::segment(name == state, w, h, unit(app), &app.palette).svg() });
+        placements.push(Placement { rect: bar, svg: situation::segment(name == state, w, h, unit(app), &app.palette).svg(), paper: false });
         at += cols + 1;
         put(frame, at, rect.y + 4, name.chars().count() as u16, vec![Span::styled(name, if name == state { bold(inks.bright) } else { inks.muted })]);
         at += name.chars().count() as u16 + 1;
@@ -270,7 +270,7 @@ fn burning(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &m
         put(frame, rect.x + 3, rect.y + 13, 20, vec![Span::styled("NEXT 6 WEEKS", inks.muted)]);
         let strip = Rect { x: rect.x + 4, y: rect.y + 14, width: rect.width.saturating_sub(8), height: 6 };
         let (w, h) = pixels(app, strip);
-        placements.push(Placement { rect: strip, svg: situation::weeks(&app.plan, &app.schedule, app.today, w, h, unit(app), &app.palette).svg() });
+        placements.push(Placement { rect: strip, svg: situation::weeks(&app.plan, &app.schedule, app.today, w, h, unit(app), &app.palette).svg(), paper: false });
     }
 }
 
@@ -391,7 +391,7 @@ fn chain(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &mut
         return;
     }
     panel(frame, inks, rect, "THIS CHAIN DECIDES THE DATE", false);
-    placements.push(Placement { rect: picture, svg: situation::chain(&app.plan, &app.schedule, w, h, unit(app), &app.palette).svg() });
+    placements.push(Placement { rect: picture, svg: situation::chain(&app.plan, &app.schedule, w, h, unit(app), &app.palette).svg(), paper: false });
     put(frame, rect.x + 2, rect.y + 12, rect.width.saturating_sub(4), others(app, inks, rect.width.saturating_sub(4), "  "));
 }
 

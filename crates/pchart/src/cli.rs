@@ -25,8 +25,8 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "apply", usage: "pchart apply PLAN EDITS.json", about: "Apply a JSON list of edits, all of them or none. \"-\" reads the list from stdin." },
     Command {
         name: "export",
-        usage: "pchart export PLAN [--view roadmap|milestones|gantt|phases|now-next-later] [--style dark|light] [--svg FILE] [--png FILE] [--pdf FILE] [--level overview|standard|full] [--size WxH] [--md FILE [--audience management|agents]]",
-        about: "A view as pictures and PDF. The roadmap is dark like the terminal, at a detail level and size, or a light 16:9 page with --style light; the other views are light pages. --md writes the plan as Markdown with the milestone chart as SVG next to it.",
+        usage: "pchart export PLAN [--view roadmap|milestones|gantt|phases|now-next-later] [--style dark|light] [--svg FILE] [--png FILE] [--pdf FILE] [--level overview|standard|full] [--size WxH] [--md FILE] [--audience team|management|client|agents]",
+        about: "A view as pictures and PDF. The roadmap is dark like the terminal, at a detail level and size, or a light 16:9 page with --style light; the other views are light pages. --md writes the plan as Markdown with the milestone chart as SVG next to it. --audience leaves out what the audience does not see: management sees no warnings, the client no warnings and not what single items have to spare; agents get the item ids in Markdown. The default is team, which sees everything.",
     },
     Command { name: "bench", usage: "pchart bench PLAN --frames N --out FILE", about: "Inside a terminal: change an item N times and time every step." },
     Command { name: "help", usage: "pchart help [--json]", about: "This help; with --json for programs." },

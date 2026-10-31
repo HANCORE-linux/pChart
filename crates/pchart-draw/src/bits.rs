@@ -52,3 +52,18 @@ pub fn symbol(symbol: Symbol, width: f32, height: f32, unit: f32, palette: &Pale
     }
     s
 }
+
+/// A page of an export as the preview shows it: scaled to fit a `width` × `height` picture, centred,
+/// over a soft shadow. `unit` is one pixel of a 21 px tall cell.
+pub fn sheet(page: &Scene, width: f32, height: f32, unit: f32) -> String {
+    let (dx, dy) = (6.0 * unit, 8.0 * unit);
+    let scale = ((width - dx) / page.width).min((height - dy) / page.height);
+    let (w, h) = (page.width * scale, page.height * scale);
+    let (x, y) = ((width - dx - w) / 2.0, (height - dy - h) / 2.0);
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect x="{}" y="{}" width="{w}" height="{h}" fill="#000000" opacity="0.5"/>{}</svg>"##,
+        x + dx,
+        y + dy,
+        page.nested(x, y, w, h)
+    )
+}

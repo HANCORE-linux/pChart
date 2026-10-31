@@ -30,6 +30,35 @@ pub struct Settings {
     pub palette: Palette,
 }
 
+/// A part of the roadmap: the days from `start` to `end`, and the lanes in `lanes` by their index in the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cut {
+    pub start: Date,
+    pub end: Date,
+    pub lanes: Vec<usize>,
+}
+
+impl Cut {
+    /// The weeks around `items`: from five weeks before the week the first of them starts to the Friday
+    /// of the week after the last one ends, with every lane that has work in these weeks.
+    pub fn around(plan: &Plan, schedule: &Schedule, items: &[usize]) -> Option<Cut> {
+        let monday = |mut day: Date| {
+            while day.weekday() != Weekday::Monday {
+                day = previous(day);
+            }
+            day
+        };
+        let first = items.iter().map(|&index| schedule.slots[index].planned.start).min()?;
+        let last = items.iter().map(|&index| schedule.slots[index].planned.finish).max()?;
+        let start = (0..35).fold(monday(first), |day, _| previous(day));
+        let end = (0..11).fold(monday(last), |day, _| next(day));
+        let lanes = (0..plan.lanes.len())
+            .filter(|&lane| plan.items.iter().zip(&schedule.slots).any(|(item, slot)| plan.lane(&item.lane) == Some(lane) && slot.planned.start <= end && slot.planned.finish >= start))
+            .collect();
+        Some(Cut { start, end, lanes })
+    }
+}
+
 /// Height of a lane with one row of bars, as in the approved design.
 const LANE: f32 = 92.0;
 /// Each further row of bars in a lane adds this share of a lane.
@@ -106,7 +135,7 @@ impl Chart<'_> {
             return (x, x, y);
         }
         let span = self.schedule.slots[index].planned;
-        (self.g.x(span.start), self.g.x(span.finish) + self.g.px, y)
+        (self.g.x(span.start).max(self.g.x0), (self.g.x(span.finish) + self.g.px).min(self.g.x1), y)
     }
 
     fn shown(&self, index: usize) -> bool {
@@ -175,12 +204,21 @@ impl Chart<'_> {
 
 /// The swimlane roadmap at the detail level of `settings`.
 pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings) -> Scene {
+    draw(plan, schedule, calendars, settings, None)
+}
+
+/// The part of the swimlane roadmap within `cut`; bars that reach beyond it are cut at its edges.
+pub fn part(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: &Cut) -> Scene {
+    draw(plan, schedule, calendars, settings, Some(cut))
+}
+
+fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: Option<&Cut>) -> Scene {
     let (p, u, today) = (settings.palette, settings.unit, settings.today);
     let mut s = Scene { width: settings.width, height: settings.height, background: Some(p.page), hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
-    let c = chart(plan, schedule, settings, Some(settings.height));
+    let c = chart(plan, schedule, settings, Some(settings.height), cut);
 
     frame(&mut s, &c, calendars);
-    if let Some(target) = schedule.target {
+    if let Some(target) = schedule.target.filter(|&target| c.shown(target)) {
         let xt = c.g.x(schedule.slots[target].planned.finish);
         s.add(Shape::Line { x1: xt, y1: c.g.lane_y(0) + 2.0 * u, x2: xt, y2: c.g.bottom(), stroke: Stroke { color: p.bright, width: u, dash: Some((4.0 * u, 4.0 * u)) } });
     }
@@ -197,30 +235,38 @@ pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], setting
         labels(&mut s, &c, &mut taken);
     }
 
-    let xt = c.g.x(today);
-    s.add(Shape::Line { x1: xt, y1: c.g.top + 42.0 * u, x2: xt, y2: c.g.bottom(), stroke: c.rule(p.ink, 1.5) });
-    s.add(Shape::Text { x: xt - 5.0 * u, y: c.g.top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
+    if (c.g.start..=c.g.end).contains(&today) {
+        let xt = c.g.x(today);
+        s.add(Shape::Line { x1: xt, y1: c.g.top + 42.0 * u, x2: xt, y2: c.g.bottom(), stroke: c.rule(p.ink, 1.5) });
+        s.add(Shape::Text { x: xt - 5.0 * u, y: c.g.top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
+    }
     s
 }
 
 /// The height at which every lane of the roadmap gets the room of the approved design.
 pub fn natural_height(plan: &Plan, schedule: &Schedule, settings: &Settings) -> f32 {
-    chart(plan, schedule, settings, None).g.bottom() + 22.0 * settings.unit
+    chart(plan, schedule, settings, None, None).g.bottom() + 22.0 * settings.unit
 }
 
 /// Lays the roadmap out: the days it shows, a row for every item, the detail level that fits, and
 /// the lanes that share `height`, or get their natural room without one. Full needs 4 rows of 21 units
 /// per lane and steps down to Standard below that; below 2 rows per lane, only the lanes around the
-/// selection are shown, always with the lane of the fixed target.
-fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height: Option<f32>) -> Chart<'a> {
+/// selection are shown, always with the lane of the fixed target. A `cut` sets the days and the lanes.
+fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height: Option<f32>, cut: Option<&Cut>) -> Chart<'a> {
     let (u, today) = (settings.unit, settings.today);
-    let first = schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(today).min(today);
-    let last = schedule.slots.iter().map(|slot| slot.planned.finish.max(slot.latest.finish)).max().unwrap_or(today);
-    let mut start = first;
-    while start.weekday() != Weekday::Monday {
-        start = previous(start);
-    }
-    let end = (0..20).fold(last, |day, _| next(day));
+    let (start, end) = match cut {
+        Some(cut) => (cut.start, cut.end),
+        None => {
+            let first = schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(today).min(today);
+            let last = schedule.slots.iter().map(|slot| slot.planned.finish.max(slot.latest.finish)).max().unwrap_or(today);
+            let mut start = first;
+            while start.weekday() != Weekday::Monday {
+                start = previous(start);
+            }
+            (start, (0..20).fold(last, |day, _| next(day)))
+        }
+    };
+    let within = |index: usize| cut.is_none() || (schedule.slots[index].planned.start <= end && schedule.slots[index].planned.finish >= start);
     let top = 26.0 * u;
     let x0 = if settings.width >= 1000.0 * u { 220.0 * u } else { 140.0 * u };
     let x1 = settings.width - 8.0 * u;
@@ -229,8 +275,8 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     let mut c = Chart {
         plan,
         schedule,
-        lanes: lane_of.clone(),
-        visible: (0..plan.lanes.len()).collect(),
+        lanes: (0..plan.items.len()).map(|index| if within(index) { lane_of[index] } else { usize::MAX }).collect(),
+        visible: cut.map_or_else(|| (0..plan.lanes.len()).collect(), |cut| cut.lanes.clone()),
         rows: vec![0; plan.items.len()],
         chain: schedule.chain.iter().copied().collect(),
         g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u, unit: LANE * u },
@@ -245,7 +291,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         c.rows = rows(&c);
     }
     let weight = |c: &Chart, lane: usize| {
-        let rows = (0..plan.items.len()).filter(|&index| lane_of[index] == lane).map(|index| c.rows[index] + 1).max().unwrap_or(1);
+        let rows = (0..plan.items.len()).filter(|&index| lane_of[index] == lane && within(index)).map(|index| c.rows[index] + 1).max().unwrap_or(1);
         1.0 + ROW * (rows - 1) as f32
     };
     let rows_y = top + 64.0 * u;
@@ -253,12 +299,12 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     if let Some(height) = height {
         let available = height - rows_y - 22.0 * u;
         let share = |c: &Chart, lanes: &[usize], room: f32| room / lanes.iter().map(|&lane| weight(c, lane)).sum::<f32>().max(1.0);
-        let all: Vec<usize> = (0..plan.lanes.len()).collect();
+        let all = c.visible.clone();
         if c.level == Level::Full && share(&c, &all, available) < 84.0 * u {
             c.level = Level::Standard;
         }
         let mut room = available;
-        if share(&c, &all, available) < 42.0 * u {
+        if cut.is_none() && share(&c, &all, available) < 42.0 * u {
             room += 18.0 * u;
             let fits = |lanes: &[usize]| share(&c, lanes, room) >= 42.0 * u;
             let selected = settings.selected.map_or(0, |index| lane_of[index]);
@@ -287,7 +333,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         }
         unit = share(&c, &c.visible, room).max(24.0 * u);
     }
-    c.lanes = lane_of.iter().map(|lane| c.visible.iter().position(|shown| shown == lane).unwrap_or(usize::MAX)).collect();
+    c.lanes = lane_of.iter().enumerate().map(|(index, lane)| c.visible.iter().position(|shown| shown == lane).filter(|_| within(index)).unwrap_or(usize::MAX)).collect();
     let weights: Vec<f32> = c.visible.iter().map(|&lane| weight(&c, lane)).collect();
     c.g.tops = std::iter::once(rows_y).chain(weights.iter().scan(rows_y, |y, weight| {
         *y += unit * weight;
@@ -308,7 +354,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
 /// The detail level a roadmap shows at the size of `settings`, and the lanes it shows, by their index
 /// in the plan.
 pub fn shown(plan: &Plan, schedule: &Schedule, settings: &Settings) -> (Level, Vec<usize>) {
-    let c = chart(plan, schedule, settings, Some(settings.height));
+    let c = chart(plan, schedule, settings, Some(settings.height), None);
     (c.level, c.visible)
 }
 
@@ -358,8 +404,8 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     }
     s.add(Shape::Line { x1: g.x0, y1: top + 40.0 * u, x2: g.x1, y2: top + 40.0 * u, stroke: c.rule(p.rule, 1.0 / u) });
 
-    for (name, from, to) in c.schedule.phases(c.plan) {
-        chevron(s, &p, u, g.x(from), g.x(to) + g.px, top + 44.0 * u, 18.0 * u, &name);
+    for (name, from, to) in c.schedule.phases(c.plan).into_iter().filter(|(_, from, to)| *to >= g.start && *from <= end) {
+        chevron(s, &p, u, g.x(from.max(g.start)), g.x(to.min(end)) + g.px, top + 44.0 * u, 18.0 * u, &name);
     }
     s.add(text(12.0 * u, top + 58.0 * u, "Phases".into(), 14.0, p.muted));
 
@@ -425,7 +471,7 @@ fn free_slack(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
         let free = free_until(c.plan, c.schedule, index);
         if free > slot.planned.finish {
             let (_, x1, y) = c.bar(index);
-            let xe = c.g.x(free) + c.g.px;
+            let xe = (c.g.x(free) + c.g.px).min(c.g.x1);
             s.add_for(index, 1.0, Shape::Rect { x: x1, y: y - 7.0 * u, w: xe - x1, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Spare, stroke: Some(c.rule(c.p.muted, 1.0)) });
             taken.push([x1, y - 7.0 * u, xe, y + 7.0 * u]);
         }

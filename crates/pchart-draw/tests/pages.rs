@@ -2,7 +2,7 @@ use jiff::civil::date;
 use pchart_core::{Holidays, Plan, Schedule, analyse, schedule};
 use pchart_draw::scene::{Anchor, Scene, Shape};
 use pchart_draw::style::sans_width;
-use pchart_draw::{gantt, milestones, now_next_later, phase_plan, swimlanes};
+use pchart_draw::{Audience, gantt, milestones, now_next_later, phase_plan, swimlanes};
 
 fn pages() -> Vec<(String, Scene)> {
     let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
@@ -14,10 +14,12 @@ fn pages() -> Vec<(String, Scene)> {
         let schedule: Schedule = schedule(&plan, &calendars, today).unwrap();
         let checks = analyse(&plan, &calendars, &schedule, today).checks;
         out.push((format!("{} milestones", plan.name), milestones(&plan, &schedule, today)));
-        out.push((format!("{} gantt", plan.name), gantt(&plan, &schedule, today, &checks)));
+        for audience in [Audience::Team, Audience::Client] {
+            out.push((format!("{} gantt for {audience:?}", plan.name), gantt(&plan, &schedule, today, &checks, audience)));
+            out.push((format!("{} swimlanes for {audience:?}", plan.name), swimlanes(&plan, &schedule, today, &checks, audience)));
+        }
         out.push((format!("{} phases", plan.name), phase_plan(&plan, &schedule, today)));
         out.push((format!("{} now-next-later", plan.name), now_next_later(&plan, &schedule, today)));
-        out.push((format!("{} swimlanes", plan.name), swimlanes(&plan, &schedule, today, &checks)));
     }
     out
 }

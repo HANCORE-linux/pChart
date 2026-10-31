@@ -76,6 +76,20 @@ impl Scene {
         let mut out = String::with_capacity(64 * self.marks.len() + 512);
         let (w, h) = (self.width, self.height);
         let _ = write!(out, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="{}">"#, self.font);
+        self.body(&mut out);
+        out
+    }
+
+    /// The scene as an svg element at `x`, `y`, scaled to `width` × `height`, to put into another picture.
+    pub fn nested(&self, x: f32, y: f32, width: f32, height: f32) -> String {
+        let mut out = String::with_capacity(64 * self.marks.len() + 512);
+        let _ = write!(out, r#"<svg x="{x}" y="{y}" width="{width}" height="{height}" viewBox="0 0 {} {}" font-family="{}">"#, self.width, self.height, self.font);
+        self.body(&mut out);
+        out
+    }
+
+    fn body(&self, out: &mut String) {
+        let (w, h) = (self.width, self.height);
         if let Some(background) = self.background {
             let _ = write!(out, r#"<rect width="{w}" height="{h}" fill="{}"/>"#, background.hex());
         }
@@ -88,8 +102,8 @@ impl Scene {
             );
         };
         out.push_str("<defs>");
-        pattern(&mut out, "hatch", 4.0, self.hatch, 1.6);
-        pattern(&mut out, "alert", 5.0, self.hatch_alert, 2.0);
+        pattern(out, "hatch", 4.0, self.hatch, 1.6);
+        pattern(out, "alert", 5.0, self.hatch_alert, 2.0);
         let _ = write!(
             out,
             r#"<pattern id="spare" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="{}" stroke-width="1.4" opacity="0.55"/></pattern>"#,
@@ -97,10 +111,9 @@ impl Scene {
         );
         out.push_str("</defs>");
         for mark in &self.marks {
-            write_mark(&mut out, mark);
+            write_mark(out, mark);
         }
         out.push_str("</svg>");
-        out
     }
 
     /// The topmost item drawn at a point.

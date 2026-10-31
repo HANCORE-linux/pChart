@@ -21,7 +21,7 @@ cargo build --release
 ./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view gantt --pdf gantt.pdf --md ROADMAP.md
 ```
 
-↑↓ selects an item, d changes the detail level, q quits.
+1–4 switch between the situation, the roadmap, the checks and the export; ↑↓ chooses a statement, an item or a check, Enter shows it in the roadmap, d changes the detail level, Esc goes back to the situation, q quits. On the export screen ←→ changes the view or the audience, Space switches a format on or off and Enter writes the files to `export/` next to the plan.
 
 ## Terminals
 

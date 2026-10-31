@@ -30,11 +30,12 @@ pub struct Painter {
     picker: Picker,
     output: Output,
     sixel: Encoder,
+    paper: Encoder,
 }
 
 impl Painter {
     pub fn new(picker: Picker, palette: &Palette) -> Self {
-        Painter { picker, output: Output::default(), sixel: Encoder::new(palette) }
+        Painter { picker, output: Output::default(), sixel: Encoder::new(palette), paper: Encoder::paper(palette) }
     }
 
     pub fn cell(&self) -> (u16, u16) {
@@ -51,9 +52,9 @@ impl Painter {
         }
     }
 
-    /// Paints `svg` for `rect`. A kitty image keeps the `id` of its place, so each new picture replaces
-    /// the last one there in place.
-    pub fn paint(&mut self, svg: &str, rect: Rect, id: u32) -> Option<(Protocol, Cost)> {
+    /// Paints `svg` for `rect`; `paper` says it shows a light page. A kitty image keeps the `id` of its
+    /// place, so each new picture replaces the last one there in place.
+    pub fn paint(&mut self, svg: &str, rect: Rect, id: u32, paper: bool) -> Option<(Protocol, Cost)> {
         let (cell_w, cell_h) = self.cell();
         let (width, height) = (u32::from(rect.width) * u32::from(cell_w), u32::from(rect.height) * u32::from(cell_h));
         let started = Instant::now();
@@ -65,7 +66,8 @@ impl Painter {
         let started = Instant::now();
         let size = Size::new(rect.width, rect.height);
         let protocol = if self.picker.protocol_type() == ProtocolType::Sixel {
-            Protocol::Sixel(Sixel { data: sixel(&mut self.sixel, &pixmap, rect), size, is_tmux: false })
+            let encoder = if paper { &mut self.paper } else { &mut self.sixel };
+            Protocol::Sixel(Sixel { data: sixel(encoder, &pixmap, rect), size, is_tmux: false })
         } else {
             let image = DynamicImage::ImageRgba8(rgba(&pixmap)?);
             let compress = self.picker.capabilities().contains(&Capability::KittyCompression);
@@ -97,10 +99,11 @@ fn sixel(encoder: &mut Encoder, pixmap: &Pixmap, rect: Rect) -> String {
     data
 }
 
-/// A picture in a place on the screen.
+/// A picture in a place on the screen; `paper` when it shows a light page.
 pub struct Placement {
     pub rect: Rect,
     pub svg: String,
+    pub paper: bool,
 }
 
 struct Job {
@@ -108,6 +111,7 @@ struct Job {
     key: u64,
     id: u32,
     svg: String,
+    paper: bool,
 }
 
 struct Done {
@@ -138,7 +142,7 @@ impl Pictures {
         let (outbox, done) = mpsc::channel();
         thread::spawn(move || {
             for job in inbox {
-                let protocol = painter.paint(&job.svg, job.rect, job.id).map(|(protocol, _)| protocol);
+                let protocol = painter.paint(&job.svg, job.rect, job.id, job.paper).map(|(protocol, _)| protocol);
                 if outbox.send(Done { rect: job.rect, key: job.key, protocol }).is_err() {
                     return;
                 }
@@ -177,7 +181,7 @@ impl Pictures {
                 self.waiting.remove(&placement.rect);
                 continue;
             }
-            let job = Job { rect: placement.rect, key, id: self.id(placement.rect), svg: placement.svg };
+            let job = Job { rect: placement.rect, key, id: self.id(placement.rect), svg: placement.svg, paper: placement.paper };
             if self.pending.contains_key(&placement.rect) {
                 self.waiting.insert(placement.rect, job);
             } else {

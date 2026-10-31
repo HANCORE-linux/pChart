@@ -63,6 +63,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | `pchart schedule PLAN --json` | calculated dates, what each item has to spare, and the deciding chain |
 | `pchart export PLAN --svg F --png F --pdf F` | the roadmap picture as files; `--level overview\|standard\|full`; `--view milestones\|gantt\|phases\|now-next-later` and `--style light` for the 16:9 pages |
 | `pchart export PLAN --md F` | the plan as Markdown with the milestone chart next to it; `--audience agents` adds the item ids |
+| `--audience team\|management\|client` | leave out what the audience does not see: management no warnings, the client also not what single items have to spare |
 | `pchart bench PLAN --frames N --out F` | inside a terminal: changes a bar N times and times every step up to the terminal |
 | `--today YYYY-MM-DD` | calculate from a fixed day, so results repeat |
 | `--holidays FILE` | holiday data instead of the bundled data |

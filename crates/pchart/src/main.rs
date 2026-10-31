@@ -10,7 +10,7 @@ use pchart_core::analysis::Severity;
 use pchart_core::edit::{Edit, Fix};
 use pchart_core::model::{Item, parse_workdays};
 use pchart_core::{Calendar, Holidays, Plan, Schedule, analyse, text};
-use pchart_draw::{Audience, Level, Output, Palette, Settings};
+use pchart_draw::{Audience, Level, Output, Palette, Settings, View};
 use serde_json::json;
 
 use crate::cli::Args;
@@ -451,10 +451,9 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
     if ["--svg", "--png", "--pdf", "--md"].iter().all(|option| args.option(option).is_none()) {
         return Err(Failure::usage("export needs at least one of --svg, --png, --pdf and --md", args));
     }
-    let audience = match args.option("--audience").unwrap_or("management") {
-        "management" => Audience::Management,
-        "agents" => Audience::Agents,
-        other => return Err(Failure::usage(format!("\"{other}\" is not an audience for Markdown; use management or agents"), args)),
+    let audience = match args.option("--audience") {
+        Some(id) => Audience::from_id(id).ok_or_else(|| Failure::usage(format!("\"{id}\" is not an audience; use team, management, client or agents"), args))?,
+        None => Audience::Team,
     };
     let view = args.option("--view").unwrap_or("roadmap");
     let light = match args.option("--style").unwrap_or(if view == "roadmap" { "dark" } else { "light" }) {
@@ -468,7 +467,7 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
     }
     let checks = || analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today).checks;
     let scene = match view {
-        "roadmap" if light => pchart_draw::swimlanes(&ctx.plan, &ctx.schedule, ctx.today, &checks()),
+        "roadmap" if light => View::Roadmap.page(&ctx.plan, &ctx.schedule, ctx.today, &checks(), audience),
         "roadmap" => {
             let size = match args.option("--size") {
                 Some(size) => Some(size.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or_else(|| Failure::usage(format!("\"{size}\" is not a size like 1220x756"), args))?),
@@ -484,11 +483,10 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
             settings.height = size.map_or_else(|| pchart_draw::natural_height(&ctx.plan, &ctx.schedule, &settings), |(_, height)| height);
             pchart_draw::roadmap(&ctx.plan, &ctx.schedule, &ctx.calendars, &settings)
         }
-        "milestones" => pchart_draw::milestones(&ctx.plan, &ctx.schedule, ctx.today),
-        "gantt" => pchart_draw::gantt(&ctx.plan, &ctx.schedule, ctx.today, &checks()),
-        "phases" => pchart_draw::phase_plan(&ctx.plan, &ctx.schedule, ctx.today),
-        "now-next-later" => pchart_draw::now_next_later(&ctx.plan, &ctx.schedule, ctx.today),
-        other => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases or now-next-later"), args)),
+        other => match View::from_id(other) {
+            Some(view) => view.page(&ctx.plan, &ctx.schedule, ctx.today, &checks(), audience),
+            None => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases or now-next-later"), args)),
+        },
     };
     let svg = scene.svg();
     let write = |path: &Path, bytes: &[u8]| std::fs::write(path, bytes).map_err(|err| Failure::file(format!("{}: {err}", path.display())));

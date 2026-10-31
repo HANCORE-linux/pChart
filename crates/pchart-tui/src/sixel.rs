@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use pchart_draw::Palette;
+use pchart_draw::page::{CARD, FIXED, GRAY, INK, LATE, LIGHT, LINK, MID, PAPER, SHADES, SOFT, WARN, WARN_LINE};
 use pchart_draw::scene::Color;
 use resvg::tiny_skia::Pixmap;
 
@@ -23,24 +24,41 @@ fn mix(a: Color, b: Color, amount: f64) -> [u8; 3] {
 
 impl Encoder {
     pub fn new(palette: &Palette) -> Self {
-        let mut colors: Vec<[u8; 3]> = Vec::new();
+        let colors = palette.colors();
+        Encoder::of(&colors, &[(palette.page, &colors), (palette.raised, &colors), (palette.alert_ground, &colors)], palette.page)
+    }
+
+    /// For a light export page on the dark screen: its colours, their edges on paper, cards, phases and
+    /// tags, and the page and its shadow over the dark ground.
+    pub fn paper(palette: &Palette) -> Self {
+        let colors = [PAPER, INK, GRAY, LIGHT, MID, SOFT, LINK, CARD, SHADES[0], SHADES[1], SHADES[2], SHADES[3], FIXED, LATE, WARN, WARN_LINE, palette.page, Color(0, 0, 0)];
+        let words = [INK, GRAY];
+        let mut grounds: Vec<(Color, &[Color])> = vec![(PAPER, &colors[..16]), (CARD, &[INK, GRAY, MID, FIXED, LATE]), (WARN, &[INK]), (palette.page, &[PAPER, Color(0, 0, 0)])];
+        grounds.extend(SHADES.iter().map(|&shade| (shade, &words[..])));
+        Encoder::of(&colors, &grounds, palette.page)
+    }
+
+    /// `colors`, and each ink of `grounds` blended onto its ground in seven steps; half transparent
+    /// pixels are mixed with `ground` first.
+    fn of(colors: &[Color], grounds: &[(Color, &[Color])], ground: Color) -> Self {
+        let mut out: Vec<[u8; 3]> = Vec::new();
         let mut add = |value: [u8; 3]| {
-            if !colors.contains(&value) {
-                colors.push(value);
+            if !out.contains(&value) {
+                out.push(value);
             }
         };
-        for color in palette.colors() {
+        for &color in colors {
             add(rgb(color));
         }
-        for ground in [palette.page, palette.raised, palette.alert_ground] {
-            for ink in palette.colors() {
+        for &(under, inks) in grounds {
+            for &ink in inks {
                 for step in 1..8 {
-                    add(mix(ground, ink, f64::from(step) / 8.0));
+                    add(mix(under, ink, f64::from(step) / 8.0));
                 }
             }
         }
-        colors.truncate(256);
-        Encoder { colors, lookup: vec![0; 1 << 18], ground: rgb(palette.page) }
+        out.truncate(256);
+        Encoder { colors: out, lookup: vec![0; 1 << 18], ground: rgb(ground) }
     }
 
     fn index(&mut self, r: u8, g: u8, b: u8) -> u8 {
@@ -167,6 +185,17 @@ mod tests {
         let mut encoder = Encoder::new(&palette);
         assert!(encoder.colors.len() <= 256);
         for color in palette.colors() {
+            let index = encoder.index(color.0, color.1, color.2);
+            let [r, g, b] = encoder.colors[usize::from(index)];
+            assert!(r.abs_diff(color.0) <= 3 && g.abs_diff(color.1) <= 3 && b.abs_diff(color.2) <= 3, "{color:?}");
+        }
+    }
+
+    #[test]
+    fn a_light_page_keeps_its_colours() {
+        let mut encoder = Encoder::paper(&Palette::labra());
+        assert!(encoder.colors.len() < 256, "{}", encoder.colors.len());
+        for color in [PAPER, INK, GRAY, LIGHT, MID, SOFT, LINK, CARD, FIXED, LATE, WARN, WARN_LINE].into_iter().chain(SHADES) {
             let index = encoder.index(color.0, color.1, color.2);
             let [r, g, b] = encoder.colors[usize::from(index)];
             assert!(r.abs_diff(color.0) <= 3 && g.abs_diff(color.1) <= 3 && b.abs_diff(color.2) <= 3, "{color:?}");

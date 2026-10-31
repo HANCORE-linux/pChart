@@ -4,18 +4,11 @@ use jiff::civil::Date;
 use pchart_core::analysis::{Analysis, Next, Severity};
 use pchart_core::{Plan, Schedule, text};
 
-/// Who a Markdown export is for. Agents get the ids of the items, so they can report progress back
-/// through the CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Audience {
-    #[default]
-    Management,
-    Agents,
-}
+use crate::views::Audience;
 
 /// The plan as Markdown: the situation in the sentences of the situation screen, the milestone chart
-/// as the picture at `picture`, phases and milestones. One direction only: the file says where it
-/// comes from.
+/// as the picture at `picture`, phases and milestones; for the team and agents also every item. What
+/// the audience does not see is left out. One direction only: the file says where it comes from.
 pub fn markdown(plan: &Plan, schedule: &Schedule, analysis: &Analysis, source: &str, today: Date, picture: &str, audience: Audience) -> String {
     let long = |date: Date| date.strftime("%a %d %b %Y").to_string();
     let mut out = String::new();
@@ -24,7 +17,11 @@ pub fn markdown(plan: &Plan, schedule: &Schedule, analysis: &Analysis, source: &
     match &analysis.verdict {
         Some(verdict) => {
             let (headline, detail) = text::verdict(plan, verdict);
-            let _ = writeln!(out, "**{}** {}\n", escape(&headline), escape(&detail));
+            if audience.spare() {
+                let _ = writeln!(out, "**{}** {}\n", escape(&headline), escape(&detail));
+            } else {
+                let _ = writeln!(out, "**{}**\n", escape(&headline));
+            }
         }
         None => {
             let end = schedule.slots.iter().map(|slot| slot.planned.finish).max().map(long).unwrap_or_default();
@@ -50,10 +47,11 @@ pub fn markdown(plan: &Plan, schedule: &Schedule, analysis: &Analysis, source: &
     }
 
     out.push_str("## What is burning next\n\n");
-    if analysis.next.is_empty() {
+    let shown: Vec<&Next> = analysis.next.iter().filter(|next| audience.warnings() || !matches!(next, Next::Check(index) if analysis.checks[*index].severity() != Severity::Problem)).collect();
+    if shown.is_empty() {
         out.push_str("Nothing is due.\n");
     }
-    for (number, next) in analysis.next.iter().enumerate() {
+    for (number, next) in shown.into_iter().enumerate() {
         let mark = match next {
             Next::Check(index) if analysis.checks[*index].severity() == Severity::Problem => "✖ ",
             Next::Check(_) => "▲ ",
@@ -92,6 +90,16 @@ pub fn markdown(plan: &Plan, schedule: &Schedule, analysis: &Analysis, source: &
             let _ = writeln!(out, "| `{}` | {} | `{}` | {planned} | {after} | {} wd | {} |", item.id, escape(&item.name), item.lane, slot.spare, if item.done { "yes" } else { "no" });
         }
         let _ = writeln!(out, "\nReport progress through the CLI: `pchart set {source} ID --done`. `pchart help --json` lists every command.");
+    } else if audience == Audience::Team {
+        out.push_str("## Items\n\n| Item | Lane | Planned | Waits on | To spare | Done |\n|---|---|---|---|---|---|\n");
+        let name = |id: &str| plan.item(id).map_or(id.to_string(), |index| escape(&plan.items[index].name));
+        for &index in &schedule.order {
+            let (item, slot) = (&plan.items[index], &schedule.slots[index]);
+            let planned = if item.milestone { long(slot.planned.finish) } else { format!("{} – {}", long(slot.planned.start), long(slot.planned.finish)) };
+            let after = if item.after.is_empty() { "—".to_string() } else { item.after.iter().map(|id| name(id)).collect::<Vec<_>>().join(", ") };
+            let lane = plan.lane(&item.lane).map_or(item.lane.clone(), |lane| escape(&plan.lanes[lane].name));
+            let _ = writeln!(out, "| {} | {lane} | {planned} | {after} | {} wd | {} |", escape(&item.name), slot.spare, if item.done { "yes" } else { "no" });
+        }
     }
     out.trim_end().to_string() + "\n"
 }

@@ -128,3 +128,20 @@ fn every_view_exports_and_light_pages_refuse_terminal_options() {
         assert_eq!(pchart(&all, None).status.code(), Some(3), "{args:?}");
     }
 }
+
+#[test]
+fn an_audience_sees_only_what_is_meant_for_it() {
+    let path = copy("audience");
+    let svg = path.with_file_name("gantt.svg");
+    let page = |audience: &str| {
+        let output = pchart(&["export", path.to_str().unwrap(), "--view", "gantt", "--audience", audience, "--svg", svg.to_str().unwrap()], None);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::read_to_string(&svg).unwrap()
+    };
+    let (team, management, client) = (page("team"), page("management"), page("client"));
+    assert!(team.contains("To spare") && team.contains("no buffer"));
+    assert!(management.contains("To spare") && !management.contains("no buffer"));
+    assert!(!client.contains("To spare") && !client.contains("no buffer") && !client.contains("wd to spare"));
+    let output = pchart(&["export", path.to_str().unwrap(), "--audience", "boss", "--svg", svg.to_str().unwrap()], None);
+    assert_eq!(output.status.code(), Some(3));
+}

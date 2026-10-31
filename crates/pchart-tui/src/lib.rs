@@ -1,4 +1,6 @@
 mod app;
+mod checks;
+mod export;
 mod pictures;
 mod situation;
 mod sixel;
@@ -32,6 +34,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
     let mut pictures = Pictures::start(Painter::new(picker, &pchart_draw::Palette::labra()));
     let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
+    let (written, results) = mpsc::channel();
     let mut terminal = ratatui::init();
     let mut trace = std::env::var_os("PCHART_TRACE").and_then(|path| std::fs::File::create(path).ok());
     let begun = Instant::now();
@@ -44,6 +47,13 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         if pictures.receive() {
             note("pictures done".into());
         }
+        if let Ok(result) = results.try_recv() {
+            app.export.busy = false;
+            match result {
+                Ok(files) => app.export.written = Some((files, jiff::Zoned::now().strftime("%H:%M").to_string())),
+                Err(err) => app.message = Some(err),
+            }
+        }
         let mut waiting = false;
         if let Err(err) = terminal.draw(|frame| {
             let placements = ui::draw(&app, frame);
@@ -51,7 +61,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         }) {
             break Err(err);
         }
-        match event::poll(if waiting { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
+        match event::poll(if waiting || app.export.busy { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
             Ok(false) => continue,
             Ok(true) => {}
             Err(err) => break Err(err),
@@ -64,9 +74,32 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
                 (_, KeyCode::Char('c')) if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 (_, KeyCode::Char('1')) => app.screen = Screen::Situation,
                 (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
+                (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
+                (_, KeyCode::Char('4')) => app.screen = Screen::Export,
                 (Screen::Situation, KeyCode::Up) => app.choose(-1),
                 (Screen::Situation, KeyCode::Down) => app.choose(1),
                 (Screen::Situation, KeyCode::Enter) => app.show_in_roadmap(),
+                (Screen::Checks, KeyCode::Up) => app.choose_check(-1),
+                (Screen::Checks, KeyCode::Down) => app.choose_check(1),
+                (Screen::Checks, KeyCode::Enter) => app.show_check_in_roadmap(),
+                (Screen::Export, KeyCode::Up) => app.export_part(-1),
+                (Screen::Export, KeyCode::Down) => app.export_part(1),
+                (Screen::Export, KeyCode::Left) => app.export_change(-1),
+                (Screen::Export, KeyCode::Right) => app.export_change(1),
+                (Screen::Export, KeyCode::Char(' ')) => app.export_toggle(),
+                (Screen::Export, KeyCode::Enter) if !app.export.busy => {
+                    if app.export.formats.contains(&true) {
+                        let job = export::job(&app);
+                        let written = written.clone();
+                        app.export.busy = true;
+                        app.message = None;
+                        std::thread::spawn(move || {
+                            let _ = written.send(export::write(&job));
+                        });
+                    } else {
+                        app.message = Some("Space switches a format on".into());
+                    }
+                }
                 (_, KeyCode::Esc) => app.screen = Screen::Situation,
                 (_, KeyCode::Up) => app.select(-1),
                 (_, KeyCode::Down) => app.select(1),
@@ -128,7 +161,7 @@ pub fn bench(plan: Plan, calendars: Vec<Calendar>, today: Date, frames: usize, o
         let t1 = Instant::now();
         let svg = app.svg(rect);
         let t2 = Instant::now();
-        let Some((protocol, cost)) = painter.paint(&svg, rect, id) else {
+        let Some((protocol, cost)) = painter.paint(&svg, rect, id, false) else {
             failure = Some("the picture could not be painted".to_string());
             break;
         };

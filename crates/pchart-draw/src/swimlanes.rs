@@ -7,6 +7,7 @@ use pchart_core::{Plan, Schedule};
 use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, PAPER, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
 use crate::style::sans_width;
+use crate::views::Audience;
 
 const LANE: f32 = 51.0;
 const ROW: f32 = 0.6;
@@ -15,7 +16,8 @@ const PHASES_Y: f32 = 156.0;
 
 /// The swimlane roadmap for export on a light page: the Standard level with the place of every lane,
 /// the fixed target, warnings and a legend.
-pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]) -> Scene {
+pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], audience: Audience) -> Scene {
+    let checks = if audience.warnings() { checks } else { &[] };
     let chain: HashSet<usize> = schedule.chain.iter().copied().collect();
     let lanes: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect();
     let place = |index: usize| {
@@ -131,6 +133,7 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     }
 
     let legend_y = page.height() - 76.0;
-    page.legend(legend_y, &[(Key::Chain, "decides the date"), (Key::Soft, "time to spare"), (Key::Milestone, "milestone"), (Key::Fixed, "fixed date"), (Key::Today, "today"), (Key::Warning, "warning")]);
+    let keys = [(Key::Chain, "decides the date"), (Key::Soft, "time to spare"), (Key::Milestone, "milestone"), (Key::Fixed, "fixed date"), (Key::Today, "today"), (Key::Warning, "warning")];
+    page.legend(legend_y, &keys[..if audience.warnings() { keys.len() } else { keys.len() - 1 }]);
     page.finish()
 }

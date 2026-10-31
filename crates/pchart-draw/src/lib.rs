@@ -11,14 +11,16 @@ pub mod scene;
 pub mod situation;
 pub mod style;
 pub mod swimlanes;
+pub mod views;
 
 pub use gantt::gantt;
 pub use later::now_next_later;
-pub use markdown::{Audience, markdown};
+pub use markdown::markdown;
 pub use milestones::milestones;
 pub use output::Output;
 pub use phases::phase_plan;
-pub use roadmap::{Level, Settings, natural_height, roadmap, shown};
+pub use roadmap::{Cut, Level, Settings, natural_height, part, roadmap, shown};
 pub use scene::Scene;
 pub use style::Palette;
 pub use swimlanes::swimlanes;
+pub use views::{Audience, View};
