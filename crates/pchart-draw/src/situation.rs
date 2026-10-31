@@ -134,15 +134,16 @@ pub fn chain(plan: &Plan, schedule: &Schedule, width: f32, height: f32, unit: f3
         }
         let late = schedule.slots[index].spare < 0;
         let ink = if late { p.alert } else { p.ink };
+        let tone = if late { p.alert } else { p.accent };
         let fixed = item.on.is_some();
         if fixed {
             let r = 9.0 * u;
-            s.add_for(index, 1.0, Shape::Path { points: vec![(xs, cy - r), (xs + r, cy), (xs, cy + r), (xs - r, cy)], closed: true, fill: Fill::Color(if late { p.alert } else { p.bright }), stroke: None });
-            s.add(Shape::Line { x1: xs, y1: cy - r - 2.0 * u, x2: xs, y2: cy - r - 12.0 * u, stroke: Stroke { color: p.bright, width: 1.6 * u, dash: None } });
-            s.add(Shape::Circle { x: xs, y: cy - r - 15.0 * u, r: 4.0 * u, fill: p.bright });
+            s.add_for(index, 1.0, Shape::Path { points: vec![(xs, cy - r), (xs + r, cy), (xs, cy + r), (xs - r, cy)], closed: true, fill: Fill::Color(tone), stroke: None });
+            s.add(Shape::Line { x1: xs, y1: cy - r - 2.0 * u, x2: xs, y2: cy - r - 12.0 * u, stroke: Stroke { color: tone, width: 1.6 * u, dash: None } });
+            s.add(Shape::Circle { x: xs, y: cy - r - 15.0 * u, r: 4.0 * u, fill: tone });
         } else if item.milestone {
             let r = 8.0 * u;
-            s.add_for(index, 1.0, Shape::Path { points: vec![(xs, cy - r), (xs + r, cy), (xs, cy + r), (xs - r, cy)], closed: true, fill: Fill::Color(ink), stroke: None });
+            s.add_for(index, 1.0, Shape::Path { points: vec![(xs, cy - r), (xs + r, cy), (xs, cy + r), (xs - r, cy)], closed: true, fill: Fill::Color(tone), stroke: None });
         } else {
             s.marks.push(Mark { shape: Shape::Rect { x: xs - 34.0 * u, y: cy - 7.0 * u, w: 68.0 * u, h: 14.0 * u, radius: 3.0 * u, fill: Fill::Color(ink), stroke: None }, opacity: 0.95, item: Some(index) });
         }

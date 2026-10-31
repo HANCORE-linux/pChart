@@ -170,6 +170,24 @@ impl Page {
         self.shape([x - r, y - r, x + r, y + r], item);
     }
 
+    /// A milestone in the accent, or red when late (picture 45, B): with room around it so it stands
+    /// apart from a bar or line it sits on, open when it has time to spare, and with a pin on a fixed date.
+    #[allow(clippy::too_many_arguments)]
+    pub fn milestone(&mut self, x: f32, y: f32, r: f32, late: bool, open: bool, fixed: bool, item: Option<usize>) {
+        let color = if late { LATE } else { FIXED };
+        let room = r + 3.0;
+        self.scene.add(Shape::Path { points: vec![(x, y - room), (x + room, y), (x, y + room), (x - room, y)], closed: true, fill: Fill::Color(PAPER), stroke: None });
+        if open {
+            self.diamond(x, y, r, PAPER, Some((color, 1.4)), item);
+        } else {
+            self.diamond(x, y, r, color, None, item);
+        }
+        if fixed {
+            self.scene.add(Shape::Line { x1: x, y1: y - r - 2.0, x2: x, y2: y - r - 9.0, stroke: Stroke { color, width: 1.4, dash: None } });
+            self.scene.add(Shape::Circle { x, y: y - r - 12.0, r: 3.0, fill: color });
+        }
+    }
+
     /// A phase arrow; returns its tip.
     pub fn chevron(&mut self, x0: f32, x1: f32, y: f32, h: f32, fill: Color, tip: f32) -> f32 {
         let tip = tip.min((x1 - x0) / 2.0);
@@ -254,11 +272,11 @@ impl Page {
                     x += 29.0;
                 }
                 Key::Milestone => {
-                    self.diamond(x + 7.0, y - 4.0, 6.0, INK, None, None);
+                    self.diamond(x + 7.0, y - 4.0, 6.0, FIXED, None, None);
                     x += 21.0;
                 }
                 Key::Fixed => {
-                    self.diamond(x + 7.0, y - 4.0, 7.0, FIXED, None, None);
+                    self.milestone(x + 7.0, y - 1.0, 6.0, false, false, true, None);
                     x += 22.0;
                 }
                 Key::Today => {

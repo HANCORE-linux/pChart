@@ -42,7 +42,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 - Plain language for people outside project management: "decides the date" instead of "critical path", "to spare" instead of "float", "waits on" instead of "dependency". Menus name tasks, not features.
 - Every text on screen is data, a legend or a key hint. No filler. A value that is not known yet stays empty.
 - Each fact appears once per screen.
-- Colour is a signal only: red means too late, yellow means look. Everything else is neutral ink.
+- Colour is a signal: red means too late, yellow means look, and milestones carry the theme's accent so they stand out (picture 45). Everything else is neutral ink.
 - The preview is the export: the terminal picture, PNG, SVG and PDF come from the same scene.
 - UI text is English.
 

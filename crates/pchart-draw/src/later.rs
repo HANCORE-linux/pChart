@@ -70,7 +70,7 @@ pub fn now_next_later(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
             page.scene.add(Shape::Rect { x, y, w: 4.0, h: height, radius: 0.0, fill: Fill::Color(if chain.contains(&index) { INK } else { MID }), stroke: None });
             let mut tx = x + 18.0;
             if item.milestone {
-                page.diamond(tx + 5.0, y + 17.0, if fixed { 6.0 } else { 5.0 }, if fixed || late { ink } else { INK }, None, Some(index));
+                page.diamond(tx + 5.0, y + 17.0, if fixed { 6.0 } else { 5.0 }, if late { LATE } else { FIXED }, None, Some(index));
                 tx += 18.0;
             }
             for (line, text) in name.iter().enumerate() {

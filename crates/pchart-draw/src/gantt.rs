@@ -4,7 +4,7 @@ use jiff::civil::Date;
 use pchart_core::analysis::Check;
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, LINK, MID, PAPER, Page, SHADES, SOFT, X0, X1, dates, fit, wrap};
+use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, LINK, MID, Page, SHADES, SOFT, X0, X1, dates, fit, wrap};
 use crate::scene::{Anchor, Scene};
 use crate::style::sans_width;
 use crate::views::Audience;
@@ -165,11 +165,9 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], au
                 if !item.milestone {
                     page.bar(x0 + 0.5, x1 - 0.5, yc, 10.0, if late { LATE } else if on_chain { INK } else { SOFT }, 2.0, Some(index));
                 } else if fixed {
-                    page.diamond(x0, yc, 7.0, ink, None, Some(index));
-                } else if on_chain || late {
-                    page.diamond(x0, yc, 6.0, ink, None, Some(index));
+                    page.milestone(x0, yc, 7.0, late, false, true, Some(index));
                 } else {
-                    page.diamond(x0, yc, 6.0, PAPER, Some((INK, 1.4)), Some(index));
+                    page.milestone(x0, yc, 6.0, late, !on_chain && !late, false, Some(index));
                 }
             }
         }

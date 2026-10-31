@@ -4,7 +4,7 @@ use jiff::civil::Date;
 use pchart_core::analysis::Check;
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, PAPER, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows, wrap};
+use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows, wrap};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
 use crate::style::sans_width;
 use crate::views::Audience;
@@ -101,11 +101,9 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
         if !item.milestone {
             page.bar(x0 + 1.0, x1 - 1.5, y(index), 9.0, if late { LATE } else if chain.contains(&index) { INK } else { SOFT }, 2.0, Some(index));
         } else if item.on.is_some() {
-            page.diamond(x0, y(index), 7.0, ink(index), Some((PAPER, 1.5)), Some(index));
-        } else if chain.contains(&index) || late {
-            page.diamond(x0, y(index), 6.0, ink(index), None, Some(index));
+            page.milestone(x0, y(index), 7.0, late, false, true, Some(index));
         } else {
-            page.diamond(x0, y(index), 6.0, PAPER, Some((INK, 1.4)), Some(index));
+            page.milestone(x0, y(index), 6.0, late, !chain.contains(&index) && !late, false, Some(index));
         }
     }
 

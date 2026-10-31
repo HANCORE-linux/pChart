@@ -47,11 +47,11 @@ pub fn symbol(symbol: Symbol, width: f32, height: f32, unit: f32, palette: &Pale
             s.marks.push(Mark { shape: rect(0.0, 12.0 * u, Fill::Color(p.dim), None), opacity: 0.5, item: None });
             s.add(rect(12.0 * u, 14.0 * u, Fill::Spare, Some(Stroke { color: p.muted, width: u, dash: None })));
         }
-        Symbol::Milestone => s.add(diamond(10.0 * u, y, 6.0 * u, p.ink)),
+        Symbol::Milestone => s.add(diamond(10.0 * u, y, 6.0 * u, p.accent)),
         Symbol::Fixed => {
-            s.add(diamond(10.0 * u, y + 2.0 * u, 6.0 * u, p.bright));
-            s.add(Shape::Line { x1: 10.0 * u, y1: y - 6.0 * u, x2: 10.0 * u, y2: y - 16.0 * u, stroke: Stroke { color: p.bright, width: 1.6 * u, dash: None } });
-            s.add(Shape::Circle { x: 10.0 * u, y: y - 19.0 * u, r: 4.0 * u, fill: p.bright });
+            s.add(diamond(10.0 * u, y + 2.0 * u, 6.0 * u, p.accent));
+            s.add(Shape::Line { x1: 10.0 * u, y1: y - 6.0 * u, x2: 10.0 * u, y2: y - 16.0 * u, stroke: Stroke { color: p.accent, width: 1.6 * u, dash: None } });
+            s.add(Shape::Circle { x: 10.0 * u, y: y - 19.0 * u, r: 4.0 * u, fill: p.accent });
         }
         Symbol::Holiday => s.add(Shape::Rect { x: 4.0 * u, y: y - 9.0 * u, w: 12.0 * u, h: 18.0 * u, radius: 0.0, fill: Fill::Hatch, stroke: None }),
         Symbol::Today => s.add(Shape::Line { x1: 10.0 * u, y1: y - 9.0 * u, x2: 10.0 * u, y2: y + 9.0 * u, stroke: Stroke { color: p.ink, width: 1.5 * u, dash: None } }),

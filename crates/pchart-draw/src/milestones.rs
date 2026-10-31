@@ -34,7 +34,7 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         let late = slot.spare < 0;
         let target = Some(index) == schedule.target;
         let (r, name_size, color) = if target { (13.0, 19.0, if late { LATE } else { FIXED }) } else { (10.0, 17.0, if late { LATE } else { INK }) };
-        page.diamond(xm, my, r, color, None, Some(index));
+        page.milestone(xm, my, r, late, false, false, Some(index));
         let date = format!("{}{}", slot.planned.finish.strftime("%d %b %Y"), if item.on.is_some() { " · fixed" } else { "" });
         let w = sans_width(&item.name, name_size, true).max(sans_width(&date, 15.0, false));
         let cx = if target { xm + 4.0 } else { xm };

@@ -531,19 +531,22 @@ fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule) {
     }
 }
 
+/// A milestone in the theme's accent, or red when it is late, with room around it so it stands apart
+/// from the bar it ends (picture 45, B).
 fn milestone(s: &mut Scene, c: &Chart, index: usize) {
     let (p, u) = (c.p, c.u);
     let (x, _, y) = c.bar(index);
-    if c.plan.items[index].on.is_some() {
-        diamond(s, index, x, y, 8.0 * u, Fill::Color(if c.late(index) { p.alert } else { p.bright }), None);
-        s.add_for(index, 1.0, Shape::Line { x1: x, y1: y - 10.0 * u, x2: x, y2: y - 20.0 * u, stroke: c.rule(p.bright, 1.6) });
-        s.add_for(index, 1.0, Shape::Circle { x, y: y - 23.0 * u, r: 4.0 * u, fill: p.bright });
-    } else if c.late(index) {
-        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.alert), None);
-    } else if c.chain.contains(&index) {
-        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.ink), None);
+    let fixed = c.plan.items[index].on.is_some();
+    diamond(s, index, x, y, if fixed { 11.0 } else { 10.0 } * u, Fill::Color(p.page), None);
+    let tone = if c.late(index) { p.alert } else { p.accent };
+    if fixed {
+        diamond(s, index, x, y, 8.0 * u, Fill::Color(tone), None);
+        s.add_for(index, 1.0, Shape::Line { x1: x, y1: y - 10.0 * u, x2: x, y2: y - 20.0 * u, stroke: c.rule(tone, 1.6) });
+        s.add_for(index, 1.0, Shape::Circle { x, y: y - 23.0 * u, r: 4.0 * u, fill: tone });
+    } else if c.late(index) || c.chain.contains(&index) {
+        diamond(s, index, x, y, 7.0 * u, Fill::Color(tone), None);
     } else {
-        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.page), Some(c.rule(p.dim, 1.5)));
+        diamond(s, index, x, y, 7.0 * u, Fill::Color(p.page), Some(c.rule(p.accent, 1.5)));
     }
 }
 
