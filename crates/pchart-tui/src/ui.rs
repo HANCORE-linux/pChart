@@ -1,8 +1,8 @@
 //! What each screen shows, and what gives way in a small window (see "Small windows" in the plan).
 
 use jiff::civil::{Date, Weekday};
-use pchart_core::analysis::{Check, Severity, State};
-use pchart_draw::bits::{self, Symbol};
+use pchart_core::analysis::{Severity, State};
+use pchart_draw::bits::{self, Icon, Part};
 use pchart_draw::scene::Color as Ink;
 use pchart_draw::{Level, shown};
 use ratatui::Frame;
@@ -16,7 +16,6 @@ use crate::pictures::Placement;
 
 /// The smallest window pChart draws in; below it says how much it needs.
 pub const MIN: (u16, u16) = (60, 16);
-const SIDE: u16 = 46;
 const TILES: u16 = 6;
 
 fn color(ink: Ink) -> Color {
@@ -328,14 +327,12 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     put(frame, 1, area.height - 1, area.width - 1, spans);
 }
 
-/// Where the parts of the roadmap screen go in `body`.
+/// Where the parts of the roadmap screen go in `body` (picture 35): the chart in its frame, and under
+/// it one line about the selection.
 pub struct Layout {
     pub panel: Rect,
     pub chart: Rect,
-    legend: Option<u16>,
-    chain: Option<u16>,
-    bar: Option<u16>,
-    side: Option<Rect>,
+    line: u16,
 }
 
 /// Where the roadmap picture goes on a screen of this size.
@@ -345,32 +342,11 @@ pub fn chart(area: Rect) -> Rect {
 }
 
 pub fn layout(area: Rect, body: Rect) -> Layout {
-    let side = (area.width >= 150).then(|| Rect { x: body.width - SIDE, y: body.y, width: SIDE, height: body.height });
-    let panel = Rect { x: body.x, y: body.y, width: body.width - side.map_or(0, |side| side.width), height: body.height };
-    let roomy = area.height >= 44;
-    let mut bottom = panel.y + panel.height - 1;
-    let bar = side.is_none().then(|| {
-        bottom -= 3;
-        bottom + 1
-    });
-    if roomy {
-        bottom -= 1;
-    }
-    let chain = (area.height >= 30).then(|| {
-        bottom -= 1;
-        bottom
-    });
-    if roomy && chain.is_some() {
-        bottom -= 1;
-    }
-    let legend = (area.width >= 110 && area.height >= 36).then(|| {
-        bottom -= 1;
-        bottom
-    });
-    let top = panel.y + 2;
-    let end = if legend.is_some() { bottom - 1 } else { bottom };
-    let chart = Rect { x: panel.x + 1, y: top, width: panel.width.saturating_sub(2), height: end.saturating_sub(top) };
-    Layout { panel, chart, legend, chain, bar, side }
+    let gap = u16::from(area.height >= 30);
+    let line = body.y + body.height - 1 - gap;
+    let panel = Rect { x: body.x, y: body.y, width: body.width, height: line - body.y };
+    let chart = Rect { x: panel.x + 1, y: panel.y + 2, width: panel.width.saturating_sub(2), height: panel.height.saturating_sub(3) };
+    Layout { panel, chart, line }
 }
 
 fn roadmap(app: &App, frame: &mut Frame, inks: &Inks, body: Rect, placements: &mut Vec<Placement>) {
@@ -415,123 +391,37 @@ fn roadmap(app: &App, frame: &mut Frame, inks: &Inks, body: Rect, placements: &m
         scene.background = None;
         placements.push(Placement { rect: l.chart, svg: scene.svg(), paper: false });
     }
-    if let Some(row) = l.legend {
-        legend(app, frame, inks, level, l.panel.x + 2, row, l.panel.width.saturating_sub(4), placements);
-    }
-    if let Some(row) = l.chain {
-        put(frame, l.panel.x + 2, row, l.panel.width.saturating_sub(4), chain(app, inks, l.panel.width.saturating_sub(4)));
-    }
-    if let Some(row) = l.bar {
-        let rule = "─".repeat(l.panel.width.saturating_sub(2) as usize);
-        put(frame, l.panel.x + 1, row - 1, l.panel.width.saturating_sub(2), vec![Span::styled(rule, inks.rule)]);
-        selection_bar(app, frame, inks, l.panel.x + 2, row, l.panel.width.saturating_sub(4), level);
-    }
-    if let Some(side) = l.side {
-        let checks = side.height >= 38;
-        let selection = Rect { height: if checks { 19 } else { side.height }, ..side };
-        selection_panel(app, frame, inks, selection, level);
-        if checks {
-            checks_panel(app, frame, inks, Rect { y: side.y + 19, height: side.height - 19, ..side });
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn legend(app: &App, frame: &mut Frame, inks: &Inks, level: Level, x: u16, row: u16, room: u16, placements: &mut Vec<Placement>) {
+    let rect = Rect { x: l.panel.x + 2, y: l.line, width: l.panel.width.saturating_sub(4), height: 1 };
     let (cw, ch) = app.cell;
-    let unit = f32::from(ch) / 21.0;
-    let mut entries = vec![(Some(Symbol::Chain), "decides the date")];
-    match level {
-        Level::Full => entries.extend([(Some(Symbol::SpareHatched), "time to spare"), (Some(Symbol::Milestone), "milestone"), (Some(Symbol::Fixed), "fixed date"), (Some(Symbol::Holiday), "holiday (lane)"), (Some(Symbol::Today), "today")]),
-        Level::Standard => entries.extend([(Some(Symbol::Spare), "time to spare"), (Some(Symbol::Milestone), "milestone"), (Some(Symbol::Fixed), "fixed date"), (Some(Symbol::Today), "today"), (None, "warning")]),
-        Level::Overview => entries.extend([(Some(Symbol::Spare), "time to spare"), (Some(Symbol::Milestone), "milestone"), (Some(Symbol::Fixed), "fixed date"), (Some(Symbol::Today), "today")]),
-    }
-    let mut at = x;
-    for (symbol, label) in entries {
-        let w = 3 + label.chars().count() as u16;
-        if at + w > x + room {
-            break;
-        }
-        match symbol {
-            Some(symbol) => {
-                let rect = Rect { x: at, y: row - 1, width: 3, height: 2 };
-                let svg = bits::symbol(symbol, f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch), unit, &app.palette).svg();
-                placements.push(Placement { rect, svg, paper: false });
-            }
-            None => put(frame, at + 1, row, 1, vec![Span::styled("▲", bold(inks.warn))]),
-        }
-        put(frame, at + 3, row, label.chars().count() as u16, vec![Span::styled(label, inks.dim)]);
-        at += w + 3;
-    }
+    placements.push(Placement { rect, svg: bits::line(&selection(app, level), f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0, &app.palette).svg(), paper: false });
 }
 
-/// "decides the date  Requirements → … → Launch", cut around the selection when it is too wide.
-fn chain(app: &App, inks: &Inks, room: u16) -> Vec<Span<'static>> {
-    let chain = &app.schedule.chain;
-    let lead = "decides the date  ";
-    let spans = |keep: &[bool]| {
-        let mut out = vec![Span::styled(lead, inks.muted)];
-        let mut gap = false;
-        for (position, &index) in chain.iter().enumerate() {
-            if !keep[position] {
-                gap = true;
-                continue;
-            }
-            if out.len() > 1 {
-                out.push(Span::styled(if gap { " → … → " } else { " → " }, inks.muted));
-            } else if gap {
-                out.push(Span::styled("… → ", inks.muted));
-            }
-            gap = false;
-            let style = if index == app.selected { bold(inks.bright) } else { inks.ink };
-            out.push(Span::styled(app.plan.items[index].name.clone(), style));
-        }
-        if gap {
-            out.push(Span::styled(" → …", inks.muted));
-        }
-        out
-    };
-    let count = chain.len();
-    let at = chain.iter().position(|&index| index == app.selected);
-    let all = vec![true; count];
-    if width(&spans(&all)) <= room || count == 0 {
-        return spans(&all);
+/// The line about the selection: its name, its team, its dates and length, and whether it decides the
+/// date or what it has to spare; at the Overview level the same for its lane.
+fn selection(app: &App, level: Level) -> Vec<Part> {
+    let p = app.palette;
+    let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[app.selected].lane).unwrap_or(0)];
+    let team = [Some(lane.name.as_str()), lane.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    let decides = |yes: bool| if yes { (Some((Icon::Bar, p.ink)), "decides the date".to_string(), p.ink, false) } else { (Some((Icon::Bar, p.muted)), "time to spare".to_string(), p.ink, false) };
+    if level == Level::Overview {
+        let (name, folded, from, to, _, on_chain) = folded_lane(app);
+        return vec![(None, name, p.bright, true), (None, format!("Lane · {folded}"), p.muted, false), (Some((Icon::Calendar, p.dim)), format!("{} – {}", day(from), day(to)), p.ink, false), decides(on_chain)];
     }
-    for reach in (0..count).rev() {
-        let keep: Vec<bool> = (0..count).map(|position| position == 0 || position + 1 == count || at.is_some_and(|at| position.abs_diff(at) <= reach)).collect();
-        if width(&spans(&keep)) <= room {
-            return spans(&keep);
-        }
-    }
-    let keep: Vec<bool> = (0..count).map(|position| Some(position) == at).collect();
-    spans(&keep)
-}
-
-pub(crate) fn lane_label(app: &App, index: usize) -> String {
-    let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[index].lane).unwrap_or(0)];
-    [Some(lane.name.as_str()), lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ")
-}
-
-/// Two rows under the chart instead of the side column: the selected item, its dates and what it has to spare.
-#[allow(clippy::too_many_arguments)]
-fn selection_bar(app: &App, frame: &mut Frame, inks: &Inks, x: u16, row: u16, room: u16, level: Level) {
     let item = &app.plan.items[app.selected];
     let slot = &app.schedule.slots[app.selected];
-    if level == Level::Overview {
-        let (name, folded, from, to, ..) = folded_lane(app);
-        put(frame, x, row, room, vec![Span::styled(name, bold(inks.bright)), Span::styled(format!("  Lane · {folded}"), inks.muted)]);
-        put(frame, x, row + 1, room, vec![Span::styled(format!("{} – {}", day(from), day(to)), inks.ink)]);
-        return;
+    let dates = if item.milestone { day(slot.planned.finish) } else { format!("{} – {}", day(slot.planned.start), day(slot.planned.finish)) };
+    let mut parts = vec![(None, item.name.clone(), p.bright, true), (Some((Icon::Person, p.dim)), team, p.dim, false), (Some((Icon::Calendar, p.dim)), dates, p.ink, false)];
+    if !item.milestone {
+        parts.push((Some((Icon::Clock, p.dim)), format!("{} wd", item.duration), p.ink, false));
     }
-    put(frame, x, row, room, vec![Span::styled(item.name.clone(), bold(inks.bright)), Span::styled(format!("  Lane {}", lane_label(app, app.selected)), inks.muted)]);
-    let dates = if item.milestone { day(slot.planned.finish) } else { format!("{} – {} · {} wd", day(slot.planned.start), day(slot.planned.finish), item.duration) };
-    let decides = app.schedule.chain.contains(&app.selected);
-    let spare = Span::styled(format!("{} wd to spare", slot.spare), if slot.spare < 0 { inks.alert } else { inks.ink });
-    let mut line = vec![Span::styled(dates, inks.ink), Span::raw("   "), spare];
-    if decides {
-        line.push(Span::styled(" · decides the date", inks.ink));
+    if slot.spare < 0 {
+        parts.push((Some((Icon::Bar, p.alert)), format!("{} wd late", -slot.spare), p.alert, false));
+    } else if app.schedule.chain.contains(&app.selected) {
+        parts.push(decides(true));
+    } else {
+        parts.push((Some((Icon::Bar, p.muted)), format!("{} wd to spare", slot.spare), p.ink, false));
     }
-    put(frame, x, row + 1, room, line);
+    parts
 }
 
 pub(crate) fn day(date: Date) -> String {
@@ -555,137 +445,6 @@ fn folded_lane(app: &App) -> (String, String, Date, Date, Vec<usize>, bool) {
     let to = shown.iter().map(|&index| app.schedule.slots[index].planned.finish).max().unwrap_or(app.today);
     let decides = shown.iter().any(|index| app.schedule.chain.contains(index));
     (app.plan.lanes[lane].name.clone(), folded, from, to, shown, decides)
-}
-
-fn selection_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, level: Level) {
-    panel(frame, inks, rect, "SELECTION", false);
-    let (x, w) = (rect.x + 2, rect.width.saturating_sub(4));
-    let value_x = x + 12;
-    let row = |frame: &mut Frame, y: u16, key: &str, value: String, style: Style| {
-        if y + 1 < rect.y + rect.height {
-            put(frame, x, y, 12, vec![Span::styled(key.to_string(), inks.muted)]);
-            put(frame, value_x, y, w.saturating_sub(12), vec![Span::styled(cut(&value, w.saturating_sub(12) as usize), style)]);
-        }
-    };
-    if level == Level::Overview {
-        let (name, folded, from, to, items, decides) = folded_lane(app);
-        let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[app.selected].lane).unwrap_or(0)];
-        put(frame, x, rect.y + 3, w, vec![Span::styled(name, bold(inks.bright))]);
-        put(frame, x, rect.y + 4, w, vec![Span::styled(format!("Lane · {folded}"), inks.muted)]);
-        row(frame, rect.y + 6, "From", day(from), inks.ink);
-        row(frame, rect.y + 7, "To", day(to), inks.ink);
-        let place = [lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-        row(frame, rect.y + 8, "Place", place, inks.ink);
-        let items: Vec<&str> = items.iter().map(|&index| app.plan.items[index].name.as_str()).collect();
-        row(frame, rect.y + 10, "Items", items.join(", "), inks.ink);
-        row(frame, rect.y + 11, "Status", if decides { "decides the date".into() } else { "time to spare".into() }, inks.ink);
-        return;
-    }
-    let item = &app.plan.items[app.selected];
-    let slot = &app.schedule.slots[app.selected];
-    put(frame, x, rect.y + 3, w, vec![Span::styled(cut(&item.name, w as usize), bold(inks.bright))]);
-    put(frame, x, rect.y + 4, w, vec![Span::styled(cut(&format!("Lane {}", lane_label(app, app.selected)), w as usize), inks.muted)]);
-    let names = |ids: Vec<&str>| if ids.is_empty() { "—".to_string() } else { ids.join(", ") };
-    let waits = names(item.after.iter().filter_map(|id| app.plan.item(id)).map(|index| app.plan.items[index].name.as_str()).collect());
-    let then = names(app.plan.items.iter().filter(|other| other.after.contains(&item.id)).map(|other| other.name.as_str()).collect());
-    let decides = app.schedule.chain.contains(&app.selected);
-    let span = |from: Date, to: Date| if item.milestone { day(to) } else { format!("{} – {}", day(from), day(to)) };
-    row(frame, rect.y + 6, "Duration", if item.milestone { "milestone".into() } else { format!("{} working days", item.duration) }, inks.ink);
-    row(frame, rect.y + 7, "Waits on", waits, inks.ink);
-    row(frame, rect.y + 8, "Then", then, inks.ink);
-    row(frame, rect.y + 10, "Planned", span(slot.planned.start, slot.planned.finish), inks.ink);
-    row(frame, rect.y + 11, "Earliest", span(slot.earliest.start, slot.earliest.finish), inks.dim);
-    row(frame, rect.y + 12, "To spare", format!("{} wd{}", slot.spare, if decides { " · decides the date" } else { "" }), if slot.spare < 0 { inks.alert } else { inks.ink });
-    row(frame, rect.y + 13, "Date", if item.on.is_some() { "fixed".into() } else { "calculated".into() }, inks.dim);
-    let lane = app.plan.lane(&item.lane).unwrap_or(0);
-    let weekday = |day: Date| !matches!(day.weekday(), Weekday::Saturday | Weekday::Sunday);
-    let days: Vec<String> = app.calendars[lane].holidays(slot.planned.start, slot.planned.finish).filter(|(day, _)| weekday(*day)).map(|(day, name)| format!("{} {name}", day.strftime("%d %b"))).collect();
-    if !days.is_empty() && rect.y + 16 < rect.y + rect.height {
-        put(frame, x, rect.y + 15, 12, vec![Span::styled("Holidays", inks.muted)]);
-        for (offset, text) in days.into_iter().enumerate() {
-            let y = rect.y + 15 + offset as u16;
-            if y + 1 >= rect.y + rect.height {
-                break;
-            }
-            put(frame, value_x, y, w.saturating_sub(12), vec![Span::styled(cut(&text, w.saturating_sub(12) as usize), inks.ink)]);
-        }
-    }
-}
-
-/// The checks next to the roadmap, in the words of picture 8, and the holidays the plan accounts for.
-fn checks_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect) {
-    let shown: Vec<&Check> = app.analysis.checks.iter().filter(|check| check.severity() != Severity::Hint).collect();
-    let problems = shown.iter().filter(|check| check.severity() == Severity::Problem).count();
-    let title = match (problems, shown.len()) {
-        (0, 0) => "CHECKS".to_string(),
-        (0, 1) => "CHECKS · 1 WARNING".to_string(),
-        (0, count) => format!("CHECKS · {count} WARNINGS"),
-        (problems, _) => format!("CHECKS · {problems} {}", if problems == 1 { "PROBLEM" } else { "PROBLEMS" }),
-    };
-    panel(frame, inks, rect, &title, false);
-    let (x, w) = (rect.x + 2, rect.width.saturating_sub(4));
-    let bottom = rect.y + rect.height - 1;
-    let mut y = rect.y + 2;
-    for check in shown {
-        if y + 3 > bottom {
-            break;
-        }
-        let mark = if check.severity() == Severity::Problem { inks.alert } else { inks.warn };
-        let (title, detail) = check_words(app, check);
-        put(frame, x, y, 2, vec![Span::styled("▲", bold(mark))]);
-        put(frame, x + 2, y, w.saturating_sub(2), vec![Span::styled(cut(&title, w.saturating_sub(2) as usize), inks.bright)]);
-        y += 1;
-        for line in detail {
-            put(frame, x + 2, y, w.saturating_sub(2), vec![Span::styled(cut(&line, w.saturating_sub(2) as usize), inks.dim)]);
-            y += 1;
-        }
-    }
-    let days = holidays(app);
-    if days.is_empty() || y + 3 > bottom {
-        return;
-    }
-    y += 1;
-    put(frame, x, y, w, vec![Span::styled("Holidays accounted for", inks.muted)]);
-    for (index, date, name) in days {
-        y += 1;
-        if y >= bottom {
-            break;
-        }
-        let item = &app.plan.items[index];
-        let lane = &app.plan.lanes[app.plan.lane(&item.lane).unwrap_or(0)];
-        let code = lane.place.clone().unwrap_or_default();
-        put(frame, x, y, 11, vec![Span::styled(cut(&item.name, 11), inks.ink)]);
-        put(frame, x + 12, y, 7, vec![Span::styled(date.strftime("%d %b").to_string(), inks.dim)]);
-        let name_room = w.saturating_sub(20 + code.chars().count() as u16 + 1) as usize;
-        put(frame, x + 19, y, name_room as u16, vec![Span::styled(cut(&name, name_room), inks.dim)]);
-        put(frame, x + w - code.chars().count() as u16, y, code.chars().count() as u16, vec![Span::styled(code, inks.muted)]);
-    }
-}
-
-/// A name inside a sentence: "Launch" becomes "launch", "SAP cutover" stays as it is.
-pub(crate) fn common(name: &str) -> String {
-    let mut chars = name.chars();
-    match (chars.next(), chars.next()) {
-        (Some(first), Some(second)) if first.is_uppercase() && second.is_lowercase() => first.to_lowercase().chain(name.chars().skip(1)).collect(),
-        _ => name.to_string(),
-    }
-}
-
-/// A check as picture 8 says it: a general title, then what it is about.
-fn check_words(app: &App, check: &Check) -> (String, Vec<String>) {
-    let name = |index: usize| app.plan.items[index].name.clone();
-    let date = |index: usize| day(app.schedule.slots[index].planned.finish);
-    match *check {
-        Check::NoBuffer { before, target } => {
-            let target_name = name(target);
-            let lower = common(&target_name);
-            ("No buffer before a fixed date".into(), vec![format!("{} {} → {} {}", name(before), date(before), target_name, date(target)), format!("Add a buffer block before {lower}?")])
-        }
-        _ => {
-            let (title, detail) = pchart_core::text::check(&app.plan, check);
-            (title, vec![detail])
-        }
-    }
 }
 
 #[cfg(test)]
@@ -777,16 +536,14 @@ mod tests {
     fn small_windows_give_way_in_the_approved_order() {
         let mut app = app();
         app.screen = Screen::Roadmap;
+        let line = |placements: &[Placement]| placements.last().map(|placement| placement.svg.clone()).unwrap_or_default();
         let (rows, placements) = screen(&app, 242, 61);
-        assert!(rows[2].contains(":: TARGET · FIXED") && rows.iter().any(|row| row.contains(":: SELECTION")) && rows.iter().any(|row| row.contains(":: CHECKS · 1 WARNING")));
-        assert!(rows.iter().any(|row| row.contains("decides the date  Requirements → UX concept")));
-        assert!(placements.len() > 5);
-        let (rows, _) = screen(&app, 120, 36);
-        assert!(rows[1].contains("on track · 12 wd to spare") && !rows.iter().any(|row| row.contains(":: SELECTION")));
-        assert!(rows.iter().any(|row| row.contains("Frontend  Lane Frontend · Bangalore · IN-KA")));
+        assert!(rows[2].contains(":: TARGET · FIXED") && has(&rows, ":: SWIMLANE ROADMAP") && !has(&rows, ":: SELECTION") && !has(&rows, ":: CHECKS · 1 WARNING"));
+        assert!(line(&placements).contains("Frontend · Bangalore") && line(&placements).contains("decides the date") && placements.len() == 6);
+        let (rows, placements) = screen(&app, 120, 36);
+        assert!(rows[1].contains("on track · 12 wd to spare") && line(&placements).contains("Mon 21 Dec – Wed 27 Jan"));
         let (rows, _) = screen(&app, 80, 24);
         assert!(rows.iter().any(|row| row.contains("ROADMAP · LANES") && row.contains("OF 7")));
-        assert!(!rows.iter().any(|row| row.contains("decides the date  Requirements")));
         let (rows, placements) = screen(&app, 50, 14);
         assert!(placements.is_empty() && rows.iter().any(|row| row.contains("Terminal size too small:")) && rows.iter().any(|row| row.contains("Width = 60 Height = 16")));
     }
@@ -797,9 +554,9 @@ mod tests {
         app.screen = Screen::Roadmap;
         app.level = Level::Overview;
         app.selected = app.plan.item("acceptance").unwrap();
-        let (rows, _) = screen(&app, 170, 50);
-        assert!(has(&rows, "Lane · 3 milestones") && has(&rows, "Fri 18 Dec") && has(&rows, "Mon 01 Mar"));
-        assert!(has(&rows, "Items       Design sign-off, Acceptance, …") && has(&rows, "Status      decides the date") && !has(&rows, "0 items"));
+        let (_, placements) = screen(&app, 170, 50);
+        let line = &placements.last().unwrap().svg;
+        assert!(line.contains("Lane · 3 milestones") && line.contains("Fri 18 Dec – Mon 01 Mar") && line.contains("decides the date") && !line.contains("0 items"));
     }
 
     #[test]
