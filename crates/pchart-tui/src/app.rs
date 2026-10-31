@@ -187,17 +187,17 @@ impl App {
         order
     }
 
-    /// The next or previous check on the Checks screen.
+    /// The next or previous line on the Checks screen: the checks, then the checks that found nothing and
+    /// the holidays.
     pub fn choose_check(&mut self, step: isize) {
-        let count = self.analysis.checks.len() as isize;
-        if count > 0 {
-            self.check = (self.check as isize + step).rem_euclid(count) as usize;
-        }
+        let count = self.analysis.checks.len() as isize + 2;
+        self.check = (self.check as isize + step).rem_euclid(count) as usize;
     }
 
-    /// The roadmap, with the first item of the chosen check selected.
+    /// The roadmap, with the first item of the chosen check selected; nothing on the two quiet lines.
     pub fn show_check_in_roadmap(&mut self) {
-        if let Some(item) = self.checks().get(self.check).and_then(|&index| self.analysis.checks[index].items().first().copied()) {
+        let Some(&index) = self.checks().get(self.check) else { return };
+        if let Some(&item) = self.analysis.checks[index].items().first() {
             self.selected = item;
         }
         self.screen = Screen::Roadmap;

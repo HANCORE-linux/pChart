@@ -366,7 +366,8 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
         Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
-        Screen::Checks => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
+        Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
+        Screen::Checks => vec![("↑↓", "check"), ("1", "situation"), ("q", "quit")],
         Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
     };
     let mut spans = Vec::new();
@@ -878,5 +879,26 @@ mod tests {
         assert!(has(&rows, "n add notes") && line.contains("Design sign-off") && line.contains("Client signs the design in a workshop in New York."));
         app.undo();
         assert!(app.plan.items[sign_off].note.is_none() && app.message.as_deref() == Some("Undone: note on Design sign-off"));
+    }
+
+    #[test]
+    fn the_quiet_lines_open_the_checks_that_found_nothing_and_the_holidays() {
+        let mut app = app();
+        app.screen = Screen::Checks;
+        app.choose_check(2);
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, ":: CHECKED · NOTHING FOUND") && !has(&rows, "Enter show in roadmap"));
+        for text in ["Every fixed date holds", "No item is longer than six weeks", "Two items at once by one person: the plan names no one"] {
+            assert!(svg.contains(text), "{text}");
+        }
+        app.choose_check(1);
+        let rows = screen(&app, 170, 50).0;
+        assert!(has(&rows, ":: HOLIDAYS ACCOUNTED FOR · 5") && has(&rows, "Christmas Day") && has(&rows, "DE-BE") && has(&rows, "Republic Day"));
+        assert!(has(&screen(&app, 80, 24).0, "Republic Day"));
+        app.show_check_in_roadmap();
+        assert_eq!(app.screen, Screen::Checks);
+        app.choose_check(1);
+        assert_eq!(app.check, 0);
     }
 }
