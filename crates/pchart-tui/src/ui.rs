@@ -518,7 +518,7 @@ fn selection_bar(app: &App, frame: &mut Frame, inks: &Inks, x: u16, row: u16, ro
     let item = &app.plan.items[app.selected];
     let slot = &app.schedule.slots[app.selected];
     if level == Level::Overview {
-        let (name, folded, from, to) = folded_lane(app);
+        let (name, folded, from, to, ..) = folded_lane(app);
         put(frame, x, row, room, vec![Span::styled(name, bold(inks.bright)), Span::styled(format!("  Lane · {folded}"), inks.muted)]);
         put(frame, x, row + 1, room, vec![Span::styled(format!("{} – {}", day(from), day(to)), inks.ink)]);
         return;
@@ -538,14 +538,23 @@ pub(crate) fn day(date: Date) -> String {
     date.strftime("%a %d %b").to_string()
 }
 
-/// The selected item's lane at the Overview level: its name, how many items it folds, and its span.
-fn folded_lane(app: &App) -> (String, String, Date, Date) {
+/// The selected item's lane at the Overview level: its name, what it folds, its span, the items it
+/// stands for (its milestones when it has nothing else), and whether one of them decides the date.
+fn folded_lane(app: &App) -> (String, String, Date, Date, Vec<usize>, bool) {
     let lane = app.plan.lane(&app.plan.items[app.selected].lane).unwrap_or(0);
-    let tasks: Vec<usize> = (0..app.plan.items.len()).filter(|&index| app.plan.lane(&app.plan.items[index].lane) == Some(lane) && !app.plan.items[index].milestone).collect();
-    let from = tasks.iter().map(|&index| app.schedule.slots[index].planned.start).min().unwrap_or(app.today);
-    let to = tasks.iter().map(|&index| app.schedule.slots[index].planned.finish).max().unwrap_or(app.today);
-    let folded = if tasks.len() == 1 { "1 item folded".to_string() } else { format!("{} items folded", tasks.len()) };
-    (app.plan.lanes[lane].name.clone(), folded, from, to)
+    let mine: Vec<usize> = (0..app.plan.items.len()).filter(|&index| app.plan.lane(&app.plan.items[index].lane) == Some(lane)).collect();
+    let tasks: Vec<usize> = mine.iter().copied().filter(|&index| !app.plan.items[index].milestone).collect();
+    let folded = match (tasks.len(), mine.len()) {
+        (0, 1) => "1 milestone".to_string(),
+        (0, count) => format!("{count} milestones"),
+        (1, _) => "1 item folded".to_string(),
+        (count, _) => format!("{count} items folded"),
+    };
+    let shown = if tasks.is_empty() { mine } else { tasks };
+    let from = shown.iter().map(|&index| app.schedule.slots[index].planned.start).min().unwrap_or(app.today);
+    let to = shown.iter().map(|&index| app.schedule.slots[index].planned.finish).max().unwrap_or(app.today);
+    let decides = shown.iter().any(|index| app.schedule.chain.contains(index));
+    (app.plan.lanes[lane].name.clone(), folded, from, to, shown, decides)
 }
 
 fn selection_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, level: Level) {
@@ -559,7 +568,7 @@ fn selection_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, level:
         }
     };
     if level == Level::Overview {
-        let (name, folded, from, to) = folded_lane(app);
+        let (name, folded, from, to, items, decides) = folded_lane(app);
         let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[app.selected].lane).unwrap_or(0)];
         put(frame, x, rect.y + 3, w, vec![Span::styled(name, bold(inks.bright))]);
         put(frame, x, rect.y + 4, w, vec![Span::styled(format!("Lane · {folded}"), inks.muted)]);
@@ -567,10 +576,8 @@ fn selection_panel(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, level:
         row(frame, rect.y + 7, "To", day(to), inks.ink);
         let place = [lane.city.as_deref(), lane.place.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
         row(frame, rect.y + 8, "Place", place, inks.ink);
-        let items: Vec<&str> = app.plan.items.iter().filter(|item| item.lane == lane.id && !item.milestone).map(|item| item.name.as_str()).collect();
+        let items: Vec<&str> = items.iter().map(|&index| app.plan.items[index].name.as_str()).collect();
         row(frame, rect.y + 10, "Items", items.join(", "), inks.ink);
-        let lane_index = app.plan.lane(&lane.id);
-        let decides = app.schedule.chain.iter().any(|&index| app.plan.lane(&app.plan.items[index].lane) == lane_index && !app.plan.items[index].milestone);
         row(frame, rect.y + 11, "Status", if decides { "decides the date".into() } else { "time to spare".into() }, inks.ink);
         return;
     }
@@ -782,6 +789,17 @@ mod tests {
         assert!(!rows.iter().any(|row| row.contains("decides the date  Requirements")));
         let (rows, placements) = screen(&app, 50, 14);
         assert!(placements.is_empty() && rows.iter().any(|row| row.contains("Terminal size too small:")) && rows.iter().any(|row| row.contains("Width = 60 Height = 16")));
+    }
+
+    #[test]
+    fn a_lane_of_milestones_stands_for_its_milestones() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        app.level = Level::Overview;
+        app.selected = app.plan.item("acceptance").unwrap();
+        let (rows, _) = screen(&app, 170, 50);
+        assert!(has(&rows, "Lane · 3 milestones") && has(&rows, "Fri 18 Dec") && has(&rows, "Mon 01 Mar"));
+        assert!(has(&rows, "Items       Design sign-off, Acceptance, …") && has(&rows, "Status      decides the date") && !has(&rows, "0 items"));
     }
 
     #[test]

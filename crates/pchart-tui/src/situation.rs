@@ -148,7 +148,7 @@ fn verdict(app: &App, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &m
         put(frame, x + w + 1, rect.y + 3, 14, vec![Span::styled("working days", inks.dim)]);
         put(frame, x + w + 1, rect.y + 4, 14, vec![Span::styled(if verdict.spare < 0 { "late" } else { "to spare" }, inks.dim)]);
         let mut at = x;
-        for (name, cols) in [("does not hold", 13), ("tight", 9), ("holds", 13)] {
+        for (name, cols) in [("does not hold", 15), ("tight", 10), ("holds", 15)] {
             let rect = Rect { x: at, y: rect.y + 6, width: cols, height: 1 };
             let (w, h) = pixels(app, rect);
             placements.push(Placement { rect, svg: situation::segment(name == state, w, h, unit(app), &app.palette).svg(), paper: false });
