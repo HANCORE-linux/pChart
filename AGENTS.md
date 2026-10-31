@@ -68,4 +68,5 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | `--today YYYY-MM-DD` | calculate from a fixed day, so results repeat |
 | `--holidays FILE` | holiday data instead of the bundled data |
 | `tools/holidays/generate.py FIRST LAST OUT [REGION …]` | holiday data from python-holidays |
+| `tools/video/record.py OUT`, then `tools/video/compose.py OUT` | the video of pChart in use (picture 48), recorded off screen in a headless cage; writes `OUT/pchart.mp4` and `OUT/pchart.gif` |
 | `PCHART_TRACE=FILE` | the TUI writes every wake-up (picture requests, finished pictures, events) to FILE |
