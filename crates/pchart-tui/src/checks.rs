@@ -15,7 +15,7 @@ use crate::pictures::Placement;
 use crate::ui::{Inks, cut, day, holidays, panel, put};
 
 /// "CHECKS · 1 WARNING · 1 HINT".
-fn title(app: &App) -> String {
+pub(crate) fn title(app: &App) -> String {
     let mut parts = vec!["CHECKS".to_string()];
     for (severity, one, many) in [(Severity::Problem, "PROBLEM", "PROBLEMS"), (Severity::Warning, "WARNING", "WARNINGS"), (Severity::Hint, "HINT", "HINTS")] {
         match app.analysis.checks.iter().filter(|check| check.severity() == severity).count() {
@@ -28,7 +28,7 @@ fn title(app: &App) -> String {
 }
 
 /// A check in the list: its title, and where it is.
-fn words(app: &App, check: &Check) -> (String, String) {
+pub(crate) fn words(app: &App, check: &Check) -> (String, String) {
     let name = |index: usize| app.plan.items[index].name.clone();
     let finish = |index: usize| day(app.schedule.slots[index].planned.finish);
     match *check {
@@ -42,7 +42,7 @@ fn words(app: &App, check: &Check) -> (String, String) {
     }
 }
 
-fn symbol(app: &App, check: &Check) -> (Icon, pchart_draw::scene::Color) {
+pub(crate) fn symbol(app: &App, check: &Check) -> (Icon, pchart_draw::scene::Color) {
     let p = app.shown();
     match check.severity() {
         Severity::Problem => (Icon::Cross, p.alert),

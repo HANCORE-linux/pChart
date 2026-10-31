@@ -18,6 +18,7 @@ pub enum Action {
     Show,
     Undo,
     Detail,
+    Details,
     Situation,
     Roadmap,
     Checks,
@@ -32,7 +33,7 @@ pub type Found = (Action, Option<usize>);
 
 impl Action {
     fn all(app: &App) -> Vec<Action> {
-        let mut all = vec![Action::ChangeDate, Action::AddItem, Action::Rename, Action::WaitsOn, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
+        let mut all = vec![Action::ChangeDate, Action::AddItem, Action::Rename, Action::WaitsOn, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
         all.push(Action::Export(app.export.view));
         all.extend(View::ALL.into_iter().filter(|&view| view != app.export.view).map(Action::Export));
         all.extend([Action::Help, Action::Quit]);
@@ -62,6 +63,7 @@ impl Action {
             Action::Important => &["important", "star", "mark", "key"],
             Action::Show => &[],
             Action::Undo => &["undo", "back", "revert", "take"],
+            Action::Details => &["details", "side", "panel", "info", "column"],
             Action::Detail => &["detail", "level", "overview", "standard", "full", "zoom", "more", "less"],
             Action::Situation => &["situation", "where", "stand", "status", "verdict", "next", "chain", "track"],
             Action::Roadmap => &["roadmap", "chart", "timeline", "lanes", "show"],
@@ -92,6 +94,8 @@ impl Action {
             Action::Important => "Mark as important".into(),
             Action::Show => item.map_or_else(String::new, |index| app.plan.items[index].name.clone()),
             Action::Undo => "Undo".into(),
+            Action::Details if app.side => "Hide the details".into(),
+            Action::Details => "Show the details".into(),
             Action::Detail => "Change the detail".into(),
             Action::Situation => "Where we stand".into(),
             Action::Roadmap => "Show the roadmap".into(),
@@ -156,6 +160,7 @@ impl Action {
                 }
                 None => "the verdict, what is next, and the chain".into(),
             },
+            (Action::Details, _) => "what it waits on, its holidays and the checks, beside the roadmap".into(),
             (Action::Roadmap, _) => "every item in its lane, over time".into(),
             (Action::Checks, _) => {
                 let looks = app.analysis.checks.iter().filter(|check| check.severity() != pchart_core::analysis::Severity::Hint).count();
@@ -202,6 +207,7 @@ impl Action {
             Action::Important => "n i",
             Action::Show => "",
             Action::Undo => "u",
+            Action::Details => "Space",
             Action::Detail => "d",
             Action::Situation => "1",
             Action::Roadmap => "2",
@@ -255,6 +261,10 @@ impl Action {
             }
             Action::Show => roadmap(app),
             Action::Undo => app.undo(),
+            Action::Details => {
+                app.screen = Screen::Roadmap;
+                app.side ^= true;
+            }
             Action::Detail => {
                 app.screen = Screen::Roadmap;
                 app.detail();
@@ -308,7 +318,7 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
     if typed_words.is_empty() {
         let selected = Some(app.selected);
         let mut found: Vec<Found> = match app.screen {
-            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None)],
+            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None), (Action::Details, None)],
             Screen::Checks => vec![(Action::Holidays, None), (Action::Undo, None)],
             Screen::Export => vec![(Action::Export(app.export.view), None)],
             Screen::Situation => vec![(Action::Undo, None)],

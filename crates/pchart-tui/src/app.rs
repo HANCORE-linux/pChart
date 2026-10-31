@@ -148,13 +148,15 @@ pub struct App {
     pub help: bool,
     pub finder: Option<Finder>,
     pub form: Option<Form>,
+    /// The details beside the roadmap are shown (picture 52).
+    pub side: bool,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false }
     }
 
     /// The colours of the screen under the help or the finder: dimmed while one of them is open.
@@ -476,6 +478,15 @@ impl App {
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
             Some(Form::Rename { typed, .. }) => drop(typed.pop()),
             _ => {}
+        }
+    }
+
+    /// Space on the roadmap: the details beside it on or off; a window of `width` columns narrower
+    /// than 150 has no room for them.
+    pub fn toggle_details(&mut self, width: u16) {
+        self.side ^= true;
+        if self.side && width < 150 {
+            self.message = Some("The details need 150 columns".into());
         }
     }
 

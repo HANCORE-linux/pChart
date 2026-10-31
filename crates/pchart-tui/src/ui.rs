@@ -112,7 +112,14 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
                 summary(app, frame, &under, area);
                 2
             };
-            roadmap(app, &palette, frame, &under, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }, &mut placements);
+            let body = Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top };
+            if app.side && area.width >= 150 {
+                let side = (area.width * 26 / 100).clamp(40, 56);
+                roadmap(app, &palette, frame, &under, Rect { width: body.width - side, ..body }, &mut placements);
+                details(app, &palette, frame, &under, Rect { x: body.width - side, width: side, ..body }, &mut placements);
+            } else {
+                roadmap(app, &palette, frame, &under, body, &mut placements);
+            }
         }
     }
     if app.overlay() {
@@ -414,6 +421,106 @@ pub struct Layout {
 }
 
 /// Where the roadmap picture goes on a screen of this size.
+/// The details beside the roadmap (picture 52): what the line under the chart does not say about the
+/// selection, and the checks.
+fn details(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &mut Vec<Placement>) {
+    let index = app.selected;
+    let item = &app.plan.items[index];
+    let slot = &app.schedule.slots[index];
+    let name = |id: &String| app.plan.item(id).map(|other| app.plan.items[other].name.clone());
+    let span = |span: pchart_core::Span| if item.milestone { day(span.finish) } else { format!("{} – {}", day(span.start), day(span.finish)) };
+    let then: Vec<String> = app.plan.items.iter().filter(|other| other.after.contains(&item.id)).map(|other| other.name.clone()).collect();
+    let date = match (item.on, item.no_earlier_than, item.no_later_than) {
+        (Some(on), _, _) => format!("fixed on {}", day(on)),
+        (_, Some(from), Some(by)) => format!("not before {}, by {}", day(from), day(by)),
+        (_, Some(from), None) => format!("not before {}", day(from)),
+        (_, None, Some(by)) => format!("by {}", day(by)),
+        _ => "calculated".to_string(),
+    };
+    let after: Vec<String> = item.after.iter().filter_map(name).collect();
+    let mut rows: Vec<(&str, String)> = vec![
+        ("Waits on", if after.is_empty() { "nothing".into() } else { after.join(", ") }),
+        ("Then", if then.is_empty() { "nothing".into() } else { then.join(", ") }),
+        ("Earliest", span(slot.earliest)),
+        ("Latest", span(slot.latest)),
+        ("Date", date),
+    ];
+    let days: Vec<(Date, String)> = holidays(app).into_iter().filter(|(at, _, _)| *at == index).map(|(_, date, name)| (date, name)).collect();
+    for (at, (date, name)) in days.iter().enumerate() {
+        rows.push((if at == 0 { "Holidays" } else { "" }, format!("{} {name}", date.strftime("%d %b"))));
+    }
+    let width = rect.width.saturating_sub(4);
+    let value_w = width.saturating_sub(11) as usize;
+    let mut lines: Vec<(&str, String)> = Vec::new();
+    for (label, value) in rows {
+        let mut first = true;
+        for chunk in wrap(&value, value_w) {
+            lines.push((if first { label } else { "" }, chunk));
+            first = false;
+        }
+    }
+    if let Some(note) = &item.note {
+        for (at, chunk) in wrap(note, value_w).into_iter().enumerate() {
+            lines.push((if at == 0 { "Note" } else { "" }, chunk));
+        }
+    }
+    let top_h = (lines.len() as u16 + 4).min(rect.height.saturating_sub(6));
+    let top = Rect { height: top_h, ..rect };
+    panel(frame, inks, top, &format!("DETAILS · {}", item.name.to_uppercase()), false);
+    for (row, (label, value)) in lines.iter().enumerate() {
+        let y = top.y + 3 + row as u16;
+        if y + 1 >= top.y + top.height {
+            break;
+        }
+        put(frame, top.x + 2, y, 10, vec![Span::styled(label.to_string(), inks.dim)]);
+        put(frame, top.x + 13, y, width.saturating_sub(11), vec![Span::styled(value.clone(), inks.ink)]);
+    }
+    let bottom = Rect { y: top.y + top.height, height: rect.height - top.height, ..rect };
+    if bottom.height < 5 {
+        return;
+    }
+    panel(frame, inks, bottom, &crate::checks::title(app), false);
+    let (cw, ch) = (f32::from(app.cell.0), f32::from(app.cell.1));
+    let mut y = bottom.y + 3;
+    for &check_index in &app.checks() {
+        if y + 2 >= bottom.y + bottom.height {
+            break;
+        }
+        let check = &app.analysis.checks[check_index];
+        let (title, place) = crate::checks::words(app, check);
+        let (icon, _) = crate::checks::symbol(app, check);
+        let tone = match check.severity() {
+            Severity::Problem => palette.alert,
+            Severity::Warning => palette.warn,
+            Severity::Hint => palette.dim,
+        };
+        let line = Rect { x: bottom.x + 2, y, width, height: 1 };
+        placements.push(Placement { rect: line, svg: bits::line(&[(Some((icon, tone)), title, palette.ink, false)], f32::from(line.width) * cw, ch, ch / 21.0, palette).svg(), paper: false });
+        let chunks = wrap(&place.split_whitespace().collect::<Vec<_>>().join(" "), width.saturating_sub(4) as usize);
+        for (at, chunk) in chunks.iter().enumerate() {
+            if y + 2 + (at as u16) < bottom.y + bottom.height {
+                put(frame, bottom.x + 5, y + 1 + at as u16, width.saturating_sub(3), vec![Span::styled(chunk.clone(), inks.dim)]);
+            }
+        }
+        y += chunks.len() as u16 + 2;
+    }
+}
+
+/// `text` broken at spaces into lines of at most `count` characters.
+fn wrap(text: &str, count: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match out.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= count => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => out.push(word.to_string()),
+        }
+    }
+    out
+}
+
 pub fn chart(area: Rect) -> Rect {
     let top = if area.width >= 120 && area.height >= 44 { 1 + TILES } else { 2 };
     layout(area, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }).chart
@@ -988,6 +1095,21 @@ mod tests {
         assert!(app.plan.items[sdk].after.contains(&"api".to_string()) && app.message.is_none());
         app.undo();
         assert_eq!(app.message.as_deref(), Some("Undone: what SDK integration waits on"));
+    }
+
+    #[test]
+    fn space_shows_the_details_beside_the_roadmap_when_there_is_room() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        app.toggle_details(170);
+        assert!(app.side && app.message.is_none());
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, ":: DETAILS · FRONTEND") && has(&rows, "Waits on") && has(&rows, "Design sign-off") && has(&rows, "26 Jan Republic Day") && has(&rows, ":: CHECKS · 1 WARNING · 1 HINT"));
+        assert!(placements.iter().any(|placement| placement.svg.contains("Mon 21 Dec – Wed 27 Jan")) && !has(&rows, "Planned"));
+        assert!(!has(&screen(&app, 120, 40).0, "DETAILS"));
+        app.toggle_details(120);
+        app.toggle_details(120);
+        assert_eq!(app.message.as_deref(), Some("The details need 150 columns"));
     }
 
     #[test]
