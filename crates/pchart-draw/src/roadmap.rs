@@ -6,7 +6,7 @@ use pchart_core::calendar::{Calendar, next, previous};
 use pchart_core::{Plan, Schedule, analyse};
 
 use crate::scene::{Anchor, Color, Fill, Mark, Scene, Shape, Stroke};
-use crate::style::{ADVANCE, FONT, Palette, phase_label};
+use crate::style::{ADVANCE, FONT, Palette};
 
 /// How much a roadmap shows. Overview folds each lane into one bar; Full adds dependencies, holidays,
 /// free slack, the date of every milestone and the place of every lane.
@@ -404,8 +404,8 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     }
     s.add(Shape::Line { x1: g.x0, y1: top + 40.0 * u, x2: g.x1, y2: top + 40.0 * u, stroke: c.rule(p.rule, 1.0 / u) });
 
-    for ((name, from, to), phase) in c.schedule.phases(c.plan).into_iter().zip(&c.plan.phases).filter(|((_, from, to), _)| *to >= g.start && *from <= end) {
-        chevron(s, &p, u, g.x(from.max(g.start)), g.x(to.min(end)) + g.px, top + 44.0 * u, 18.0 * u, &name, phase.short.as_deref());
+    for (name, from, to) in c.schedule.phases(c.plan).into_iter().filter(|(_, from, to)| *to >= g.start && *from <= end) {
+        chevron(s, &p, u, g.x(from.max(g.start)), g.x(to.min(end)) + g.px, top + 44.0 * u, 18.0 * u, &name);
     }
     s.add(text(12.0 * u, top + 58.0 * u, "Phases".into(), 14.0, p.muted));
 
@@ -658,22 +658,24 @@ fn diamond(s: &mut Scene, item: usize, x: f32, y: f32, r: f32, fill: Fill, strok
     s.add_for(item, 1.0, Shape::Path { points: vec![(x, y - r), (x + r, y), (x, y + r), (x - r, y)], closed: true, fill, stroke });
 }
 
-/// A phase arrow with its name, which follows `phase_label` down to text 8 pixels high.
 #[allow(clippy::too_many_arguments)]
-fn chevron(s: &mut Scene, p: &Palette, u: f32, x0: f32, x1: f32, y: f32, h: f32, name: &str, short: Option<&str>) {
+fn chevron(s: &mut Scene, p: &Palette, u: f32, x0: f32, x1: f32, y: f32, h: f32, label: &str) {
     let tip = (8.0 * u).min((x1 - x0) / 2.0);
     let points = vec![(x0, y), (x1 - tip, y), (x1, y + h / 2.0), (x1 - tip, y + h), (x0, y + h), (x0 + tip, y + h / 2.0)];
     s.add(Shape::Path { points, closed: true, fill: Fill::Color(p.raised), stroke: Some(Stroke { color: p.muted, width: u, dash: None }) });
-    let room = x1 - x0 - tip - 4.0 * u;
-    if room < 8.0 {
-        return;
-    }
-    let (lines, size) = phase_label(name, short, room, h, 13.5 * u, 8.0, |text, size| text.chars().count() as f32 * size * ADVANCE);
-    let pitch = size * 1.15;
-    let first = y + h / 2.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
-    for (index, line) in lines.into_iter().enumerate() {
-        s.add(Shape::Text { x: (x0 + x1) / 2.0 + tip / 2.0, y: first + pitch * index as f32, text: line, size, color: p.dim, bold: false, anchor: Anchor::Middle });
-    }
+    let room = x1 - x0 - tip - 8.0 * u;
+    let count = label.chars().count();
+    let size = (room / (count as f32 * ADVANCE)).clamp(10.5 * u, 13.5 * u);
+    let fits = |chars: usize| chars as f32 * size * ADVANCE <= room;
+    let label = if fits(count) {
+        label.to_string()
+    } else {
+        match (4..count).rev().find(|&keep| fits(keep + 1)) {
+            Some(keep) => label.chars().take(keep).collect::<String>() + "…",
+            None => return,
+        }
+    };
+    s.add(Shape::Text { x: (x0 + x1) / 2.0 + tip / 2.0, y: y + h / 2.0 + size * 0.36, text: label, size, color: p.dim, bold: false, anchor: Anchor::Middle });
 }
 
 fn days(from: Date, to: Date) -> i32 {

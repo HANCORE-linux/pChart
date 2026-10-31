@@ -4,7 +4,7 @@ use jiff::civil::{Date, Weekday};
 use pchart_core::calendar::{next, previous};
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{CARD, FIXED, GRAY, INK, Key, LATE, MID, Page, X0, X1, dates, fit};
+use crate::page::{CARD, FIXED, GRAY, INK, Key, LATE, MID, Page, X0, X1, dates, fit, wrap};
 use crate::scene::{Anchor, Fill, Scene, Shape};
 use crate::style::sans_width;
 
@@ -35,9 +35,20 @@ pub fn now_next_later(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         ("Next", format!("starts {} – {}", day(next(now_end)), day(next_end)), items.iter().copied().filter(|&index| start(index) > now_end && start(index) <= next_end).collect()),
         ("Later", format!("starts from {}", day(next(next_end))), items.iter().copied().filter(|&index| start(index) > next_end).collect()),
     ];
-    let longest = columns.iter().map(|(_, _, cards)| cards.len()).max().unwrap_or(0) as f32;
-    let mut page = Page::new(plan, schedule, today, "Now / Next / Later", 198.0 + longest * PITCH + 96.0);
     let width = (X1 - X0 - 2.0 * GAP) / 3.0;
+    let card = |index: usize| {
+        let item = &plan.items[index];
+        let fixed = item.on.is_some();
+        let room = width - 30.0 - if item.milestone { 18.0 } else { 0.0 };
+        let lane = plan.lane(&item.lane).map_or(item.lane.as_str(), |lane| plan.lanes[lane].name.as_str());
+        let when = if item.milestone && fixed { format!("{} {} · fixed", day(schedule.slots[index].planned.finish), schedule.slots[index].planned.finish.year()) } else { dates(plan, schedule, index, true) };
+        let name = wrap(&item.name, 15.0, true, room);
+        let info = if sans_width(&format!("{lane} · {when}"), 13.0, false) <= room { vec![format!("{lane} · {when}")] } else { wrap(lane, 13.0, false, room).into_iter().chain([when]).collect() };
+        let height = CARD_H + 18.0 * (name.len() - 1) as f32 + 16.0 * (info.len() - 1) as f32;
+        (name, info, height)
+    };
+    let longest = columns.iter().map(|(_, _, cards)| cards.iter().map(|&index| card(index).2 + PITCH - CARD_H).sum::<f32>()).fold(0.0, f32::max);
+    let mut page = Page::new(plan, schedule, today, "Now / Next / Later", 198.0 + longest + 96.0);
     for (column, (name, rule, cards)) in columns.iter().enumerate() {
         let x = X0 + column as f32 * (width + GAP);
         page.text(x, 158.0, name, 24.0, INK, true, Anchor::Start, None);
@@ -54,20 +65,21 @@ pub fn now_next_later(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
             } else {
                 INK
             };
-            page.scene.add(Shape::Rect { x, y, w: width, h: CARD_H, radius: 3.0, fill: Fill::Color(CARD), stroke: None });
-            page.scene.add(Shape::Rect { x, y, w: 4.0, h: CARD_H, radius: 0.0, fill: Fill::Color(if chain.contains(&index) { INK } else { MID }), stroke: None });
+            let (name, info, height) = card(index);
+            page.scene.add(Shape::Rect { x, y, w: width, h: height, radius: 3.0, fill: Fill::Color(CARD), stroke: None });
+            page.scene.add(Shape::Rect { x, y, w: 4.0, h: height, radius: 0.0, fill: Fill::Color(if chain.contains(&index) { INK } else { MID }), stroke: None });
             let mut tx = x + 18.0;
             if item.milestone {
                 page.diamond(tx + 5.0, y + 17.0, if fixed { 6.0 } else { 5.0 }, if fixed || late { ink } else { INK }, None, Some(index));
                 tx += 18.0;
             }
-            let room = x + width - tx - 12.0;
-            page.text(tx, y + 22.0, &fit(&item.name, 15.0, true, room), 15.0, ink, true, Anchor::Start, Some(index));
-            let lane = plan.lane(&item.lane).map_or(item.lane.as_str(), |lane| plan.lanes[lane].name.as_str());
-            let when = if item.milestone && fixed { format!("{} {} · fixed", day(schedule.slots[index].planned.finish), schedule.slots[index].planned.finish.year()) } else { dates(plan, schedule, index, true) };
-            let lane = fit(lane, 13.0, false, (room - sans_width(&format!(" · {when}"), 13.0, false)).max(0.0));
-            page.text(tx, y + 39.0, &fit(&format!("{lane} · {when}"), 13.0, false, room), 13.0, if fixed || late { ink } else { GRAY }, false, Anchor::Start, Some(index));
-            y += PITCH;
+            for (line, text) in name.iter().enumerate() {
+                page.text(tx, y + 22.0 + 18.0 * line as f32, text, 15.0, ink, true, Anchor::Start, Some(index));
+            }
+            for (line, text) in info.iter().enumerate() {
+                page.text(tx, y + 39.0 + 18.0 * (name.len() - 1) as f32 + 16.0 * line as f32, text, 13.0, if fixed || late { ink } else { GRAY }, false, Anchor::Start, Some(index));
+            }
+            y += height + PITCH - CARD_H;
         }
     }
     let legend_y = page.height() - 76.0;

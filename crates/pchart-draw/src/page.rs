@@ -305,6 +305,21 @@ pub enum Key {
     Warning,
 }
 
+/// `text` broken into lines of `room` pixels at its spaces; only a single word wider than `room` is cut.
+pub fn wrap(text: &str, size: f32, bold: bool, room: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split(' ') {
+        match lines.last_mut() {
+            Some(line) if sans_width(&format!("{line} {word}"), size, bold) <= room => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines.into_iter().map(|line| fit(&line, size, bold, room)).collect()
+}
+
 /// `text` cut to `room` pixels in Noto Sans, ending in "…" when it was cut.
 pub fn fit(text: &str, size: f32, bold: bool, room: f32) -> String {
     if sans_width(text, size, bold) <= room {

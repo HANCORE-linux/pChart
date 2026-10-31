@@ -51,3 +51,14 @@ fn texts_on_pages_neither_cover_each_other_nor_leave_the_page() {
         }
     }
 }
+
+#[test]
+fn names_on_pages_are_whole() {
+    for (name, scene) in pages() {
+        for mark in &scene.marks {
+            if let Shape::Text { text, .. } = &mark.shape {
+                assert!(!text.ends_with('…'), "{name}: \"{text}\" is cut");
+            }
+        }
+    }
+}

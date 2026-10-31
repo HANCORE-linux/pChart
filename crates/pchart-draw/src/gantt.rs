@@ -4,7 +4,7 @@ use jiff::civil::Date;
 use pchart_core::analysis::Check;
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, LINK, MID, PAPER, Page, SHADES, SOFT, X0, X1, dates, fit};
+use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, LINK, MID, PAPER, Page, SHADES, SOFT, X0, X1, dates, fit, wrap};
 use crate::scene::{Anchor, Scene};
 use crate::style::sans_width;
 use crate::views::Audience;
@@ -53,27 +53,32 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], au
     let checks = if audience.warnings() { checks } else { &[] };
     let chain: HashSet<usize> = schedule.chain.iter().copied().collect();
     let (phases, rest) = phase_items(plan, schedule);
+    let lane_name = |index: usize| plan.lane(&plan.items[index].lane).map_or(plan.items[index].lane.as_str(), |lane| plan.lanes[lane].name.as_str());
+    let name_w = plan.items.iter().map(|item| sans_width(&item.name, 13.0, item.on.is_some())).fold(0.0, f32::max).min(190.0) + 12.0;
+    let lane_x = X0 + name_w + 16.0;
+    let lane_w = (0..plan.items.len()).map(|index| sans_width(lane_name(index), 12.0, false)).fold(0.0, f32::max).min(110.0);
+    let lines = |index: usize| (wrap(&plan.items[index].name, 13.0, plan.items[index].on.is_some(), name_w - 4.0), wrap(lane_name(index), 12.0, false, lane_w));
+    let tall = |index: usize| {
+        let (name, lane) = lines(index);
+        20.0 + 15.0 * (name.len().max(lane.len()) - 1) as f32
+    };
     let mut rows: Vec<(Row, f32, f32)> = Vec::new();
     let mut y = 169.0;
     for (index, phase) in phases.iter().enumerate() {
         rows.push((Row::Phase(index), y, 19.0));
         y += 19.0;
         for &item in &phase.items {
-            rows.push((Row::Item(item), y, 20.0));
-            y += 20.0;
+            rows.push((Row::Item(item), y, tall(item)));
+            y += tall(item);
         }
     }
     for &item in &rest {
-        rows.push((Row::Item(item), y + 4.0, 20.0));
-        y += 24.0;
+        rows.push((Row::Item(item), y + 4.0, tall(item)));
+        y += 4.0 + tall(item);
     }
     let bottom = y;
     let mut page = Page::new(plan, schedule, today, "Gantt chart", bottom + 96.0);
 
-    let lane_name = |index: usize| plan.lane(&plan.items[index].lane).map_or(plan.items[index].lane.as_str(), |lane| plan.lanes[lane].name.as_str());
-    let name_w = plan.items.iter().map(|item| sans_width(&item.name, 13.0, item.on.is_some())).fold(0.0, f32::max).min(190.0) + 12.0;
-    let lane_x = X0 + name_w + 16.0;
-    let lane_w = (0..plan.items.len()).map(|index| sans_width(lane_name(index), 12.0, false)).fold(0.0, f32::max).min(110.0);
     let date_x = lane_x + lane_w + 16.0;
     let date_w = (0..plan.items.len()).map(|index| sans_width(&dates(plan, schedule, index, false), 12.0, false)).fold(0.0, f32::max);
     let spare_x = date_x + date_w + 16.0;
@@ -145,8 +150,13 @@ pub fn gantt(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check], au
                 } else {
                     GRAY
                 };
-                page.text(X0 + 12.0, yc + 4.5, &fit(&item.name, 13.0, fixed, name_w - 4.0), 13.0, ink, fixed, Anchor::Start, Some(index));
-                page.text(lane_x, yc + 4.5, &fit(lane_name(index), 12.0, false, lane_w), 12.0, GRAY, false, Anchor::Start, Some(index));
+                let (name, lane) = lines(index);
+                for (line, text) in name.iter().enumerate() {
+                    page.text(X0 + 12.0, yc + 4.5 - 7.5 * (name.len() - 1) as f32 + 15.0 * line as f32, text, 13.0, ink, fixed, Anchor::Start, Some(index));
+                }
+                for (line, text) in lane.iter().enumerate() {
+                    page.text(lane_x, yc + 4.5 - 7.5 * (lane.len() - 1) as f32 + 15.0 * line as f32, text, 12.0, GRAY, false, Anchor::Start, Some(index));
+                }
                 page.text(date_x, yc + 4.5, &dates(plan, schedule, index, false), 12.0, if fixed || late { ink } else { GRAY }, false, Anchor::Start, Some(index));
                 if !on_chain && audience.spare() {
                     page.text(spare_x, yc + 4.5, &format!("{} wd", slot.spare), 12.0, if late { LATE } else { GRAY }, false, Anchor::Start, Some(index));

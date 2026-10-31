@@ -4,7 +4,7 @@ use jiff::civil::Date;
 use pchart_core::analysis::Check;
 use pchart_core::{Plan, Schedule};
 
-use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, PAPER, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows};
+use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, PAPER, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows, wrap};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
 use crate::style::sans_width;
 use crate::views::Audience;
@@ -38,10 +38,11 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     };
     let extents: Vec<(usize, f32, f32, bool)> = (0..plan.items.len()).map(|index| (lanes[index], ends(index).0, ends(index).1, plan.items[index].milestone)).collect();
     let row = rows(&extents, 7.0);
+    let lane_lines: Vec<Vec<String>> = plan.lanes.iter().map(|lane| wrap(&lane.name, 14.0, false, label_w)).collect();
     let mut tops = vec![ROWS_Y];
     for lane in 0..plan.lanes.len() {
         let count = (0..plan.items.len()).filter(|&index| lanes[index] == lane).map(|index| row[index] + 1).max().unwrap_or(1);
-        tops.push(tops[lane] + LANE * (1.0 + ROW * (count - 1) as f32));
+        tops.push(tops[lane] + (LANE * (1.0 + ROW * (count - 1) as f32)).max(LANE + 17.0 * (lane_lines[lane].len() - 1) as f32));
     }
     let bottom = tops[plan.lanes.len()];
     let y = |index: usize| tops[lanes[index]] + 29.5 + row[index] as f32 * LANE * ROW;
@@ -69,10 +70,12 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
         }
     }
 
-    for (index, lane) in plan.lanes.iter().enumerate() {
+    for (index, lines) in lane_lines.iter().enumerate() {
         page.line(X0, tops[index], X1, tops[index], LIGHT, 1.2);
-        page.text(X0, tops[index] + 21.0, &fit(&lane.name, 14.0, false, label_w), 14.0, INK, false, Anchor::Start, None);
-        page.text(X0, tops[index] + 38.0, &fit(&place(index), 12.0, false, label_w), 12.0, GRAY, false, Anchor::Start, None);
+        for (line, text) in lines.iter().enumerate() {
+            page.text(X0, tops[index] + 21.0 + 17.0 * line as f32, text, 14.0, INK, false, Anchor::Start, None);
+        }
+        page.text(X0, tops[index] + 38.0 + 17.0 * (lines.len() - 1) as f32, &fit(&place(index), 12.0, false, label_w), 12.0, GRAY, false, Anchor::Start, None);
     }
     if let Some(target) = schedule.target {
         page.vline(axis.milestone(plan, schedule, target), PHASES_Y + 22.0, bottom, FIXED, 1.0, Some((4.0, 4.0)), Some(target));
