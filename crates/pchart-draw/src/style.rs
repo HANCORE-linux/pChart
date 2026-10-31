@@ -56,3 +56,47 @@ pub fn sans_width(text: &str, size: f32, bold: bool) -> f32 {
 
 /// Advance of one character in JetBrains Mono, in font sizes.
 pub const ADVANCE: f32 = 0.6;
+
+/// The lines and text size of a phase name in its arrow, `room` wide and `height` high: the whole name
+/// on one line, as large as `most` and as small as `least`; else on two lines, broken at a space; else
+/// the plan's short name the same way; else the name cut with "…" at `least`. `width` measures text.
+pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most: f32, least: f32, width: impl Fn(&str, f32) -> f32) -> (Vec<String>, f32) {
+    let one = |text: &str| most.min(most * room / width(text, most).max(0.01));
+    let two = |text: &str| {
+        let words: Vec<&str> = text.split(' ').collect();
+        (1..words.len())
+            .map(|at| {
+                let (a, b) = (words[..at].join(" "), words[at..].join(" "));
+                (one(&a).min(one(&b)).min(height / 2.6), vec![a, b])
+            })
+            .max_by(|x, y| x.0.total_cmp(&y.0))
+    };
+    for text in std::iter::once(name).chain(short) {
+        if one(text) >= least {
+            return (vec![text.to_string()], one(text));
+        }
+        if let Some((size, lines)) = two(text).filter(|(size, _)| *size >= least) {
+            return (lines, size);
+        }
+    }
+    let chars: Vec<char> = name.chars().collect();
+    let keep = (0..chars.len()).rev().find(|&keep| width(&(chars[..keep].iter().collect::<String>() + "…"), least) <= room).unwrap_or(0);
+    (vec![chars[..keep].iter().collect::<String>().trim_end().to_string() + "…"], least)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_phase_name_shrinks_then_breaks_then_takes_its_short_name() {
+        let width = |text: &str, size: f32| sans_width(text, size, false);
+        let (lines, size) = phase_label("Requirements", None, 68.7, 52.0, 17.0, 8.0, width);
+        assert_eq!(lines, ["Requirements"]);
+        assert!((8.0..10.5).contains(&size));
+        let (lines, _) = phase_label("Beta and acceptance testing", None, 80.0, 52.0, 17.0, 8.0, width);
+        assert_eq!(lines, ["Beta and", "acceptance testing"]);
+        assert_eq!(phase_label("Requirements", Some("Reqs"), 30.0, 52.0, 17.0, 8.0, width).0, ["Reqs"]);
+        assert_eq!(phase_label("Requirements", None, 30.0, 52.0, 17.0, 8.0, width).0, ["Requi…"]);
+    }
+}

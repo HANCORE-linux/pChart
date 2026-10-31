@@ -3,7 +3,7 @@ use pchart_core::{Plan, Schedule};
 
 use crate::page::{Axis, FIXED, GRAY, HEIGHT, INK, LATE, MID, Page, SHADES, X0, X1};
 use crate::scene::{Anchor, Color, Fill, Scene, Shape};
-use crate::style::sans_width;
+use crate::style::{phase_label, sans_width};
 
 /// The milestone chart for export: phases on a time line and every milestone with its date, on a
 /// light page for slides and print.
@@ -14,8 +14,8 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     page.months(&axis, ty - 4.0, ty - 22.0, HEIGHT - 90.0, 15.0);
     page.line(X0, ty + 6.0, X1, ty + 6.0, MID, 1.5);
 
-    for (index, (name, from, to)) in schedule.phases(plan).into_iter().enumerate() {
-        chevron(&mut page, axis.x(from), axis.xe(to), ty + 34.0, 52.0, &name, SHADES[index % SHADES.len()]);
+    for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
+        chevron(&mut page, axis.x(from), axis.xe(to), ty + 34.0, 52.0, &name, phase.short.as_deref(), SHADES[index % SHADES.len()]);
     }
 
     let my = ty + 214.0;
@@ -50,17 +50,13 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     page.finish()
 }
 
-fn chevron(page: &mut Page, x0: f32, x1: f32, y: f32, h: f32, label: &str, fill: Color) {
+#[allow(clippy::too_many_arguments)]
+fn chevron(page: &mut Page, x0: f32, x1: f32, y: f32, h: f32, name: &str, short: Option<&str>, fill: Color) {
     let tip = page.chevron(x0, x1, y, h, fill, 14.0);
-    let room = x1 - x0 - tip - 8.0;
-    let mut size = 17.0;
-    let mut label = label.to_string();
-    if sans_width(&label, size, false) > room {
-        size = (size * room / sans_width(&label, size, false)).max(10.5);
+    let (lines, size) = phase_label(name, short, x1 - x0 - tip - 4.0, h, 17.0, 8.0, |text, size| sans_width(text, size, false));
+    let pitch = size * 1.2;
+    let first = y + h / 2.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
+    for (index, line) in lines.iter().enumerate() {
+        page.text((x0 + x1) / 2.0 + tip / 2.0, first + pitch * index as f32, line, size, INK, false, Anchor::Middle, None);
     }
-    while sans_width(&label, size, false) > room && label.chars().count() > 3 {
-        let keep = label.chars().count() - 2;
-        label = label.chars().take(keep).collect::<String>() + "…";
-    }
-    page.text((x0 + x1) / 2.0 + tip / 2.0, y + h / 2.0 + size * 0.36, &label, size, INK, false, Anchor::Middle, None);
 }

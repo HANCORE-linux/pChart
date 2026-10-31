@@ -23,6 +23,9 @@ pub struct Plan {
 pub struct Phase {
     pub name: String,
     pub until: String,
+    /// What a phase arrow shows when the whole name does not fit, even small or on two lines.
+    #[serde(default)]
+    pub short: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -84,6 +87,9 @@ impl Plan {
         }
         for phase in &self.phases {
             let _ = write!(out, "\n[[phases]]\nname = {}\nuntil = {}\n", quote(&phase.name), quote(&phase.until));
+            if let Some(short) = &phase.short {
+                let _ = writeln!(out, "short = {}", quote(short));
+            }
         }
         for lane in &self.lanes {
             let _ = write!(out, "\n[[lanes]]\nid = {}\nname = {}\n", quote(&lane.id), quote(&lane.name));
@@ -246,6 +252,7 @@ mod tests {
         changed.items[0].buffer = true;
         changed.items[1].no_later_than = Some(jiff::civil::date(2026, 12, 1));
         changed.start = Some(jiff::civil::date(2026, 11, 2));
+        changed.phases[0].short = Some("Reqs".into());
         assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);
     }
 
