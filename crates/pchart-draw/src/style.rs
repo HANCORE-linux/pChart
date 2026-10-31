@@ -33,6 +33,15 @@ impl Palette {
         }
     }
 
+    /// The palette under a dialog: every colour two thirds of the way to the page.
+    pub fn dimmed(&self) -> Palette {
+        let dim = |color: Color| {
+            let mix = |from: u8, to: u8| (f32::from(from) + (f32::from(to) - f32::from(from)) * 0.68).round() as u8;
+            Color(mix(color.0, self.page.0), mix(color.1, self.page.1), mix(color.2, self.page.2))
+        };
+        Palette { page: self.page, ink: dim(self.ink), bright: dim(self.bright), dim: dim(self.dim), muted: dim(self.muted), raised: dim(self.raised), rule: dim(self.rule), accent: dim(self.accent), warn: dim(self.warn), alert: dim(self.alert), alert_ground: dim(self.alert_ground) }
+    }
+
     pub fn colors(&self) -> [Color; 11] {
         [self.page, self.ink, self.bright, self.dim, self.muted, self.raised, self.rule, self.accent, self.warn, self.alert, self.alert_ground]
     }

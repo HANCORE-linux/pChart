@@ -2,6 +2,7 @@ mod app;
 mod checks;
 mod export;
 mod pictures;
+mod question;
 mod situation;
 mod sixel;
 mod ui;
@@ -35,6 +36,22 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
     let mut pictures = Pictures::start(Painter::new(picker, &pchart_draw::Palette::labra()));
     let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
     let (written, results) = mpsc::channel();
+    let (save, saves) = mpsc::channel::<Plan>();
+    let (failed, failures) = mpsc::channel::<String>();
+    let target = path.to_path_buf();
+    let saver = std::thread::spawn(move || {
+        let mut last = Ok(());
+        while let Ok(mut plan) = saves.recv() {
+            while let Ok(newer) = saves.try_recv() {
+                plan = newer;
+            }
+            last = pchart_store::save(&target, &plan).map_err(|err| err.to_string());
+            if let Err(err) = &last {
+                let _ = failed.send(err.clone());
+            }
+        }
+        last
+    });
     let mut terminal = ratatui::init();
     let mut trace = std::env::var_os("PCHART_TRACE").and_then(|path| std::fs::File::create(path).ok());
     let begun = Instant::now();
@@ -46,6 +63,13 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
     let result = loop {
         if pictures.receive() {
             note("pictures done".into());
+        }
+        if app.unsaved {
+            app.unsaved = false;
+            let _ = save.send(app.plan.clone());
+        }
+        if let Ok(err) = failures.try_recv() {
+            app.message = Some(err);
         }
         if let Ok(result) = results.try_recv() {
             app.export.busy = false;
@@ -69,6 +93,18 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         let read = event::read();
         note(format!("event {read:?}"));
         match read {
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.question.is_some() => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Esc => app.question = None,
+                KeyCode::Enter => app.confirm(),
+                KeyCode::Up => app.question.as_mut().into_iter().for_each(|question| question.choice = (question.choice + 3) % 4),
+                KeyCode::Down => app.question.as_mut().into_iter().for_each(|question| question.choice = (question.choice + 1) % 4),
+                KeyCode::Backspace => app.question.as_mut().into_iter().for_each(|question| {
+                    question.typed.pop();
+                }),
+                KeyCode::Char(c) => app.question.as_mut().into_iter().for_each(|question| question.typed.push(c)),
+                _ => {}
+            },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => match (app.screen, key.code) {
                 (_, KeyCode::Char('q')) => break Ok(()),
                 (_, KeyCode::Char('c')) if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
@@ -104,6 +140,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
                 (_, KeyCode::Up) => app.select(-1),
                 (_, KeyCode::Down) => app.select(1),
                 (_, KeyCode::Char('d')) => app.detail(),
+                (_, KeyCode::Char('u')) => app.undo(),
+                (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
                 _ => {}
             },
             Ok(_) => {}
@@ -111,7 +149,9 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path) -> io
         }
     };
     ratatui::restore();
-    result
+    drop(save);
+    let saved = saver.join().unwrap_or_else(|_| Err("the plan could not be saved".into()));
+    result.and(saved.map_err(|err| io::Error::other(format!("the last change was not saved: {err}"))))
 }
 
 /// Changes the selected item `frames` times like a held arrow key and measures every step,

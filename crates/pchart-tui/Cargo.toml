@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 pchart-core.workspace = true
 pchart-draw.workspace = true
+pchart-store.workspace = true
 jiff.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true

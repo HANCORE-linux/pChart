@@ -4,7 +4,7 @@ use jiff::civil::{Date, Weekday};
 use pchart_core::analysis::{Severity, State};
 use pchart_draw::bits::{self, Icon, Part};
 use pchart_draw::scene::Color as Ink;
-use pchart_draw::{Level, shown};
+use pchart_draw::{Level, Palette, shown};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -35,8 +35,7 @@ pub(crate) struct Inks {
 }
 
 impl Inks {
-    fn of(app: &App) -> Inks {
-        let p = app.palette;
+    fn of(p: Palette) -> Inks {
         let style = |ink: Ink| Style::new().fg(color(ink));
         Inks { ink: style(p.ink), bright: style(p.bright), dim: style(p.dim), muted: style(p.muted), rule: style(p.rule), warn: style(p.warn), alert: style(p.alert), accent: color(p.accent), raised: color(p.raised) }
     }
@@ -88,7 +87,7 @@ pub(crate) fn panel(frame: &mut Frame, inks: &Inks, rect: Rect, title: &str, foc
 /// Draws the screen and returns the pictures it needs.
 pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     let area = frame.area();
-    let inks = Inks::of(app);
+    let inks = Inks::of(app.palette);
     if area.width < MIN.0 || area.height < MIN.1 {
         too_small(frame, &inks, area);
         return Vec::new();
@@ -100,14 +99,16 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
         Screen::Checks => crate::checks::draw(app, frame, &inks, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &inks, area, &mut placements),
         Screen::Roadmap => {
+            let palette = if app.question.is_some() { app.palette.dimmed() } else { app.palette };
+            let under = Inks::of(palette);
             let top = if area.width >= 120 && area.height >= 44 {
-                tiles(app, frame, &inks, area, &mut placements);
+                tiles(app, &palette, frame, &under, area, &mut placements);
                 1 + TILES
             } else {
-                summary(app, frame, &inks, area);
+                summary(app, frame, &under, area);
                 2
             };
-            roadmap(app, frame, &inks, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }, &mut placements);
+            roadmap(app, &palette, frame, &under, Rect { x: 0, y: top, width: area.width, height: area.height - 1 - top }, &mut placements);
         }
     }
     keys(app, frame, &inks, area);
@@ -156,6 +157,14 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         put(frame, x, 0, w, spans);
         x += w + 1;
     }
+    if app.question.is_some() && app.screen == Screen::Roadmap {
+        let mode = if area.width >= 100 { "CHANGE A DATE · nothing changed yet" } else { "CHANGE A DATE" };
+        let w = mode.chars().count() as u16;
+        if x + w + 2 < area.width {
+            put(frame, area.width - w - 1, 0, w, vec![Span::styled(mode, inks.warn)]);
+        }
+        return;
+    }
     let right = if area.width >= 135 { format!("{} · saved", home(&app.path)) } else { "saved".to_string() };
     let right = if (right.chars().count() as u16) + x + 2 > area.width { "saved".to_string() } else { right };
     let w = right.chars().count() as u16;
@@ -192,11 +201,11 @@ pub(crate) fn holidays(app: &App) -> Vec<(usize, Date, String)> {
     out
 }
 
-fn tiles(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut Vec<Placement>) {
+fn tiles(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut Vec<Placement>) {
     let (cw, ch) = app.cell;
     let quarter = area.width / 4;
     let big = ch as f32 * 46.0 / 21.0;
-    let p = app.palette;
+    let p = *palette;
     let target = app.schedule.target;
     let first = app.schedule.chain.first().copied();
     let spare = app.schedule.spare();
@@ -254,7 +263,7 @@ fn tiles(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut
             let cols = ((value.chars().count() as f32 * 0.6 * big) / cw as f32).ceil() as u16 + 1;
             let rect = Rect { x: x + 2, y: 3, width: cols.min(w.saturating_sub(4)), height: 2 };
             let (px_w, px_h) = (f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch));
-            placements.push(Placement { rect, svg: bits::big(&value, big, value_ink, px_w, px_h, &app.palette).svg(), paper: false });
+            placements.push(Placement { rect, svg: bits::big(&value, big, value_ink, px_w, px_h, palette).svg(), paper: false });
             side_x = rect.x + rect.width + 2;
         }
         put(frame, side_x, 4, (x + w).saturating_sub(side_x + 2), vec![Span::styled(side, side_style)]);
@@ -309,7 +318,8 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
     let hints: &[(&str, &str)] = match app.screen {
         Screen::Situation => &[("↑↓", "choose"), ("Enter", "show in roadmap"), ("q", "quit")],
-        Screen::Roadmap => &[("↑↓", item), ("d", "detail"), ("1", "situation"), ("q", "quit")],
+        Screen::Roadmap if app.question.is_some() => &[("↑↓", "choose"), ("Enter", "apply"), ("Esc", "keep as it is")],
+        Screen::Roadmap => &[("↑↓", item), ("Enter", "change a date"), ("u", "undo"), ("d", "detail"), ("1", "situation"), ("q", "quit")],
         Screen::Checks => &[("↑↓", "check"), ("Enter", "show in roadmap"), ("1", "situation"), ("q", "quit")],
         Screen::Export => &[("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back")],
     };
@@ -349,10 +359,11 @@ pub fn layout(area: Rect, body: Rect) -> Layout {
     Layout { panel, chart, line }
 }
 
-fn roadmap(app: &App, frame: &mut Frame, inks: &Inks, body: Rect, placements: &mut Vec<Placement>) {
+fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: Rect, placements: &mut Vec<Placement>) {
     let area = frame.area();
     let l = layout(area, body);
-    let settings = app.settings(l.chart);
+    let mut settings = app.settings(l.chart);
+    settings.palette = *palette;
     let (level, lanes) = shown(&app.plan, &app.schedule, &settings);
     let first = app.schedule.slots.iter().map(|slot| slot.planned.start).min().unwrap_or(app.today);
     let last = app.schedule.slots.iter().map(|slot| slot.planned.finish).max().unwrap_or(app.today);
@@ -386,20 +397,26 @@ fn roadmap(app: &App, frame: &mut Frame, inks: &Inks, body: Rect, placements: &m
         put(frame, l.panel.x + l.panel.width - w - 2, l.panel.y + 1, w, switch);
     }
 
+    let (cw, ch) = app.cell;
     if l.chart.width > 0 && l.chart.height > 0 {
         let mut scene = pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings);
         scene.background = None;
+        if app.question.is_some() {
+            let w = l.chart.width.saturating_sub(4).min(94);
+            let h = l.chart.height.min(24);
+            let x = (l.chart.width - w) / 2;
+            crate::question::dialog(app, &mut scene, f32::from(x) * f32::from(cw), 0.0, f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), f32::from(ch) / 21.0);
+        }
         placements.push(Placement { rect: l.chart, svg: scene.svg(), paper: false });
     }
     let rect = Rect { x: l.panel.x + 2, y: l.line, width: l.panel.width.saturating_sub(4), height: 1 };
-    let (cw, ch) = app.cell;
-    placements.push(Placement { rect, svg: bits::line(&selection(app, level), f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0, &app.palette).svg(), paper: false });
+    placements.push(Placement { rect, svg: bits::line(&selection(app, level, palette), f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0, palette).svg(), paper: false });
 }
 
 /// The line about the selection: its name, its team, its dates and length, and whether it decides the
 /// date or what it has to spare; at the Overview level the same for its lane.
-fn selection(app: &App, level: Level) -> Vec<Part> {
-    let p = app.palette;
+fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
+    let p = *palette;
     let lane = &app.plan.lanes[app.plan.lane(&app.plan.items[app.selected].lane).unwrap_or(0)];
     let team = [Some(lane.name.as_str()), lane.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
     let decides = |yes: bool| if yes { (Some((Icon::Bar, p.ink)), "decides the date".to_string(), p.ink, false) } else { (Some((Icon::Bar, p.muted)), "time to spare".to_string(), p.ink, false) };
@@ -588,5 +605,48 @@ mod tests {
         assert!(!has(&rows, "WHO IS WAITING") && !svg.contains("NEXT 6 WEEKS") && !svg.contains("does not hold"));
         let (rows, placements) = screen(&app, 80, 24);
         assert!(has(&rows, ":: NEXT") && !has(&rows, "THIS CHAIN DECIDES THE DATE") && placements.len() == 3);
+    }
+
+    #[test]
+    fn the_date_question_changes_a_start_and_u_takes_it_back() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let frontend = app.plan.item("frontend").unwrap();
+        app.selected = frontend;
+        app.ask();
+        assert!(app.answer().is_none() && app.question.as_ref().is_some_and(|question| question.choice == 0 && question.typed.is_empty()));
+        let question = app.question.as_mut().unwrap();
+        question.choice = 2;
+        question.typed = "4 jan".into();
+        let date = jiff::civil::date(2027, 1, 4);
+        assert_eq!(app.answer(), Some(pchart_core::Edit::Fix { item: "frontend".into(), kind: pchart_core::Fix::NoEarlierThan, date }));
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, "CHANGE A DATE · nothing changed yet") && has(&rows, "keep as it is"));
+        for text in ["When does Frontend start?", "After Design sign-off", "not before this date, later if the plan needs it", "Mon 04 Jan 2027", "Launch would be ", "9 working days late.", " moves to "] {
+            assert!(svg.contains(text), "{text}");
+        }
+
+        app.confirm();
+        assert!(app.question.is_none() && app.unsaved && app.history.len() == 1);
+        assert_eq!(app.plan.items[frontend].no_earlier_than, Some(date));
+        assert_eq!(app.analysis.verdict.as_ref().map(|verdict| (verdict.state, verdict.spare)), Some((pchart_core::analysis::State::DoesNotHold, -9)));
+        app.ask();
+        let question = app.question.as_mut().unwrap();
+        assert!(question.choice == 2 && question.typed == "04 Jan 2027");
+        question.choice = 0;
+        assert_eq!(app.answer(), Some(pchart_core::Edit::Unfix { item: "frontend".into() }));
+        app.question.as_mut().unwrap().choice = 1;
+        app.question.as_mut().unwrap().typed = "soon".into();
+        app.confirm();
+        assert!(app.question.is_some() && app.history.len() == 1 && app.message.as_deref() == Some("Type a date, such as 4 jan or next friday"));
+        app.question = None;
+
+        app.unsaved = false;
+        app.undo();
+        assert!(app.unsaved && app.history.is_empty() && app.plan.items[frontend].no_earlier_than.is_none() && app.message.as_deref() == Some("Undone: Frontend start"));
+        assert_eq!(app.analysis.verdict.as_ref().map(|verdict| verdict.state), Some(pchart_core::analysis::State::Holds));
+        app.undo();
+        assert_eq!(app.message.as_deref(), Some("Nothing to undo"));
     }
 }

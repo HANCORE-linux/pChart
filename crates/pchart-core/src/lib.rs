@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod calendar;
 pub mod edit;
+pub mod input;
 pub mod model;
 pub mod schedule;
 pub mod text;

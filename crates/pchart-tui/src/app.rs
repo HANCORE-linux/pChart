@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use jiff::civil::Date;
-use pchart_core::{Analysis, Calendar, Plan, Schedule, analyse};
+use pchart_core::{Analysis, Calendar, Edit, Fix, Plan, Schedule, analyse};
 use pchart_draw::{Audience, Level, Palette, Settings, View};
 use ratatui::layout::Rect;
 
@@ -44,6 +44,17 @@ impl Default for Export {
     }
 }
 
+/// The answers of the date question (picture 37), in its order: calculated after what it waits on, on a
+/// fixed date, no earlier than, no later than.
+pub const ANSWERS: [Option<Fix>; 4] = [None, Some(Fix::On), Some(Fix::NoEarlierThan), Some(Fix::NoLaterThan)];
+
+/// The open date question: about which item, the answer chosen, and the date typed so far.
+pub struct Question {
+    pub item: usize,
+    pub choice: usize,
+    pub typed: String,
+}
+
 pub struct App {
     pub plan: Plan,
     pub calendars: Vec<Calendar>,
@@ -63,13 +74,18 @@ pub struct App {
     pub cell: (u16, u16),
     pub message: Option<String>,
     pub palette: Palette,
+    /// The plans before each change, newest last, with what the change was; `u` goes back one.
+    pub history: Vec<(Plan, String)>,
+    /// The plan changed and is still to be written.
+    pub unsaved: bool,
+    pub question: Option<Question>,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra() }
+        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), history: Vec::new(), unsaved: false, question: None }
     }
 
     /// The roadmap picture for `rect`.
@@ -180,6 +196,72 @@ impl App {
     pub fn export_toggle(&mut self) {
         if self.export.part == Part::Format {
             self.export.formats[self.export.format] ^= true;
+        }
+    }
+
+    fn take(&mut self, plan: Plan, schedule: Schedule) {
+        self.analysis = analyse(&plan, &self.calendars, &schedule, self.today);
+        self.plan = plan;
+        self.schedule = schedule;
+        self.unsaved = true;
+    }
+
+    /// Makes `edit`, keeps the plan before it for `u`, and marks the plan to be written.
+    pub fn apply(&mut self, edit: &Edit, label: String) -> Result<(), String> {
+        let plan = edit.apply(&self.plan).map_err(|err| err.to_string())?;
+        let schedule = pchart_core::schedule(&plan, &self.calendars, self.today).map_err(|err| err.to_string())?;
+        let before = self.plan.clone();
+        self.take(plan, schedule);
+        self.history.push((before, label));
+        self.message = None;
+        Ok(())
+    }
+
+    /// Goes back to the plan before the last change.
+    pub fn undo(&mut self) {
+        let Some((plan, label)) = self.history.pop() else {
+            self.message = Some("Nothing to undo".into());
+            return;
+        };
+        match pchart_core::schedule(&plan, &self.calendars, self.today) {
+            Ok(schedule) => {
+                self.take(plan, schedule);
+                self.message = Some(format!("Undone: {label}"));
+            }
+            Err(err) => self.message = Some(err.to_string()),
+        }
+    }
+
+    /// Opens the date question for the selected item, with its present answer chosen.
+    pub fn ask(&mut self) {
+        let item = &self.plan.items[self.selected];
+        let (choice, date) = [(1, item.on), (2, item.no_earlier_than), (3, item.no_later_than)].into_iter().find(|(_, date)| date.is_some()).unwrap_or((0, None));
+        self.question = Some(Question { item: self.selected, choice, typed: date.map(|date| date.strftime("%d %b %Y").to_string()).unwrap_or_default() });
+    }
+
+    /// The change the open question would make: None while nothing would change or the date is not
+    /// understood yet.
+    pub fn answer(&self) -> Option<Edit> {
+        let question = self.question.as_ref()?;
+        let item = &self.plan.items[question.item];
+        match ANSWERS[question.choice] {
+            None => (item.on.is_some() || item.no_earlier_than.is_some() || item.no_later_than.is_some()).then(|| Edit::Unfix { item: item.id.clone() }),
+            Some(kind) => pchart_core::input::date(&question.typed, self.today).map(|date| Edit::Fix { item: item.id.clone(), kind, date }),
+        }
+    }
+
+    /// Makes the answer of the open question and closes it.
+    pub fn confirm(&mut self) {
+        let Some(question) = &self.question else { return };
+        let item = &self.plan.items[question.item];
+        let label = format!("{} {}", item.name, if item.milestone { "date" } else { "start" });
+        match self.answer() {
+            Some(edit) => match self.apply(&edit, label) {
+                Ok(()) => self.question = None,
+                Err(err) => self.message = Some(err),
+            },
+            None if ANSWERS[question.choice].is_none() => self.question = None,
+            None => self.message = Some("Type a date, such as 4 jan or next friday".into()),
         }
     }
 

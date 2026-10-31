@@ -1276,6 +1276,7 @@ dependencies = [
  "jiff",
  "pchart-core",
  "pchart-draw",
+ "pchart-store",
  "ratatui",
  "ratatui-image",
  "resvg",
