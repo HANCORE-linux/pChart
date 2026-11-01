@@ -73,7 +73,7 @@ inner.write_text(f"""#!/bin/bash
 echo "$WAYLAND_DISPLAY" > {state}/display
 while [ ! -e {state}/go ]; do sleep 0.05; done
 cd {plan}
-exec kitty -o background_opacity=1.0 -o font_size={font} -o window_padding_width=0 -o remember_window_size=no -o cursor_blink_interval=0 \\
+exec kitty -o background_opacity=1.0 -o font_size={font} -o window_padding_width=14 -o remember_window_size=no -o cursor_blink_interval=0 \\
   -o background={labra["background"]} -o foreground={labra["foreground"]} -o allow_remote_control=socket-only --listen-on unix:{state}/kitty.sock \\
   python3 -I {HERE}/drive.py {state}/start {state}/done env HOME={home} XDG_STATE_HOME={home}/.local/state XDG_CONFIG_HOME={home}/.config PCHART_TRACE={os.environ.get("TRACE", "/dev/null")} bash --noprofile --rcfile {state}/bashrc -i
 """)

@@ -76,10 +76,11 @@ inputs = [
     *still(cards.wallpaper("labra", work / "labra.png"), main), *still(cards.wallpaper("harbor", work / "harbor.png"), main),
     *still(cards.bar("labra", work / "bar-labra.png"), main), *still(cards.bar("harbor", work / "bar-harbor.png"), main),
     "-f", "concat", "-safe", "0", "-i", str(work / "frames.txt"),
+    *still(cards.window(work / "window.png", width, height), main), *still(cards.corners(work / "corners.png", width, height), main),
 ]
 for _, _, png in bands:
     inputs += still(png, main)
-end_input = 5 + len(bands)
+end_input = 7 + len(bands)
 inputs += still(cards.end(work / "end.png"), CARD)
 audio_input = end_input + 1
 inputs += ["-i", str(music(work / "music.wav", main + CARD))]
@@ -87,13 +88,15 @@ inputs += ["-i", str(music(work / "music.wav", main + CARD))]
 graph = [
     f"[0:v]fps={FPS},format=rgba[w0]", f"[1:v]fps={FPS},format=rgba,fade=t=in:st={switch:.3f}:d={SWITCH}:alpha=1[w1]", "[w0][w1]overlay[d0]",
     f"[d0][2:v]overlay=0:0:enable='lt(t,{switch:.3f})'[d1]", f"[d1][3:v]overlay=0:0:enable='gte(t,{switch:.3f})'[d2]",
-    f"[4:v]fps={FPS},pad=iw+4:ih+4:2:2:color={cards.THEMES['labra']['accent']},format=rgba,setpts=PTS+{OPEN}/TB,"
+    f"[4:v]fps={FPS},format=rgba[t0]", f"[6:v]fps={FPS},format=gray[mask]",
+    f"[t0][mask]alphamerge,colorchannelmixer=aa={cards.OPACITY}[t1]", f"[5:v]fps={FPS},format=rgba[deco]",
+    f"[deco][t1]overlay={cards.MARGIN}:{cards.MARGIN}:eof_action=repeat,setpts=PTS+{OPEN}/TB,"
     f"scale=w='trunc((iw*(0.87+0.13*min(1,max(0,(t-{OPEN})/{POP}))))/2)*2':h='trunc((ih*(0.87+0.13*min(1,max(0,(t-{OPEN})/{POP}))))/2)*2':eval=frame,"
-    f"fade=t=in:st={OPEN}:d={POP}:alpha=1[term]",
-    f"[d2][term]overlay=x='(W-w)/2':y='{y - 2}+({height + 4}-h)/2':eof_action=repeat:enable='gte(t,{OPEN})'[m0]",
+    f"fade=t=in:st={OPEN}:d={POP}:alpha=1[window]",
+    f"[d2][window]overlay=x='(W-w)/2':y='{y + height / 2}-h/2':eof_action=repeat:enable='gte(t,{OPEN})'[m0]",
 ]
 for index, (start, end, _) in enumerate(bands):
-    graph.append(f"[m{index}][{index + 5}:v]overlay=0:{cards.H - cards.BAND}:enable='between(t,{start:.3f},{end:.3f})'[m{index + 1}]")
+    graph.append(f"[m{index}][{index + 7}:v]overlay=0:{cards.H - cards.BAND}:enable='between(t,{start:.3f},{end:.3f})'[m{index + 1}]")
 graph += [
     f"[m{len(bands)}]format=rgb24,fade=t=in:st=0:d=0.4,fade=t=out:st={main - FADE:.3f}:d={FADE},setsar=1[main]",
     f"[{end_input}:v]fps={FPS},format=rgb24,fade=t=in:st=0:d={FADE},setsar=1[end]",

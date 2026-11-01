@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-W, H, BAR, BAND = 1920, 1080, 30, 70
+W, H, BAR, BAND = 1920, 1080, 28, 70
 MONO, SANS = "JetBrains Mono, JetBrainsMono Nerd Font, monospace", "Noto Sans"
 ROOT = Path(__file__).resolve().parent.parent.parent
 THEMES = json.loads((ROOT / "crates/pchart-tui/themes.json").read_text())
@@ -37,12 +37,38 @@ def bar(name, out: Path):
     """The bar along the top of the desktop in the theme's colours: the workspaces, the day and the time."""
     c = THEMES[name]
     body = [f'<rect width="{W}" height="{BAR}" fill="{c["background"]}"/>']
-    for number in range(4):
-        body.append(f'<circle cx="{22 + number * 20}" cy="{BAR / 2}" r="{4.5 if number == 0 else 3}" fill="{c["foreground"] if number == 0 else c["muted"]}"/>')
+    for number in range(1, 5):
+        body.append(text(18 + (number - 1) * 22, 20, str(number), 15, "#ee585d" if number == 1 and name == "labra" else c["foreground"] if number == 1 else c["muted"]))
     body.append(text(W / 2, 20, "Thursday 09:41", 15, c["foreground"], anchor="middle"))
     for number in range(3):
         body.append(f'<rect x="{W - 30 - number * 24}" y="10" width="12" height="10" rx="2" fill="none" stroke="{c["foreground"]}" stroke-width="1.5"/>')
     return png("".join(body), out, W, BAR)
+
+
+# How Labra decorates a window in Hyprland (its hyprland.lua): a border of 1 px running from pink at the
+# bottom to olive at the top, corners rounded by 4 px, the window at 94 % opacity, and a soft dark shadow
+# 20 px wide, 4 px down.
+BORDER, ROUNDING, OPACITY, SHADOW, MARGIN = 1, 4, 0.94, 20, 40
+GRADIENT = [("0", "#fd5ea0"), ("0.143", "#fd5ea0"), ("0.286", "#89974a"), ("1", "#89974a")]
+
+
+def window(out: Path, width, height):
+    """The decoration around a window of `width` × `height`, drawn on a canvas `MARGIN` larger on every
+    side: the shadow under it and the border around it, with the window itself left clear."""
+    w, h, m, b, r = width, height, MARGIN, BORDER, ROUNDING
+    stops = "".join(f'<stop offset="{at}" stop-color="{color}" stop-opacity="0.7"/>' for at, color in reversed([(f"{1 - float(at):.3f}", color) for at, color in GRADIENT]))
+    return png("".join([
+        f'<defs><linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">{stops}</linearGradient>',
+        f'<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{SHADOW / 3}"/></filter>',
+        f'<mask id="hole"><rect width="{w + 2 * m}" height="{h + 2 * m}" fill="white"/><rect x="{m}" y="{m}" width="{w}" height="{h}" rx="{r}" fill="black"/></mask></defs>',
+        f'<g mask="url(#hole)"><rect x="{m}" y="{m + 4}" width="{w}" height="{h}" rx="{r}" fill="#050604" fill-opacity="0.9" filter="url(#soft)"/>',
+        f'<rect x="{m - b / 2}" y="{m - b / 2}" width="{w + b}" height="{h + b}" rx="{r + b / 2}" fill="none" stroke="url(#edge)" stroke-width="{b}"/></g>',
+    ]), out, w + 2 * m, h + 2 * m)
+
+
+def corners(out: Path, width, height):
+    """The window's shape as a mask: white inside the rounded corners."""
+    return png(f'<rect width="{width}" height="{height}" fill="black"/><rect width="{width}" height="{height}" rx="{ROUNDING}" fill="white"/>', out, width, height)
 
 
 def keys(right, y, names, lit, c):
