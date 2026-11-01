@@ -341,11 +341,11 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
             y = 150.0 * u;
         }
         if let (false, Some(plan), Some(schedule), Some(analysis)) = (start.undated, &plan, &schedule, &analysis) {
-            let first = schedule.chain.first().copied().or_else(|| schedule.order.first().copied());
+            let first = schedule.first.or_else(|| schedule.order.first().copied());
             let last = (0..plan.items.len()).max_by_key(|&index| schedule.slots[index].planned.finish);
             let (icon, tone, words): (Icon, _, Vec<(String, _, bool)>) = match (&analysis.verdict, start.date().filter(|_| !start.forwards)) {
                 (Some(verdict), Some(_)) => {
-                    let start_by = first.map(|index| (plan.items[index].name.clone(), schedule.slots[index].latest.start));
+                    let start_by = first.map(|index| (plan.items[index].name.clone(), schedule.start_by.unwrap_or(schedule.slots[index].latest.start)));
                     match verdict.state {
                         State::DoesNotHold => (Icon::Cross, p.alert, vec![(format!("{} would be ", plan.items[verdict.target].name), p.bright, true), (format!("{} working days late.", -verdict.spare), p.alert, true)]),
                         _ => match start_by {

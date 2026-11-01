@@ -242,7 +242,7 @@ fn tiles(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, area: Rec
     let big = ch as f32 * 46.0 / 21.0;
     let p = *palette;
     let target = app.schedule.target;
-    let first = app.schedule.chain.first().copied();
+    let first = app.schedule.first;
     let spare = app.schedule.spare();
     let warnings = app.analysis.checks.iter().filter(|check| check.severity() == Severity::Warning).count();
     let problems = app.analysis.checks.iter().filter(|check| check.severity() == Severity::Problem).count();
@@ -272,7 +272,7 @@ fn tiles(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, area: Rec
         },
         match first {
             Some(index) => {
-                let date = app.schedule.slots[index].latest.start;
+                let date = app.schedule.start_by.unwrap_or(app.schedule.slots[index].latest.start);
                 let name = app.plan.items[index].name.clone();
                 match app.before {
                     Some(_) if date < app.today => ("LATEST START".into(), day(date).0, p.alert, day(date).1, inks.dim, name),
@@ -334,10 +334,10 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     if let (Some((word, style)), Some(spare)) = (state(app, inks), app.schedule.spare()) {
         groups.push(vec![Span::styled(word, bold(style)), Span::styled(" · ", inks.dim), Span::styled(spare.to_string(), bold(inks.bright)), Span::styled(" wd to spare", inks.dim)]);
     }
-    if let Some(&first) = app.schedule.chain.first()
+    if let Some(by) = app.schedule.start_by
         && app.schedule.target.is_some()
     {
-        groups.push(vec![Span::styled("start by ", inks.dim), Span::styled(app.schedule.slots[first].latest.start.strftime("%a %d %b").to_string(), bold(inks.bright))]);
+        groups.push(vec![Span::styled("start by ", inks.dim), Span::styled(by.strftime("%a %d %b").to_string(), bold(inks.bright))]);
     }
     let warnings = app.analysis.checks.iter().filter(|check| check.severity() != Severity::Hint).count();
     if warnings > 0 {
@@ -683,8 +683,8 @@ fn trial(app: &App, palette: &Palette) -> Vec<MixedPart> {
             runs.push((pchart_draw::situation::state_words(verdict.state).to_string(), tone, true));
             runs.push((format!(" · {} wd to spare", verdict.spare), p.ink, false));
         }
-        if let Some(&first) = app.schedule.chain.first().filter(|_| verdict.state != State::DoesNotHold) {
-            let (name, start) = (&app.plan.items[first].name, app.schedule.slots[first].latest.start);
+        if let (Some(first), Some(start)) = (app.schedule.first.filter(|_| verdict.state != State::DoesNotHold), app.schedule.start_by) {
+            let name = &app.plan.items[first].name;
             let when = match start.cmp(&app.today) {
                 std::cmp::Ordering::Equal => format!("{name} must start today"),
                 std::cmp::Ordering::Greater => format!("{name} must start by {}", day(start)),
@@ -926,6 +926,27 @@ mod tests {
         let found = crate::actions::find(&app, "");
         assert!(found.iter().all(|(action, _)| !matches!(action, crate::actions::Action::ChangeDate | crate::actions::Action::Why | crate::actions::Action::AddItem)));
         assert!(crate::actions::find(&app, "gantt").iter().all(|(action, _)| *action != crate::actions::Action::Export(pchart_draw::View::Gantt)));
+    }
+
+    #[test]
+    fn a_fixed_kickoff_before_the_chain_leaves_the_latest_start_to_the_work_after_it() {
+        let mut app = app();
+        let mut plan = app.plan.clone();
+        plan.items.push(pchart_core::model::Item { id: "kickoff".into(), lane: "product".into(), name: "Kickoff".into(), milestone: true, on: Some(jiff::civil::date(2026, 11, 2)), ..Default::default() });
+        let requirements = plan.item("requirements").unwrap();
+        plan.items[requirements].after.push("kickoff".into());
+        app.schedule = pchart_core::schedule(&plan, &app.calendars, app.today).unwrap();
+        app.analysis = pchart_core::analyse(&plan, &app.calendars, &app.schedule, app.today);
+        app.plan = plan;
+        app.screen = Screen::Roadmap;
+        assert_eq!(app.schedule.first, Some(requirements));
+        let svgs: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.clone()).collect();
+        assert!(svgs.contains("16 Nov") && svgs.contains(">Requirements<"), "the tile");
+        let rows = screen(&app, 110, 40).0;
+        assert!(has(&rows, "start by Mon 16 Nov"), "{rows:#?}");
+        app.try_length(1);
+        let line = screen(&app, 170, 50).1.last().unwrap().svg.clone();
+        assert!(line.contains("Requirements must start by") && !line.contains("Kickoff must"), "{line}");
     }
 
     #[test]
