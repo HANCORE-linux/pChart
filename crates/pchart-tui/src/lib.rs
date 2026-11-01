@@ -197,6 +197,19 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                     _ => {}
                 }
             }
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.why => match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.why = false;
+                    app.finder = Some(app::Finder::default());
+                }
+                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Char('?') => app.help = true,
+                KeyCode::Esc | KeyCode::Char('y') => app.why = false,
+                KeyCode::Up => app.select(-1),
+                KeyCode::Down => app.select(1),
+                _ => {}
+            },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.before.is_some() => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Char('q') => break Ok(()),
@@ -248,6 +261,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('d')) => app.detail(),
                 (_, KeyCode::Char('u')) => app.undo(),
                 (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
+                (Screen::Roadmap, KeyCode::Char('y')) if app.level != pchart_draw::Level::Overview => app.why = true,
                 (Screen::Roadmap, KeyCode::Char('n')) if app.level != pchart_draw::Level::Overview => app.add_notes(),
                 (Screen::Roadmap, KeyCode::Char(' ')) => app.toggle_details(terminal.size().map_or(0, |size| size.width)),
                 (Screen::Roadmap, KeyCode::Char('a')) if app.level != pchart_draw::Level::Overview => app.start_add(),

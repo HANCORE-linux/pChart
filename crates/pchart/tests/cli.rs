@@ -184,3 +184,14 @@ fn without_a_plan_and_a_terminal_it_explains_itself() {
     assert_eq!(options.status.code(), Some(3));
     assert!(String::from_utf8_lossy(&options.stderr).starts_with("which plan? Name the plan file."));
 }
+
+#[test]
+fn why_names_the_chain_and_what_the_item_itself_has_to_spare() {
+    let path = copy("why");
+    let launch = stdout(&pchart(&["why", path.to_str().unwrap(), "launch"], None));
+    assert!(launch.starts_with("Launch on Mon 01 Mar is set by this chain:\n") && launch.ends_with("Launch has 12 working days to spare.\nRequirements can start Thu 29 Oct at the earliest and Mon 16 Nov at the latest.\n"), "{launch}");
+    let sdk = stdout(&pchart(&["why", path.to_str().unwrap(), "sdk-integration"], None));
+    assert!(sdk.contains("SDK integration has 19 working days to spare.\n"), "{sdk}");
+    let value: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["why", path.to_str().unwrap(), "sdk-integration", "--json"], None))).unwrap();
+    assert_eq!((value["spare_wd"].as_i64(), value["chain"].as_array().map(Vec::len)), (Some(19), Some(3)));
+}

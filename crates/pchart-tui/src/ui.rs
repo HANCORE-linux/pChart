@@ -391,6 +391,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
+        Screen::Roadmap if app.why => vec![("↑↓", "another item"), ("Esc", "back"), ("?", "help")],
         Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
         Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Checks => vec![("↑↓", "check"), ("?", "help")],
@@ -547,16 +548,20 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
     let span = format!("{} – {}", first.strftime("%b %Y"), last.strftime("%b %Y")).to_uppercase();
     let switch_w = 34;
     let room = l.panel.width.saturating_sub(4 + switch_w) as usize;
-    let mode = if app.before.is_some() { "WHAT-IF · " } else { "" };
-    let title = if lanes.len() < app.plan.lanes.len() {
-        format!("{mode}ROADMAP · LANES {}–{} OF {}", lanes.first().map_or(0, |lane| lane + 1), lanes.last().map_or(0, |lane| lane + 1), app.plan.lanes.len())
-    } else if format!(":: {mode}SWIMLANE ROADMAP · {span}").chars().count() <= room {
-        format!("{mode}SWIMLANE ROADMAP · {span}")
-    } else if format!(":: {mode}ROADMAP · {span}").chars().count() <= room {
-        format!("{mode}ROADMAP · {span}")
+    let mode = if app.before.is_some() {
+        "WHAT-IF · "
+    } else if app.why {
+        "WHY THIS DATE · "
     } else {
-        format!("{mode}ROADMAP")
+        ""
     };
+    let titles = if lanes.len() < app.plan.lanes.len() {
+        let part = format!("LANES {}–{} OF {}", lanes.first().map_or(0, |lane| lane + 1), lanes.last().map_or(0, |lane| lane + 1), app.plan.lanes.len());
+        vec![format!("{mode}ROADMAP · {part}"), format!("{mode}{part}")]
+    } else {
+        vec![format!("{mode}SWIMLANE ROADMAP · {span}"), format!("{mode}ROADMAP · {span}")]
+    };
+    let title = titles.into_iter().find(|title| title.chars().count() + 3 <= room).unwrap_or_else(|| format!("{mode}ROADMAP"));
     panel(frame, inks, l.panel, &title, true);
 
     let mut switch = vec![Span::styled("Detail ", inks.muted)];
@@ -579,6 +584,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
     if l.chart.width > 0 && l.chart.height > 0 {
         let mut scene = match &app.before {
             Some(before) => pchart_draw::what_if(&app.plan, &app.schedule, &app.calendars, &settings, &before.schedule),
+            None if app.why => pchart_draw::why(&app.plan, &app.schedule, &app.calendars, &settings, app.selected),
             None => pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings),
         };
         scene.background = None;
@@ -615,6 +621,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
     let (w, h, u) = (f32::from(rect.width) * f32::from(cw), f32::from(ch), f32::from(ch) / 21.0);
     let line = match app.spot() {
         _ if app.before.is_some() => bits::line_of_runs(&trial(app, palette), w, h, u, palette),
+        _ if app.why => bits::line(&reason(app, palette), w, h, u, palette),
         Some(Spot::Place(lane, date)) => bits::line(&place(app, lane, date, palette), w, h, u, palette),
         _ => bits::line(&selection(app, level, palette), w, h, u, palette),
     };
@@ -668,6 +675,30 @@ fn trial(app: &App, palette: &Palette) -> Vec<MixedPart> {
         parts.push((Some((icon, tone)), runs));
     }
     parts
+}
+
+/// The line in "Why this date?" (picture 56): the selection and its date, the items before it that set
+/// it, from the first, and what it has to spare. A long chain keeps its first and its last two items.
+fn reason(app: &App, palette: &Palette) -> Vec<Part> {
+    let p = *palette;
+    let item = &app.plan.items[app.selected];
+    let slot = &app.schedule.slots[app.selected];
+    let chain = pchart_core::why(&app.schedule, app.selected);
+    let names: Vec<&str> = chain[..chain.len() - 1].iter().map(|&index| app.plan.items[index].name.as_str()).collect();
+    let when = if item.milestone { format!("on {}", day(slot.planned.finish)) } else { format!("starts {}", day(slot.planned.start)) };
+    let after = match names.len() {
+        0 => "nothing comes before it".to_string(),
+        1..=4 => format!("after {}", names.join(" → ")),
+        count => format!("after {} → … → {} → {}", names[0], names[count - 2], names[count - 1]),
+    };
+    let spare = if slot.spare < 0 {
+        (Some((Icon::Bar, p.alert)), format!("{} wd late", -slot.spare), p.alert, false)
+    } else if app.schedule.chain.contains(&app.selected) {
+        (Some((Icon::Bar, p.ink)), format!("decides the date · {} wd to spare", slot.spare), p.ink, false)
+    } else {
+        (Some((Icon::Bar, p.muted)), format!("{} wd to spare", slot.spare), p.ink, false)
+    };
+    vec![(None, item.name.clone(), p.bright, true), (Some((Icon::Calendar, p.dim)), when, p.ink, false), (None, after, p.ink, false), spare]
 }
 
 /// The line about the selection: its name, its team, its dates and length, and whether it decides the
@@ -820,8 +851,29 @@ mod tests {
             app.toggle_details(200);
             look(&mut app, &format!("details {item}"));
             app.side = false;
+            app.why = true;
+            look(&mut app, &format!("why {item}"));
+            app.why = false;
         }
         assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
+    }
+
+    #[test]
+    fn why_this_date_shows_the_chain_and_says_it_in_one_line() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        app.selected = app.plan.item("launch").unwrap();
+        app.why = true;
+        let (rows, placements) = screen(&app, 170, 50);
+        let line = &placements.last().unwrap().svg;
+        assert!(has(&rows, ":: WHY THIS DATE · SWIMLANE ROADMAP") && has(&rows, "↑↓ another item") && has(&rows, "Esc back"));
+        assert!(line.contains("on Mon 01 Mar") && line.contains("after Requirements → … → Beta test → Acceptance") && line.contains("decides the date · 12 wd to spare"));
+        app.selected = app.plan.item("sdk-integration").unwrap();
+        let line = screen(&app, 170, 50).1.last().unwrap().svg.clone();
+        assert!(line.contains("starts Thu 10 Dec") && line.contains("after Requirements → Data model") && line.contains("19 wd to spare"));
+        app.selected = app.plan.item("requirements").unwrap();
+        assert!(screen(&app, 170, 50).1.last().unwrap().svg.contains("nothing comes before it"));
+        assert!(has(&screen(&app, 80, 24).0, ":: WHY THIS DATE · LANES"));
     }
 
     #[test]

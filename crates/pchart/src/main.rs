@@ -203,16 +203,22 @@ fn run(args: &Args) -> Result<u8, Failure> {
                         json!({ "item": ctx.plan.items[step].id, "lane": ctx.plan.items[step].lane, "start": report::iso(slot.planned.start), "finish": report::iso(slot.planned.finish), "spare_wd": slot.spare })
                     })
                     .collect();
-                print_json(&json!({ "schema": 1, "item": ctx.plan.items[index].id, "chain": steps }));
+                print_json(&json!({ "schema": 1, "item": ctx.plan.items[index].id, "spare_wd": ctx.schedule.slots[index].spare, "chain": steps }));
             } else {
                 let slot = &ctx.schedule.slots[index];
                 say!("{} on {} is set by this chain:", ctx.plan.items[index].name, text::day(slot.planned.finish));
                 for line in text::chain_steps(&ctx.plan, &ctx.schedule, &chain) {
                     say!("  {line}");
                 }
-                let first = &ctx.schedule.slots[chain[0]];
+                let name = &ctx.plan.items[index].name;
+                if slot.spare < 0 {
+                    say!("{name} is {} late.", text::working_days(-slot.spare));
+                } else {
+                    say!("{name} has {} to spare.", text::working_days(slot.spare));
+                }
                 if chain.len() > 1 {
-                    say!("{} to spare: {} can start {} at the earliest and {} at the latest.", text::working_days(first.slack), ctx.plan.items[chain[0]].name, text::day(first.earliest.start), text::day(first.latest.start));
+                    let first = &ctx.schedule.slots[chain[0]];
+                    say!("{} can start {} at the earliest and {} at the latest.", ctx.plan.items[chain[0]].name, text::day(first.earliest.start), text::day(first.latest.start));
                 }
             }
             Ok(0)

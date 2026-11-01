@@ -118,6 +118,8 @@ struct Chart<'a> {
     /// The row of bars an item sits in within its lane, so items at the same time do not cover each other.
     rows: Vec<usize>,
     chain: HashSet<usize>,
+    /// Why this date? (picture 56): the chain is that of one item, and the rest steps back.
+    why: bool,
     g: Grid,
     p: Palette,
     u: f32,
@@ -212,23 +214,33 @@ impl Chart<'_> {
 
 /// The swimlane roadmap at the detail level of `settings`.
 pub fn roadmap(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings) -> Scene {
-    draw(plan, schedule, calendars, settings, None, None)
+    draw(plan, schedule, calendars, settings, None, None, None)
 }
 
 /// The part of the swimlane roadmap within `cut`; bars that reach beyond it are cut at its edges.
 pub fn part(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: &Cut) -> Scene {
-    draw(plan, schedule, calendars, settings, Some(cut), None)
+    draw(plan, schedule, calendars, settings, Some(cut), None, None)
 }
 
 /// The roadmap of a plan tried as what-if, with the places items had in `before` dashed.
 pub fn what_if(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, before: &Schedule) -> Scene {
-    draw(plan, schedule, calendars, settings, None, Some(before))
+    draw(plan, schedule, calendars, settings, None, Some(before), None)
 }
 
-fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: Option<&Cut>, before: Option<&Schedule>) -> Scene {
+/// Why this date? (picture 56): the roadmap with the chain of items that sets the date of `item`, each
+/// waiting on the one before with its arrow, and everything else stepping back.
+pub fn why(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, item: usize) -> Scene {
+    draw(plan, schedule, calendars, settings, None, None, Some(item))
+}
+
+fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: Option<&Cut>, before: Option<&Schedule>, why: Option<usize>) -> Scene {
     let (p, u, today) = (settings.palette, settings.unit, settings.today);
     let mut s = Scene { width: settings.width, height: settings.height, background: Some(p.page), hatch: (p.raised, p.muted), hatch_alert: (p.alert_ground, p.alert), spare: p.dim, font: FONT, marks: Vec::new() };
-    let c = chart(plan, schedule, settings, Some(settings.height), cut);
+    let mut c = chart(plan, schedule, settings, Some(settings.height), cut);
+    if let Some(item) = why {
+        c.chain = pchart_core::why(schedule, item).into_iter().collect();
+        c.why = true;
+    }
 
     frame(&mut s, &c, calendars);
     if let Some(target) = schedule.target.filter(|&target| c.shown(target)) {
@@ -242,8 +254,10 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         folded(&mut s, &c);
     } else {
         let mut taken: Vec<Area> = (0..plan.items.len()).filter(|&index| c.shown(index)).flat_map(|index| c.area(index)).collect();
+        if c.level == Level::Full || why.is_some() {
+            arrows(&mut s, &c, &mut taken, why.is_some());
+        }
         if c.level == Level::Full {
-            arrows(&mut s, &c, &mut taken);
             free_slack(&mut s, &c, &mut taken);
         }
         if let Some(before) = before {
@@ -259,6 +273,11 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         let xt = c.g.x(today);
         s.add(Shape::Line { x1: xt, y1: c.g.top + 42.0 * u, x2: xt, y2: c.g.bottom(), stroke: c.rule(p.ink, 1.5) });
         s.add(Shape::Text { x: xt - 5.0 * u, y: c.g.top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
+    }
+    if why.is_some() {
+        for mark in s.marks.iter_mut().filter(|mark| mark.item.is_some_and(|index| !c.chain.contains(&index))) {
+            mark.opacity *= 0.3;
+        }
     }
     s
 }
@@ -299,6 +318,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         visible: cut.map_or_else(|| (0..plan.lanes.len()).collect(), |cut| cut.lanes.clone()),
         rows: vec![0; plan.items.len()],
         chain: schedule.chain.iter().copied().collect(),
+        why: false,
         g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u, unit: LANE * u },
         p: settings.palette,
         u,
@@ -451,11 +471,13 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     }
 }
 
-/// Who waits on whom, as arrows from the end of an item to the start of the next.
-fn arrows(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
+/// Who waits on whom, as arrows from the end of an item to the start of the next; with `chain` only
+/// those along the chain, each item from the one that sets its start.
+fn arrows(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>, chain: bool) {
     let u = c.u;
     for (index, item) in c.plan.items.iter().enumerate() {
-        for pred in item.after.iter().filter_map(|id| c.plan.item(id)).filter(|&pred| c.shown(pred) && c.shown(index)) {
+        let along = |pred: usize| !chain || (c.chain.contains(&index) && c.schedule.slots[index].driver == Some(pred));
+        for pred in item.after.iter().filter_map(|id| c.plan.item(id)).filter(|&pred| c.shown(pred) && c.shown(index) && along(pred)) {
             let (ax0, ax1, ay) = c.bar(pred);
             let (bx0, _, by) = c.bar(index);
             let from_milestone = c.plan.items[pred].milestone;
@@ -669,10 +691,11 @@ fn buffers(s: &mut Scene, c: &Chart, checks: &[Check], taken: &mut Vec<Area>) {
         if y + 9.0 * u > floor || x < c.g.x0 {
             continue;
         }
-        s.add(Shape::Path { points: vec![(xa, y - 5.0 * u), (xa, y), (xl, y), (xl, y - 5.0 * u)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.warn, 1.6)) });
+        let opacity = if c.why && !c.chain.contains(&target) { 0.3 } else { 1.0 };
+        s.marks.push(Mark { shape: Shape::Path { points: vec![(xa, y - 5.0 * u), (xa, y), (xl, y), (xl, y - 5.0 * u)], closed: false, fill: Fill::None, stroke: Some(c.rule(c.p.warn, 1.6)) }, opacity, item: None });
         taken.push([xa.min(xl) - u, y - 6.0 * u, xl.max(xa) + u, y + u]);
         taken.push([x, y - 6.0 * u, x + w, y + 9.0 * u]);
-        s.add(Shape::Text { x, y: y + 5.0 * u, text: text.into(), size: 13.5 * u, color: c.p.warn, bold: true, anchor: Anchor::Start });
+        s.marks.push(Mark { shape: Shape::Text { x, y: y + 5.0 * u, text: text.into(), size: 13.5 * u, color: c.p.warn, bold: true, anchor: Anchor::Start }, opacity, item: None });
     }
 }
 
