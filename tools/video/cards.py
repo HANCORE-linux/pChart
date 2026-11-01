@@ -1,30 +1,22 @@
-"""The parts of the video that are not pChart (picture 48): the title and end card, and the band under
-the screen with the caption of a scene and its keys, the one just pressed lit."""
+"""The parts of the video that are not pChart (picture 48, in the style of the OmaQ video): the desktop
+around the terminal, with the theme's wallpaper and a bar on top, the caption
+of a scene on the left under it and its keys on the right, the one just pressed lit, and the end card."""
 
 import html
+import json
 import subprocess
 from pathlib import Path
 
-W, H, BAND = 1920, 1080, 90
-BG, INK, BRIGHT, DIM, MUTED, RAISED, ACC = "#0d0d0d", "#d3d7b5", "#dee1c8", "#9ea188", "#585d58", "#1d201d", "#e33d84"
-SANS, MONO = "Noto Sans", "JetBrains Mono, JetBrainsMono Nerd Font, monospace"
+W, H, BAR, BAND = 1920, 1080, 30, 70
+MONO, SANS = "JetBrains Mono, JetBrainsMono Nerd Font, monospace", "Noto Sans"
+ROOT = Path(__file__).resolve().parent.parent.parent
+THEMES = json.loads((ROOT / "crates/pchart-tui/themes.json").read_text())
+WALLPAPERS = {"labra": Path(__file__).resolve().parent / "wallpapers/labra.jpg", "harbor": Path(__file__).resolve().parent / "wallpapers/harbor.jpg"}
 
 
-def text(x, y, value, size, fill, family=SANS, bold=False, anchor="start"):
+def text(x, y, value, size, fill, family=MONO, bold=False, anchor="start"):
     weight = ' font-weight="700"' if bold else ""
     return f'<text x="{x}" y="{y}" font-family="{family}" font-size="{size}" fill="{fill}" text-anchor="{anchor}"{weight}>{html.escape(value)}</text>'
-
-
-def keys(right, y, names, lit=None):
-    out, x = [], right
-    for name in reversed(names):
-        w = 22 + len(name) * 13
-        x -= w
-        on = name == lit
-        out.append(f'<rect x="{x}" y="{y - 26}" width="{w}" height="38" rx="7" fill="{ACC if on else RAISED}" stroke="{ACC if on else MUTED}" stroke-width="1.5"/>')
-        out.append(text(x + w / 2, y, name, 21, "#040704" if on else BRIGHT, MONO, True, "middle"))
-        x -= 12
-    return "".join(out)
 
 
 def png(body, out: Path, width=W, height=H):
@@ -34,28 +26,55 @@ def png(body, out: Path, width=W, height=H):
     return out
 
 
-def title(out: Path):
-    return png("".join([
-        f'<rect width="{W}" height="{H}" fill="{BG}"/>',
-        text(W / 2, 470, "pChart", 128, BRIGHT, MONO, True, "middle"),
-        f'<rect x="{W / 2 - 230}" y="505" width="460" height="4" fill="{ACC}"/>',
-        text(W / 2, 580, "Project charts in the terminal, in plain language", 38, INK, anchor="middle"),
-        text(W / 2, 640, "Sample plan: Customer portal v1", 26, DIM, anchor="middle"),
-    ]), out)
+def wallpaper(name, out: Path):
+    """The theme's wallpaper, cut to fill the screen."""
+    source = WALLPAPERS[name]
+    subprocess.run(["magick", str(source), "-resize", f"{W}x{H}^", "-gravity", "center", "-extent", f"{W}x{H}", str(out)], check=True)
+    return out
+
+
+def bar(name, out: Path):
+    """The bar along the top of the desktop in the theme's colours: the workspaces, the day and the time."""
+    c = THEMES[name]
+    body = [f'<rect width="{W}" height="{BAR}" fill="{c["background"]}"/>']
+    for number in range(4):
+        body.append(f'<circle cx="{22 + number * 20}" cy="{BAR / 2}" r="{4.5 if number == 0 else 3}" fill="{c["foreground"] if number == 0 else c["muted"]}"/>')
+    body.append(text(W / 2, 20, "Thursday 09:41", 15, c["foreground"], anchor="middle"))
+    for number in range(3):
+        body.append(f'<rect x="{W - 30 - number * 24}" y="10" width="12" height="10" rx="2" fill="none" stroke="{c["foreground"]}" stroke-width="1.5"/>')
+    return png("".join(body), out, W, BAR)
+
+
+def keys(right, y, names, lit, c):
+    out, x = [], right
+    for name in reversed(names):
+        w = 22 + len(name) * 12
+        x -= w
+        on = name == lit
+        out.append(f'<rect x="{x}" y="{y - 24}" width="{w}" height="34" rx="6" fill="{c["accent"] if on else "#0d0d0d"}" fill-opacity="{1 if on else 0.82}" stroke="{c["accent"] if on else "#585d58"}" stroke-width="1.5"/>')
+        out.append(text(x + w / 2, y, name, 19, "#040704" if on else "#dee1c8", MONO, True, "middle"))
+        x -= 10
+    return "".join(out)
+
+
+def band(name, out: Path, caption, names, lit=None):
+    """The caption of a scene in a dark box on the left, and its keys on the right."""
+    c = THEMES[name]
+    body = []
+    if caption:
+        width = 28 + len(caption) * 12.6
+        body += [f'<rect x="20" y="16" width="{width}" height="36" rx="3" fill="#0d0d0d" fill-opacity="0.86"/>', text(34, 40, caption, 21, "#dee1c8")]
+    body.append(keys(W - 20, 44, names, lit, c))
+    return png("".join(body), out, W, BAND)
 
 
 def end(out: Path):
+    """The end card: the name, what pChart is, and how to start it."""
+    icon = f'<rect x="{W / 2 - 330}" y="330" width="150" height="150" rx="33" fill="#c026d3"/>' + text(W / 2 - 255, 437, "P", 92, "#ffffff", SANS, True, "middle")
+    name = text(W / 2 - 150, 445, "pChart", 120, "#dee1c8", MONO, True)
+    prompt = text(W / 2 - 110, 690, "~ ❯ pchart", 34, "#d3d7b5") + f'<rect x="{W / 2 + 106}" y="662" width="18" height="36" fill="#e33d84"/>'
     return png("".join([
-        f'<rect width="{W}" height="{H}" fill="{BG}"/>',
-        text(W / 2, 400, "pChart", 96, BRIGHT, MONO, True, "middle"),
-        text(W / 2, 490, "Situation · Roadmap · Checks · Export", 36, INK, anchor="middle"),
-        text(W / 2, 550, "Change a date, try what-if, add notes: every change is saved and can be undone.", 26, DIM, anchor="middle"),
-        text(W / 2, 600, "The plan file is the only source of truth; pictures, PDF and Markdown come from it.", 26, DIM, anchor="middle"),
-        text(W / 2, 650, "Follows the Omarchy theme · runs in kitty, Ghostty and foot", 26, DIM, anchor="middle"),
+        f'<rect width="{W}" height="{H}" fill="#000000"/>', icon, name,
+        text(W / 2, 590, "Project charts that check themselves.", 44, "#d3d7b5", SANS, anchor="middle"), prompt,
+        text(W / 2, 760, "Rust · MIT · kitty, Ghostty and foot", 20, "#585d58", MONO, anchor="middle"),
     ]), out)
-
-
-def band(out: Path, left, right, caption, names, lit=None):
-    """The band under the screen, from `left` to `right`: the caption, or with `lit` only the keys."""
-    body = keys(right, 54, names, lit) if lit else text(left, 54, caption, 25, INK) + keys(right, 54, names)
-    return png(body, out, W, BAND)

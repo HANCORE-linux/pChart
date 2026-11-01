@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Runs pChart in a pty inside this terminal and types the keys of the timeline at their times.
+"""Runs CMD, the shell pChart is typed into, in a pty inside this terminal and types the keys of the
+timeline at their times.
 Writes the start time to START and touches DONE at the end. usage: drive.py START DONE CMD..."""
 import fcntl, os, pty, select, sys, termios, time, tty
 from pathlib import Path
@@ -19,6 +20,14 @@ start = time.time()
 Path(start_file).write_text(repr(start))
 saved = termios.tcgetattr(0)
 tty.setraw(0)
+
+
+def write(target, data):
+    """All of `data`: a terminal busy with a large picture takes only part of a write."""
+    while data:
+        data = data[os.write(target, data):]
+
+
 keys = list(KEYS)
 try:
     while time.time() - start < END + 0.5:
@@ -34,9 +43,9 @@ try:
                 break
             if not data:
                 break
-            os.write(1, data)
+            write(1, data)
         if 0 in ready:
-            os.write(fd, os.read(0, 4096))
+            write(fd, os.read(0, 4096))
         if keys and time.time() - start >= keys[0][0]:
             os.write(fd, NAMES.get(keys[0][1], keys[0][1].encode()))
             keys.pop(0)

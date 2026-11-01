@@ -1,30 +1,35 @@
-"""What the video shows: when each key is typed (seconds after pChart starts), when the Omarchy theme
-switches to Harbor, and the scenes with their captions and keys, as approved in the storyboard
-(picture 48)."""
+"""What the video shows: when each key is typed (seconds after the terminal opens), and the scenes with
+their captions and keys (picture 48, made anew as a use case on 2026-11-01: a terminal opens on the
+Omarchy desktop, pchart opens a plan from before, and pchart read shows how pChart's own code is built).
+THEME after END keeps the video in Labra."""
 
 
-def typed(at, text, step):
+def typed(at, text, step=0.08):
     return [(at + index * step, "space" if char == " " else char) for index, char in enumerate(text)]
 
 
-LEAD = 1.0
-THEME = 36.0
+LEAD = 0.6
+THEME = 999.0
 KEYS = [
-    (3.0, "down"), (4.6, "up"),
-    (7.0, "2"), (8.6, "enter"), (9.6, "down"), (10.2, "down"), *typed(11.0, "4 jan", 0.15), (15.6, "esc"),
-    *[(17.0 + index * 0.18, "right") for index in range(12)], (23.6, "esc"),
-    (25.0, "n"), (26.0, "down"), (26.4, "down"), (26.8, "down"), (27.3, "left"), (27.6, "left"), (27.9, "left"),
-    (28.8, "i"), (29.8, "enter"), *typed(30.4, "Client signs in New York", 0.09), (33.6, "enter"), (34.6, "esc"),
-    (41.0, "3"), (43.5, "down"), (45.2, "up"),
-    (47.0, "4"), (48.5, "left"), (49.5, "down"), (50.2, "right"), (50.9, "right"), (52.2, "enter"),
+    *typed(1.4, "pchart"), (2.3, "enter"),
+    (4.4, "up"), (6.2, "enter"),
+    (8.2, "down"), (9.3, "up"),
+    (11.0, "2"), (12.6, "y"), (14.4, "down"), (15.8, "down"), (17.4, "esc"),
+    (19.0, "3"), (21.4, "b"),
+    (24.0, "4"), (25.4, "left"), *[(27.4 + index * 0.3, "right") for index in range(6)], (30.6, "right"),
+    (33.0, "q"),
+    *typed(34.6, "pchart read ~/projects/pchart", 0.07), (37.0, "enter"),
+    *typed(40.0, "pchart pchart.pchart", 0.07), (41.7, "enter"),
+    (43.8, "down"), (44.8, "down"), (45.8, "right"), (46.8, "down"),
+    (48.6, "4"), (50.0, "right"),
 ]
-END = 56.0
+END = 54.5
 SCENES = [
-    (LEAD, 7.0, "Opening a plan says where it stands, what is next and which chain decides the date.", ["↑↓"]),
-    (7.0, 17.0, "Enter asks when an item starts. Type a date as you say it, and see what follows first.", ["2", "Enter", "↑↓", "Esc"]),
-    (17.0, 25.0, "←→ tries an item longer or shorter. Nothing is saved until Enter; Esc goes back.", ["←→", "Esc"]),
-    (25.0, 35.0, "n moves a cursor through the roadmap to add notes; i marks a milestone important.", ["n", "←→", "i", "Enter"]),
-    (35.0, 41.0, "pChart follows the Omarchy theme: switched to Harbor, it recolours at once.", []),
-    (41.0, 47.0, "Checks say what to look at, what happens, and what you can do.", ["3", "↑↓"]),
-    (47.0, END, "The preview is the file: pick a view and an audience, and Enter writes it.", ["4", "←→", "↑↓", "Enter"]),
+    (LEAD, 6.6, "Open a terminal, type pchart, and pick up the plan you had open.", ["↑↓", "Enter"]),
+    (6.6, 10.6, "A plan says where it stands, what is next and which chain decides the date.", ["↑↓"]),
+    (10.6, 18.6, "y shows why a date is set: the chain before it, and what it has to spare.", ["2", "y", "↑↓", "Esc"]),
+    (18.6, 23.6, "Checks say what to look at, and b adds the buffer they suggest.", ["3", "b"]),
+    (23.6, 33.6, "The preview is the file: Gantt chart, network diagram, dependency matrix.", ["4", "←→"]),
+    (33.6, 42.0, "pchart read shows how a folder is built. Here: pChart's own code.", ["Enter"]),
+    (42.0, END, "Each file a box, each use an arrow; the matrix shows the layers.", ["↑↓", "←→", "4"]),
 ]
