@@ -57,6 +57,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | Command | Use |
 |---|---|
 | `pchart help --json` | every command, option, exit code and edit |
+| `pchart new PLAN --template ID --target DATE` | a new plan from a template (`new-application`, `website-relaunch`, `product-launch`, `empty`); never writes over a file |
 | `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |
 | `pchart check PLAN` | problems, warnings and hints; exit code 1 or 2 |
 | `pchart set … --dry-run`, `pchart apply PLAN - --dry-run` | try a change and read what it does, without writing |

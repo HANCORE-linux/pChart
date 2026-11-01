@@ -1,8 +1,8 @@
 mod cli;
 mod report;
 
-use std::io::{Read, Write};
-use std::path::Path;
+use std::io::{IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use jiff::civil::Date;
@@ -50,6 +50,7 @@ impl Failure {
 
 fn main() -> ExitCode {
     let words: Vec<String> = std::env::args().skip(1).collect();
+    let words = if words.is_empty() && !std::io::stdout().is_terminal() { vec!["help".into()] } else { words };
     let json = words.iter().any(|word| word == "--json");
     match Args::parse(words).map_err(|message| Failure { code: 3, kind: "usage", message, hint: Some("pchart help".into()) }).and_then(|args| run(&args)) {
         Ok(code) => ExitCode::from(code),
@@ -68,7 +69,7 @@ fn main() -> ExitCode {
 }
 
 struct Context {
-    path: std::path::PathBuf,
+    path: PathBuf,
     plan: Plan,
     calendars: Vec<Calendar>,
     holidays: Holidays,
@@ -77,22 +78,14 @@ struct Context {
 }
 
 fn context(args: &Args) -> Result<Context, Failure> {
-    let path = std::path::PathBuf::from(args.words.first().ok_or_else(|| Failure::usage("which plan? Name the plan file.", args))?);
+    let path = PathBuf::from(args.words.first().ok_or_else(|| Failure::usage("which plan? Name the plan file.", args))?);
+    context_of(path, args)
+}
+
+fn context_of(path: PathBuf, args: &Args) -> Result<Context, Failure> {
     let plan = pchart_store::load(&path).map_err(|err| Failure::file(err.to_string()))?;
-    let today = match args.option("--today") {
-        Some(text) => date(text, args)?,
-        None => jiff::Zoned::now().date(),
-    };
-    let text = match args.option("--holidays") {
-        Some(file) => std::fs::read_to_string(file).map_err(|err| Failure::file(format!("{file}: {err}")))?,
-        None => {
-            let mut text = String::new();
-            flate2::read::GzDecoder::new(HOLIDAYS).read_to_string(&mut text).expect("the bundled holiday data is gzip text");
-            text
-        }
-    };
-    let places: Vec<&str> = plan.lanes.iter().filter_map(|lane| lane.place.as_deref()).collect();
-    let holidays = Holidays::parse_for(&text, |region| places.iter().any(|place| *place == region || place.split_once('-').is_some_and(|(country, _)| country == region)));
+    let today = today(args)?;
+    let holidays = holidays_for(&holiday_text(args)?, &plan);
     if !args.flag("--json") {
         for lane in &plan.lanes {
             if let Some(place) = &lane.place
@@ -102,9 +95,38 @@ fn context(args: &Args) -> Result<Context, Failure> {
             }
         }
     }
-    let calendars: Vec<Calendar> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+    let calendars = calendars(&holidays, &plan);
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(|err| Failure::file(format!("{}: {err}", path.display())))?;
     Ok(Context { path, plan, calendars, holidays, today, schedule })
+}
+
+fn today(args: &Args) -> Result<Date, Failure> {
+    match args.option("--today") {
+        Some(text) => date(text, args),
+        None => Ok(jiff::Zoned::now().date()),
+    }
+}
+
+/// The holiday data: the file `--holidays` names, else the bundled data.
+fn holiday_text(args: &Args) -> Result<String, Failure> {
+    match args.option("--holidays") {
+        Some(file) => std::fs::read_to_string(file).map_err(|err| Failure::file(format!("{file}: {err}"))),
+        None => {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(HOLIDAYS).read_to_string(&mut text).expect("the bundled holiday data is gzip text");
+            Ok(text)
+        }
+    }
+}
+
+/// The holidays of the places of the plan's lanes.
+fn holidays_for(text: &str, plan: &Plan) -> Holidays {
+    let places: Vec<&str> = plan.lanes.iter().filter_map(|lane| lane.place.as_deref()).collect();
+    Holidays::parse_for(text, |region| places.iter().any(|place| *place == region || place.split_once('-').is_some_and(|(country, _)| country == region)))
+}
+
+fn calendars(holidays: &Holidays, plan: &Plan) -> Vec<Calendar> {
+    plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect()
 }
 
 fn date(text: &str, args: &Args) -> Result<Date, Failure> {
@@ -140,10 +162,17 @@ fn run(args: &Args) -> Result<u8, Failure> {
         "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--audience"],
         "bench" => &["--frames", "--out"],
         "open" => &["--theme"],
+        "new" => &["--template", "--name", "--target", "--start"],
         _ => &[],
     };
     if let Some(option) = args.unknown_options(known) {
         return Err(Failure::usage(format!("{} does not know {option}", args.command), args));
+    }
+    if args.command == "new" {
+        return new(args);
+    }
+    if args.command == "open" && args.words.is_empty() && std::io::stdout().is_terminal() {
+        return start(args);
     }
     let ctx = context(args)?;
     let json = args.flag("--json");
@@ -244,12 +273,74 @@ fn run(args: &Args) -> Result<u8, Failure> {
             pchart_tui::bench(ctx.plan, ctx.calendars, ctx.today, frames, Path::new(out)).map_err(|err| Failure::file(err.to_string()))?;
             Ok(0)
         }
-        _ => {
-            let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
-            pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme).map_err(|err| Failure::file(err.to_string()))?;
-            Ok(0)
+        _ => open(ctx, args),
+    }
+}
+
+/// Opens the plan in the terminal and puts it first among the plans opened last.
+fn open(ctx: Context, args: &Args) -> Result<u8, Failure> {
+    let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
+    pchart_store::remember(&ctx.path);
+    pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme).map_err(|err| Failure::file(err.to_string()))?;
+    Ok(0)
+}
+
+/// `pchart` without a plan, in a terminal: the start, which writes a new plan or picks one opened before,
+/// and then opens it.
+fn start(args: &Args) -> Result<u8, Failure> {
+    let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
+    let text = holiday_text(args)?;
+    let lanes = |plan: &Plan| calendars(&holidays_for(&text, plan), plan);
+    let dir = std::env::current_dir().map_err(|err| Failure::file(err.to_string()))?;
+    match pchart_tui::start(&dir, today(args)?, theme, &lanes).map_err(|err| Failure::file(err.to_string()))? {
+        Some(path) => open(context_of(path, args)?, args),
+        None => Ok(0),
+    }
+}
+
+/// `pchart new`: a plan from a template, written where no file is.
+fn new(args: &Args) -> Result<u8, Failure> {
+    let path = PathBuf::from(args.words.first().ok_or_else(|| Failure::usage("where? Name the new plan file.", args))?);
+    let templates = pchart_store::templates();
+    let ids = templates.iter().map(|(id, _)| *id).collect::<Vec<_>>().join(", ");
+    let id = args.option("--template").ok_or_else(|| Failure::usage(format!("which template? {ids}"), args))?;
+    let (_, template) = templates.iter().find(|(other, _)| *other == id).ok_or_else(|| Failure::usage(format!("there is no template \"{id}\"; there are {ids}"), args))?;
+    let date = match (args.option("--target"), args.option("--start")) {
+        (Some(_), Some(_)) => return Err(Failure::usage("give either --target or --start", args)),
+        (Some(text), None) | (None, Some(text)) => Some(date(text, args)?),
+        (None, None) => None,
+    };
+    let plan = template.new_plan(args.option("--name").unwrap_or(&template.name), date, args.option("--start").is_some());
+    let today = today(args)?;
+    let calendars = calendars(&holidays_for(&holiday_text(args)?, &plan), &plan);
+    let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(|err| Failure::edit(err.to_string()))?;
+    let analysis = analyse(&plan, &calendars, &schedule, today);
+    let dry = args.flag("--dry-run");
+    if path.exists() {
+        return Err(Failure::file(format!("{}: is there already", path.display())));
+    }
+    if !dry {
+        pchart_store::create(&path, &plan).map_err(|err| Failure::file(err.to_string()))?;
+    }
+    if args.flag("--json") {
+        let mut out = report::situation_json(&plan, &schedule, &analysis);
+        out["written"] = json!(!dry);
+        print_json(&out);
+        return Ok(0);
+    }
+    say!("{}", if dry { "Dry run, nothing written." } else { "Saved." });
+    match &analysis.verdict {
+        Some(verdict) => {
+            let (headline, detail) = text::verdict(&plan, verdict);
+            say!("{headline} {detail}");
+        }
+        None => {
+            if let Some(last) = (0..plan.items.len()).max_by_key(|&index| schedule.slots[index].planned.finish) {
+                say!("{} on {}.", plan.items[last].name, text::day(schedule.slots[last].planned.finish));
+            }
         }
     }
+    Ok(0)
 }
 
 fn holidays(args: &Args, ctx: &Context, json: bool) -> Result<u8, Failure> {

@@ -81,13 +81,34 @@ pub struct Item {
     pub note: Option<String>,
 }
 
+/// The words of `text` in small letters joined by "-", or None when it has none.
+pub fn slug(text: &str) -> Option<String> {
+    let words: Vec<String> = text.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_string).collect();
+    (!words.is_empty()).then(|| words.join("-"))
+}
+
 impl Plan {
     /// An id for a new item called `name`: its words in small letters joined by "-", numbered when the id
     /// is taken.
     pub fn new_id(&self, name: &str) -> String {
-        let words: Vec<String> = name.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|word| !word.is_empty()).map(str::to_string).collect();
-        let base = if words.is_empty() { "item".to_string() } else { words.join("-") };
+        let base = slug(name).unwrap_or_else(|| "item".into());
         (1..).map(|number| if number == 1 { base.clone() } else { format!("{base}-{number}") }).find(|id| self.item(id).is_none()).unwrap_or(base)
+    }
+
+    /// A new plan from this template, called `name`, with `date` on its target, the last milestone
+    /// nothing waits on, or as its start when `forwards` or when it has no such milestone. Without a
+    /// date it starts on the day it is scheduled from.
+    pub fn new_plan(&self, name: &str, date: Option<Date>, forwards: bool) -> Plan {
+        let mut plan = self.clone();
+        plan.name = name.to_string();
+        let target = (0..plan.items.len()).rev().find(|&index| plan.items[index].milestone && !plan.items.iter().any(|other| other.after.contains(&plan.items[index].id)));
+        if let Some(date) = date {
+            match target.filter(|_| !forwards) {
+                Some(target) => plan.items[target].on = Some(date),
+                None => plan.start = Some(date),
+            }
+        }
+        plan
     }
 
     pub fn parse(text: &str) -> Result<Plan, Error> {
@@ -304,6 +325,19 @@ mod tests {
         assert_eq!(plan.new_id("Frontend"), "frontend-2");
         assert_eq!(plan.new_id("Beta & acceptance!"), "beta-acceptance");
         assert_eq!(plan.new_id("…"), "item");
+    }
+
+    #[test]
+    fn a_new_plan_puts_its_date_on_the_last_milestone_nothing_waits_on() {
+        let mut template = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+        let launch = template.item("launch").unwrap();
+        template.items[launch].on = None;
+        let day = Date::constant(2027, 3, 1);
+        let backwards = template.new_plan("Portal", Some(day), false);
+        assert_eq!((backwards.name.as_str(), backwards.items[launch].on, backwards.start), ("Portal", Some(day), None));
+        let forwards = template.new_plan("Portal", Some(day), true);
+        assert_eq!((forwards.items[launch].on, forwards.start), (None, Some(day)));
+        assert_eq!(template.new_plan("Portal", None, false).items, template.items);
     }
 
     #[test]

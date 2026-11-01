@@ -5,7 +5,8 @@ pub struct Command {
 }
 
 pub const COMMANDS: &[Command] = &[
-    Command { name: "open", usage: "pchart PLAN [--theme NAME]", about: "Open the plan in the terminal, in the colours of the current Omarchy theme, which it follows while it changes, or in Labra without Omarchy. --theme NAME takes a theme by name instead, such as labra or harbor." },
+    Command { name: "open", usage: "pchart [PLAN] [--theme NAME]", about: "Open the plan in the terminal, in the colours of the current Omarchy theme, which it follows while it changes, or in Labra without Omarchy. --theme NAME takes a theme by name instead, such as labra or harbor. Without PLAN it starts: a new plan from a template, written to this folder, or a plan opened before." },
+    Command { name: "new", usage: "pchart new PLAN --template ID [--name NAME] [--target DATE | --start DATE]", about: "Write a new plan from a template: new-application, website-relaunch, product-launch or empty. --target puts the date on its last milestone and plans backwards from it, --start plans forwards from it; without either it starts today. Never writes over a file." },
     Command { name: "situation", usage: "pchart situation PLAN", about: "Where the plan stands: does the date hold, who waits on whom, what is next." },
     Command { name: "why", usage: "pchart why PLAN ITEM", about: "The chain of items that sets the date of ITEM." },
     Command { name: "waits", usage: "pchart waits PLAN", about: "Every lane that waits on another lane, and for what." },
@@ -71,10 +72,10 @@ pub struct Args {
 
 impl Args {
     pub fn parse(mut words: Vec<String>) -> Result<Args, String> {
-        if words.is_empty() || words.iter().any(|word| word == "-h" || word == "--help") {
+        if words.iter().any(|word| word == "-h" || word == "--help") {
             words = vec!["help".into()];
         }
-        let command = match COMMANDS.iter().find(|command| command.name == words[0] && command.name != "open") {
+        let command = match COMMANDS.iter().find(|command| words.first().is_some_and(|word| command.name == word) && command.name != "open") {
             Some(command) => {
                 words.remove(0);
                 command.name
@@ -162,8 +163,10 @@ mod tests {
     }
 
     #[test]
-    fn no_words_means_help() {
-        assert_eq!(parse("").command, "help");
+    fn no_plan_means_the_start_and_help_means_help() {
+        let args = parse("--today 2026-10-29");
+        assert_eq!((args.command, args.words.len()), ("open", 0));
+        assert_eq!(parse("").command, "open");
         assert_eq!(parse("situation x --help").command, "help");
     }
 }

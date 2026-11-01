@@ -35,7 +35,7 @@ pub(crate) struct Inks {
 }
 
 impl Inks {
-    fn of(p: Palette) -> Inks {
+    pub(crate) fn of(p: Palette) -> Inks {
         let style = |ink: Ink| Style::new().fg(color(ink));
         Inks { ink: style(p.ink), bright: style(p.bright), dim: style(p.dim), muted: style(p.muted), rule: style(p.rule), warn: style(p.warn), alert: style(p.alert), accent: color(p.accent), raised: color(p.raised) }
     }

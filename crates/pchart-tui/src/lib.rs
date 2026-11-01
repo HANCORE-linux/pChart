@@ -10,6 +10,7 @@ mod pictures;
 mod question;
 mod situation;
 mod sixel;
+mod start;
 pub mod theme;
 mod ui;
 
@@ -265,6 +266,58 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
     drop(save);
     let saved = saver.join().unwrap_or_else(|_| Err("the plan could not be saved".into()));
     result.and(saved.map_err(|err| io::Error::other(format!("the last change was not saved: {err}"))))
+}
+
+/// The start (picture 54), for `pchart` without a plan: returns the plan to open, a new one written to
+/// `dir` or one opened before, or None when the user leaves.
+/// `calendars` gives the calendars of a plan's lanes, for the plans opened before.
+pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<Option<std::path::PathBuf>> {
+    let picker = picker()?;
+    let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
+    let mut start = start::Start::new(dir.to_path_buf(), pchart_store::recent(), calendars, today, theme.palette, pictures.cell());
+    let mut terminal = ratatui::init();
+    let result = loop {
+        pictures.receive();
+        let mut waiting = false;
+        if let Err(err) = terminal.draw(|frame| {
+            let placements = start::draw(&start, frame);
+            waiting = pictures.draw(frame, placements);
+        }) {
+            break Err(err);
+        }
+        match event::poll(if waiting { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(err) => break Err(err),
+        }
+        match event::read() {
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                start.message = None;
+                match key.code {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(None),
+                    KeyCode::Esc => break Ok(None),
+                    KeyCode::Up => start.choose(-1),
+                    KeyCode::Down => start.choose(1),
+                    KeyCode::Left | KeyCode::Right => start.forwards ^= true,
+                    KeyCode::Tab | KeyCode::BackTab => start.naming ^= true,
+                    KeyCode::Enter => {
+                        if let Some(path) = start.enter() {
+                            break Ok(Some(path));
+                        }
+                    }
+                    KeyCode::Backspace if start.naming => drop(start.name.pop()),
+                    KeyCode::Backspace => drop(start.typed.pop()),
+                    KeyCode::Char(c) if start.naming => start.name.push(c),
+                    KeyCode::Char(c) => start.typed.push(c),
+                    _ => {}
+                }
+            }
+            Ok(_) => {}
+            Err(err) => break Err(err),
+        }
+    };
+    ratatui::restore();
+    result
 }
 
 /// Changes the selected item `frames` times like a held arrow key and measures every step,

@@ -34,6 +34,60 @@ pub fn save(path: &Path, plan: &Plan) -> Result<(), Error> {
     written.map_err(|err| failed(path, err))
 }
 
+/// Writes a new plan, never over a file that is there.
+pub fn create(path: &Path, plan: &Plan) -> Result<(), Error> {
+    OpenOptions::new().write(true).create_new(true).open(path).map_err(|err| if err.kind() == ErrorKind::AlreadyExists { failed(path, "is there already") } else { failed(path, err) })?;
+    save(path, plan).inspect_err(|_| {
+        let _ = fs::remove_file(path);
+    })
+}
+
+/// The templates pChart ships, by id.
+const TEMPLATES: [(&str, &str); 4] = [
+    ("new-application", include_str!("../templates/new-application.pchart")),
+    ("website-relaunch", include_str!("../templates/website-relaunch.pchart")),
+    ("product-launch", include_str!("../templates/product-launch.pchart")),
+    ("empty", include_str!("../templates/empty.pchart")),
+];
+
+/// The templates pChart ships: their ids and plans.
+pub fn templates() -> Vec<(&'static str, Plan)> {
+    TEMPLATES.iter().map(|(id, text)| (*id, Plan::parse(text).expect("the bundled templates are plans"))).collect()
+}
+
+/// Where pChart keeps what it remembers between runs: `$XDG_STATE_HOME/pchart`, else
+/// `~/.local/state/pchart`.
+fn state() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").filter(|dir| !dir.is_empty()).map(|home| PathBuf::from(home).join(".local/state")))?;
+    Some(base.join("pchart"))
+}
+
+/// The plans opened last, newest first, those that still exist.
+pub fn recent() -> Vec<PathBuf> {
+    state().map(|dir| recent_in(&dir)).unwrap_or_default()
+}
+
+/// Puts `path` first among the plans opened last, keeping eight.
+pub fn remember(path: &Path) {
+    if let Some(dir) = state() {
+        remember_in(&dir, path);
+    }
+}
+
+fn recent_in(dir: &Path) -> Vec<PathBuf> {
+    fs::read_to_string(dir.join("recent")).unwrap_or_default().lines().map(PathBuf::from).filter(|path| path.is_file()).collect()
+}
+
+fn remember_in(dir: &Path, path: &Path) {
+    let Ok(path) = fs::canonicalize(path) else { return };
+    let mut paths = recent_in(dir);
+    paths.retain(|other| other != &path);
+    paths.insert(0, path);
+    paths.truncate(8);
+    let text: String = paths.iter().map(|path| format!("{}\n", path.display())).collect();
+    let _ = fs::create_dir_all(dir).and_then(|()| fs::write(dir.join("recent"), text));
+}
+
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".");
@@ -96,6 +150,53 @@ mod tests {
         assert_eq!(load(&path).unwrap(), plan);
         let names: Vec<String> = fs::read_dir(&dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["portal.pchart"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_plan_is_never_written_over_a_file() {
+        let dir = folder("create");
+        let path = dir.join("portal.pchart");
+        let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+        create(&path, &plan).unwrap();
+        assert_eq!(load(&path).unwrap(), plan);
+        let err = create(&path, &Plan { name: "Other".into(), ..plan.clone() }).unwrap_err();
+        assert!(err.to_string().ends_with("portal.pchart: is there already"), "{err}");
+        assert_eq!(load(&path).unwrap(), plan);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_templates_are_plans_that_check_clean() {
+        let calendar = pchart_core::Holidays::parse("").calendar(None);
+        let today = "2026-10-29".parse().unwrap();
+        let ids: Vec<&str> = templates().iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, ["new-application", "website-relaunch", "product-launch", "empty"]);
+        for (id, template) in templates() {
+            let plan = template.new_plan(&template.name, Some("2027-03-01".parse().unwrap()), false);
+            let calendars = vec![calendar.clone(); plan.lanes.len()];
+            let schedule = pchart_core::schedule(&plan, &calendars, today).unwrap();
+            let analysis = pchart_core::analyse(&plan, &calendars, &schedule, today);
+            assert!(analysis.checks.is_empty(), "{id}: {:?}", analysis.checks);
+        }
+    }
+
+    #[test]
+    fn the_plans_opened_last_come_first_and_only_eight_are_kept() {
+        let dir = folder("recent");
+        let state = dir.join("state");
+        assert!(recent_in(&state).is_empty());
+        let paths: Vec<PathBuf> = (0..10).map(|number| dir.join(format!("plan-{number}.pchart"))).collect();
+        for path in &paths {
+            fs::write(path, "").unwrap();
+            remember_in(&state, path);
+        }
+        remember_in(&state, &paths[5]);
+        fs::remove_file(&paths[8]).unwrap();
+        let canonical = |number: usize| fs::canonicalize(&paths[number]).unwrap();
+        assert_eq!(recent_in(&state), [5, 9, 7, 6, 4, 3, 2].map(canonical));
+        remember_in(&state, &dir.join("gone.pchart"));
+        assert_eq!(recent_in(&state).len(), 7);
         fs::remove_dir_all(dir).unwrap();
     }
 

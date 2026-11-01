@@ -15,11 +15,14 @@ Pick a template, set the target date, and pChart schedules the rest backwards an
 ```sh
 cargo build --release
 ./target/release/pchart samples/customer-portal.pchart --today 2026-10-29
+./target/release/pchart new portal.pchart --template new-application --target 2027-03-01
 ./target/release/pchart situation samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart schedule samples/customer-portal.pchart --today 2026-10-29
 ./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --level standard --png roadmap.png --pdf roadmap.pdf
 ./target/release/pchart export samples/customer-portal.pchart --today 2026-10-29 --view gantt --pdf gantt.pdf --md ROADMAP.md
 ```
+
+`pchart` alone starts a new plan: ↑↓ picks a template, the date typed is the target (or with ←→ the start), and Enter writes the plan to the current folder and opens it.
 
 1–4 switch between the situation, the roadmap, the checks and the export; ↑↓ chooses a statement, an item or a check, Enter shows it in the roadmap, d changes the detail level, Esc goes back to the situation, q quits. On the export screen ←→ changes the view or the audience, Space switches a format on or off and Enter writes the files to `export/` next to the plan.
 

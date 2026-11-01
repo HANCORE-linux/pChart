@@ -145,3 +145,42 @@ fn an_audience_sees_only_what_is_meant_for_it() {
     let output = pchart(&["export", path.to_str().unwrap(), "--audience", "boss", "--svg", svg.to_str().unwrap()], None);
     assert_eq!(output.status.code(), Some(3));
 }
+
+#[test]
+fn a_new_plan_comes_from_a_template_and_never_replaces_a_file() {
+    let dir = copy("new").parent().unwrap().to_path_buf();
+    let path = dir.join("portal-v2.pchart");
+    let written = pchart(&["new", path.to_str().unwrap(), "--template", "new-application", "--name", "Customer portal v2", "--target", "2027-03-01"], None);
+    assert!(written.status.success(), "{}", String::from_utf8_lossy(&written.stderr));
+    assert!(stdout(&written).starts_with("Saved.\nLaunch on Mon 01 Mar is on track."), "{}", stdout(&written));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("name = \"Customer portal v2\"") && text.contains("on = 2027-03-01"), "{text}");
+
+    let again = pchart(&["new", path.to_str().unwrap(), "--template", "empty"], None);
+    assert_eq!(again.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&again.stderr).contains("portal-v2.pchart: is there already"));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+    let unknown = pchart(&["new", dir.join("x.pchart").to_str().unwrap(), "--template", "trade-fair"], None);
+    assert_eq!(unknown.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&unknown.stderr).starts_with("there is no template \"trade-fair\"; there are new-application, website-relaunch, product-launch, empty"));
+
+    let web = dir.join("web.pchart");
+    let dry = pchart(&["new", web.to_str().unwrap(), "--template", "website-relaunch", "--start", "2026-11-02", "--dry-run", "--json"], None);
+    let value: serde_json::Value = serde_json::from_str(&stdout(&dry)).unwrap();
+    assert_eq!(value["written"], false);
+    assert!(!web.exists());
+    let forwards = pchart(&["new", web.to_str().unwrap(), "--template", "website-relaunch", "--start", "2026-11-02"], None);
+    assert!(forwards.status.success());
+    assert!(std::fs::read_to_string(&web).unwrap().contains("start = 2026-11-02"));
+}
+
+#[test]
+fn without_a_plan_and_a_terminal_it_explains_itself() {
+    let output = Command::new(env!("CARGO_BIN_EXE_pchart")).stdout(Stdio::piped()).stderr(Stdio::piped()).output().unwrap();
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("pChart: project charts in the terminal that check themselves."));
+    let options = pchart(&[], None);
+    assert_eq!(options.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&options.stderr).starts_with("which plan? Name the plan file."));
+}
