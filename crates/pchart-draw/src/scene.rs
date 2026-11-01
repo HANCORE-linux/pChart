@@ -107,6 +107,14 @@ impl Scene {
     }
 
     /// The scene as an svg element at `x`, `y`, scaled to `width` × `height`, to put into another picture.
+    /// The page as wide as `width` pixels, from `top` on the page down as far as `height` pixels reach.
+    pub fn window(&self, top: f32, width: f32, height: f32) -> String {
+        let mut out = String::with_capacity(64 * self.marks.len() + 512);
+        let _ = write!(out, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 {top} {} {}" font-family="{}">"#, self.width, self.width * height / width, self.font);
+        self.body(&mut out);
+        out
+    }
+
     pub fn nested(&self, x: f32, y: f32, width: f32, height: f32) -> String {
         let mut out = String::with_capacity(64 * self.marks.len() + 512);
         let _ = write!(out, r#"<svg x="{x}" y="{y}" width="{width}" height="{height}" viewBox="0 0 {} {}" font-family="{}">"#, self.width, self.height, self.font);

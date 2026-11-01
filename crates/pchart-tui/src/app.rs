@@ -106,6 +106,8 @@ pub enum Form {
     /// What `item` waits on: one box for each item, and the one `↑↓` is on.
     WaitsOn { item: usize, on: Vec<bool>, at: usize },
     Remove { item: usize },
+    /// How long `item` takes, as typed.
+    Length { item: usize, typed: String },
 }
 
 /// The plan as it was before a what-if, which Esc goes back to.
@@ -161,7 +163,7 @@ impl App {
         let analysis = analyse(&plan, &calendars, &schedule, today);
         let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false };
         if !app.dated() {
-            app.screen = Screen::Export;
+            app.screen = Screen::Roadmap;
             app.export.view = View::Network;
             app.export.formats[3] = false;
         }
@@ -353,7 +355,33 @@ impl App {
     /// `a` on the roadmap: adds an item after the selected one, in its lane.
     pub fn start_add(&mut self) {
         let lane = self.plan.lane(&self.plan.items[self.selected].lane).unwrap_or(0);
-        self.form = Some(Form::Add(Adding { from: self.selected, name: String::new(), milestone: false, length: "5".into(), lane, place: 0, at: 0 }));
+        let length = if self.dated() { "5" } else { "" };
+        self.form = Some(Form::Add(Adding { from: self.selected, name: String::new(), milestone: false, length: length.into(), lane, place: 0, at: 0 }));
+    }
+
+    /// Enter in the network diagram: how long the selected item takes.
+    pub fn start_length(&mut self) {
+        let item = &self.plan.items[self.selected];
+        if item.milestone {
+            self.message = Some(format!("{} is a milestone; it has no length", item.name));
+            return;
+        }
+        self.form = Some(Form::Length { item: self.selected, typed: String::new() });
+    }
+
+    /// The arrow keys in the network diagram: the nearest item that way.
+    pub fn move_in_network(&mut self, dx: f32, dy: f32) {
+        let (_, boxes, _) = pchart_draw::structure::layout(&self.plan, &self.schedule);
+        let middle = |index: usize| ((boxes[index][0] + boxes[index][2]) / 2.0, (boxes[index][1] + boxes[index][3]) / 2.0);
+        let (x, y) = middle(self.selected);
+        let near = (0..boxes.len()).filter(|&index| index != self.selected).filter_map(|index| {
+            let (ox, oy) = middle(index);
+            let (ahead, aside) = ((ox - x) * dx + (oy - y) * dy, ((ox - x) * dy).abs() + ((oy - y) * dx).abs());
+            (ahead > 1.0).then_some((ahead + 3.0 * aside, index))
+        });
+        if let Some((_, index)) = near.min_by(|a, b| a.0.total_cmp(&b.0)) {
+            self.selected = index;
+        }
     }
 
     /// `r` on the roadmap: renames the selected item.
@@ -438,7 +466,7 @@ impl App {
                 if name.is_empty() {
                     return Err("Type a name".into());
                 }
-                let duration = if adding.milestone { 0 } else { pchart_core::input::length(&adding.length).ok_or("Type a length, such as 5 or 2w")? };
+                let duration = if adding.milestone || !self.dated() && adding.length.trim().is_empty() { 0 } else { pchart_core::input::length(&adding.length).ok_or("Type a length, such as 5 or 2w")? };
                 let from = &self.plan.items[adding.from];
                 let id = self.plan.new_id(name);
                 let place = self.places(adding.from).get(adding.place).map_or(Place::After, |(place, _)| *place);
@@ -483,6 +511,11 @@ impl App {
                 Ok((edits, format!("what {} waits on", it.name)))
             }
             Form::Remove { item } => Ok((self.removal(*item)?.0, format!("removed {}", self.plan.items[*item].name))),
+            Form::Length { item, typed } => {
+                let it = &self.plan.items[*item];
+                let days = pchart_core::input::length(typed).filter(|&days| days > 0).ok_or("Type a length, such as 5 or 2w")?;
+                Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
+            }
         }
     }
 
@@ -525,7 +558,7 @@ impl App {
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => adding.name.push(c),
             Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
-            Some(Form::Rename { typed, .. }) => typed.push(c),
+            Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => typed.push(c),
             Some(Form::WaitsOn { on, at, .. }) if c == ' ' => {
                 if let Some(&other) = order.get(*at) {
                     on[other] ^= true;
@@ -540,7 +573,7 @@ impl App {
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => drop(adding.name.pop()),
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
-            Some(Form::Rename { typed, .. }) => drop(typed.pop()),
+            Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => drop(typed.pop()),
             _ => {}
         }
     }
@@ -567,8 +600,12 @@ impl App {
                     }
                     _ => None,
                 };
+                let undated = !self.dated();
                 match self.apply_all(&edits, label) {
                     Ok(()) => {
+                        if undated && self.dated() {
+                            self.message = Some("Every piece of work has a length now".into());
+                        }
                         if added {
                             self.selected = self.plan.items.len() - 1;
                         }

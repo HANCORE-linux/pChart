@@ -85,6 +85,7 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                         let echo = match pchart_core::input::length(&adding.length) {
                             Some(1) => ("→  1 working day".to_string(), p.bright, true),
                             Some(days) => (format!("→  {days} working days"), p.bright, true),
+                            None if !app.dated() && adding.length.trim().is_empty() => ("not known yet: it stays empty".to_string(), p.muted, false),
                             None => ("such as 5, 2w or 3 weeks".to_string(), p.muted, false),
                         };
                         bits::runs(s, value_x + box_w + 20.0 * u, baseline, 16.6 * u, &[(&echo.0, echo.1, echo.2)]);
@@ -102,6 +103,27 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 }
                 top += step;
             }
+        }
+        Form::Length { item, typed } => {
+            let name = &app.plan.items[*item].name;
+            head(app, s, x, y, width, height, u, &format!("LENGTH · {}", name.to_uppercase()), &format!("How long does {name} take?"));
+            let box_w = 110.0 * u;
+            field(s, left, top, box_w, typed, true, u, p.ink, p.bright);
+            let echo = match pchart_core::input::length(typed) {
+                Some(1) => ("→  1 working day".to_string(), p.bright, true),
+                Some(days) => (format!("→  {days} working days"), p.bright, true),
+                None if app.plan.items[*item].duration > 0 => (format!("now {} working days", app.plan.items[*item].duration), p.muted, false),
+                None => ("such as 5, 2w or 3 weeks".to_string(), p.muted, false),
+            };
+            bits::runs(s, left + box_w + 20.0 * u, top + 19.0 * u, 16.6 * u, &[(&echo.0, echo.1, echo.2)]);
+            let others = app.plan.without_length().into_iter().filter(|other| other != item).count();
+            let words = match others {
+                0 => "With it every piece of work has a length, and the dates come.".to_string(),
+                1 => "1 other piece of work has no length yet.".to_string(),
+                count => format!("{count} other pieces of work have no length yet."),
+            };
+            bits::runs(s, left, top + 64.0 * u, 15.0 * u, &[(&fit(&words, 15.0 * u, room), p.dim, false)]);
+            return;
         }
         Form::Rename { item, typed } => {
             let name = &app.plan.items[*item].name;
@@ -167,6 +189,9 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 top += step;
             }
         }
+    }
+    if !app.dated() {
+        return;
     }
     top += 18.0 * u;
     s.add(Shape::Line { x1: x + 16.0 * u, y1: top - 10.0 * u, x2: x + width - 16.0 * u, y2: top - 10.0 * u, stroke: Stroke { color: p.rule, width: u, dash: None } });

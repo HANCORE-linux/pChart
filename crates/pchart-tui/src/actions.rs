@@ -38,7 +38,7 @@ impl Action {
         let mut all = if app.dated() {
             vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
         } else {
-            vec![Action::Situation, Action::Roadmap, Action::Checks]
+            vec![Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::Undo, Action::Situation, Action::Roadmap, Action::Checks]
         };
         all.push(Action::Export(app.export.view));
         all.extend(View::of(&app.plan).into_iter().filter(|&view| view != app.export.view).map(Action::Export));

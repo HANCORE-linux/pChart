@@ -4,6 +4,7 @@ use jiff::civil::{Date, Weekday};
 use pchart_core::analysis::{Severity, State};
 use pchart_draw::bits::{self, Icon, MixedPart, Part};
 use pchart_draw::scene::Color as Ink;
+use pchart_draw::scene::{Fill, Shape, Stroke};
 use pchart_draw::{Level, Palette, shown};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -99,7 +100,8 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     title_bar(app, frame, &inks, area);
     let under = Inks::of(app.shown());
     match app.screen {
-        Screen::Situation | Screen::Roadmap | Screen::Checks if !app.dated() => undated(app, frame, &under, area),
+        Screen::Roadmap if !app.dated() => network(app, frame, &under, area, &mut placements),
+        Screen::Situation | Screen::Checks if !app.dated() => undated(app, frame, &under, area),
         Screen::Situation => crate::situation::draw(app, frame, &under, area, &mut placements),
         Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
@@ -161,7 +163,8 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let warnings = app.analysis.checks.iter().filter(|check| check.severity() != Severity::Hint).count();
     let problems = app.analysis.checks.iter().any(|check| check.severity() == Severity::Problem);
     let full = area.width >= 100;
-    for (number, name, screen) in [("1", "Situation", Screen::Situation), ("2", "Roadmap", Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export)] {
+    let second = if app.dated() { "Roadmap" } else { "Network" };
+    for (number, name, screen) in [("1", "Situation", Screen::Situation), ("2", second, Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export)] {
         let current = app.screen == screen;
         let mut spans = if current {
             let under = |style: Style| style.add_modifier(Modifier::UNDERLINED).underline_color(inks.accent).bg(inks.raised);
@@ -361,6 +364,83 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     put(frame, 1, 1, room, join(&groups));
 }
 
+/// Screen 2 of a plan whose work has no length yet (picture 60): the network diagram with the selection,
+/// moved with the arrow keys and scrolled to keep it in sight, the dialogs over it, and a line about the
+/// selection under it.
+fn network(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut Vec<Placement>) {
+    let p = app.palette;
+    let box_rect = Rect { x: 0, y: 1, width: area.width, height: area.height.saturating_sub(3) };
+    panel(frame, inks, box_rect, "NETWORK DIAGRAM", true);
+    let work = app.plan.items.iter().filter(|item| !item.milestone).count();
+    let missing = vec![Span::styled(format!("{} of {work} without a length", app.plan.without_length().len()), inks.dim)];
+    let w = width(&missing);
+    if box_rect.width > w + 24 {
+        put(frame, box_rect.x + box_rect.width - w - 2, box_rect.y + 1, w, missing);
+    }
+    let chart = Rect { x: box_rect.x + 2, y: box_rect.y + 2, width: box_rect.width.saturating_sub(4), height: box_rect.height.saturating_sub(3) };
+    let (cw, ch) = app.cell;
+    let (pw, ph, u) = (f32::from(chart.width) * f32::from(cw), f32::from(chart.height) * f32::from(ch), f32::from(ch) / 21.0);
+    if chart.width > 10 && chart.height > 4 {
+        let mut page = pchart_draw::network(&app.plan, &app.schedule, app.today);
+        let (_, boxes, _) = pchart_draw::structure::layout(&app.plan, &app.schedule);
+        let [x0, y0, x1, y1] = boxes[app.selected];
+        let (x0, y0, x1, y1, arm) = (x0 - 6.0, y0 - 6.0, x1 + 6.0, y1 + 6.0, 9.0);
+        for (cx, cy, sx, sy) in [(x0, y0, 1.0, 1.0), (x1, y0, -1.0, 1.0), (x0, y1, 1.0, -1.0), (x1, y1, -1.0, -1.0)] {
+            page.add(Shape::Path { points: vec![(cx + sx * arm, cy), (cx, cy), (cx, cy + sy * arm)], closed: false, fill: Fill::None, stroke: Some(Stroke { color: pchart_draw::page::INK, width: 2.0, dash: None }) });
+        }
+        let tall = page.width * ph / pw;
+        let top = (y1 + 120.0 - tall).clamp(0.0, (page.height - tall).max(0.0));
+        if app.form.is_none() {
+            placements.push(Placement { rect: chart, svg: page.window(top, pw, ph), paper: true });
+        } else {
+            page.add(Shape::Rect { x: 0.0, y: 0.0, w: page.width, h: page.height, radius: 0.0, fill: Fill::Color(p.page), stroke: None });
+            page.marks.last_mut().expect("the shade").opacity = 0.78;
+            let mut s = bits::canvas(pw, ph, &p);
+            s.background = None;
+            let w = chart.width.saturating_sub(4).min(94);
+            let h = chart.height.min(match app.form {
+                Some(Form::Rename { .. } | Form::Length { .. }) => 9,
+                Some(Form::Remove { item }) => match app.removal(item) {
+                    Ok((_, words)) => (255.0 + 28.0 * words.len().max(1) as f32) / 21.0,
+                    Err(_) => 8.0,
+                }
+                .ceil() as u16,
+                Some(Form::Add(_)) => 15,
+                _ => 32,
+            });
+            let x = (chart.width - w) / 2;
+            crate::item::dialog(app, &mut s, f32::from(x) * f32::from(cw), 0.0, f32::from(w) * f32::from(cw), f32::from(h) * f32::from(ch), u);
+            let mut svg = page.window(top, pw, ph);
+            let end = svg.rfind("</svg>").unwrap_or(svg.len());
+            svg.insert_str(end, &s.nested(0.0, top, page.width, tall));
+            placements.push(Placement { rect: chart, svg, paper: false });
+        }
+    }
+    let rect = Rect { x: 2, y: area.height - 2, width: area.width.saturating_sub(4), height: 1 };
+    let line = bits::line(&built(app, &p), f32::from(rect.width) * f32::from(cw), f32::from(ch), u, &p);
+    placements.push(Placement { rect, svg: line.svg(), paper: false });
+}
+
+/// The line about the selection in the network diagram: its name, its team, its length or that it has
+/// none yet, what it waits on and what waits on it.
+fn built(app: &App, p: &Palette) -> Vec<Part> {
+    let item = &app.plan.items[app.selected];
+    let lane = &app.plan.lanes[app.plan.lane(&item.lane).unwrap_or(0)];
+    let team = [Some(lane.name.as_str()), lane.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    let names = |list: Vec<&str>| list.join(", ");
+    let mut parts = vec![(None, item.name.clone(), p.bright, true), (Some((Icon::Person, p.dim)), team, p.dim, false)];
+    if !item.milestone {
+        parts.push(if item.duration > 0 { (Some((Icon::Clock, p.dim)), format!("{} wd", item.duration), p.ink, false) } else { (Some((Icon::Clock, p.dim)), "no length yet".into(), p.muted, false) });
+    }
+    let before: Vec<&str> = item.after.iter().filter_map(|id| app.plan.item(id)).map(|index| app.plan.items[index].name.as_str()).collect();
+    let then: Vec<&str> = app.plan.items.iter().filter(|other| other.after.contains(&item.id)).map(|other| other.name.as_str()).collect();
+    parts.push((None, if before.is_empty() { "nothing comes before it".into() } else { format!("after {}", names(before)) }, p.ink, false));
+    if !then.is_empty() {
+        parts.push((None, format!("then {}", names(then)), p.ink, false));
+    }
+    parts
+}
+
 /// The situation, the roadmap and the checks of a plan whose work has no length yet: what is missing.
 fn undated(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let rect = Rect { x: 0, y: 1, width: area.width, height: area.height - 2 };
@@ -398,7 +478,9 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let mut hints: Vec<(&str, &str)> = match app.screen {
         _ if app.finder.is_some() => vec![("↑↓", "choose"), ("Enter", "run"), ("Esc", "close")],
         _ if app.help => vec![("Esc", "close"), ("Ctrl+P", "find an action")],
-        Screen::Situation | Screen::Roadmap | Screen::Checks if !app.dated() => vec![("4", "how it is built"), ("?", "help")],
+        Screen::Roadmap if !app.dated() && app.form.is_none() => vec![("↑↓←→", "item"), ("Enter", "length"), ("a", "add"), ("w", "waits on"), ("r", "rename"), ("x", "remove"), ("?", "help")],
+        Screen::Roadmap if app.form.is_some() && matches!(app.form, Some(Form::Length { .. })) => vec![("Enter", "keep the length"), ("Esc", "keep as it is")],
+        Screen::Situation | Screen::Checks if !app.dated() => vec![("2", "how it is built"), ("?", "help")],
         Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.form.is_some() => match &app.form {
@@ -871,6 +953,18 @@ mod tests {
             look(&mut app, &format!("no dates {shown:?}"));
             app.finder = Some(crate::app::Finder { typed: String::new(), chosen: 0 });
             look(&mut app, &format!("no dates {shown:?} finder"));
+            app.finder = None;
+            app.help = true;
+            look(&mut app, &format!("no dates {shown:?} help"));
+        }
+        let mut net = undated();
+        for (dialog, start) in [("length", App::start_length as fn(&mut App)), ("add", App::start_add), ("rename", App::start_rename), ("waits on", App::start_waits), ("remove", App::start_remove)] {
+            for item in ["frontend", "launch", "requirements"] {
+                net.selected = net.plan.item(item).unwrap();
+                start(&mut net);
+                look(&mut net, &format!("network {dialog} {item}"));
+                net.form = None;
+            }
         }
         let mut app = app();
         app.screen = Screen::Roadmap;
@@ -902,15 +996,18 @@ mod tests {
     #[test]
     fn a_plan_without_lengths_opens_with_how_it_is_built_and_says_what_is_missing() {
         let mut app = undated();
-        assert_eq!((app.screen, app.export.view, app.formats()), (Screen::Export, pchart_draw::View::Network, 3));
+        assert_eq!((app.screen, app.export.view, app.formats()), (Screen::Roadmap, pchart_draw::View::Network, 3));
+        let rows = screen(&app, 170, 50).0;
+        assert!(has(&rows, "2 Network") && has(&rows, ":: NETWORK DIAGRAM") && has(&rows, "10 of 10 without a length") && has(&rows, "Enter length"));
+        app.screen = Screen::Export;
         let (rows, placements) = screen(&app, 170, 50);
         assert!(has(&rows, ":: EXPORT") && placements.iter().any(|placement| placement.svg.contains("Network diagram")));
         assert!(placements.iter().any(|placement| !placement.svg.contains("Gantt chart") && placement.svg.contains("Dependency matrix")));
         assert!(!placements.iter().any(|placement| placement.svg.contains("Markdown")));
-        for shown in [Screen::Situation, Screen::Roadmap, Screen::Checks] {
+        for shown in [Screen::Situation, Screen::Checks] {
             app.screen = shown;
             let rows = screen(&app, 170, 50).0;
-            assert!(has(&rows, ":: NO DATES YET") && has(&rows, "10 of 10 pieces of work have no length yet.") && has(&rows, "Requirements") && has(&rows, "4 how it is built"), "{shown:?}");
+            assert!(has(&rows, ":: NO DATES YET") && has(&rows, "10 of 10 pieces of work have no length yet.") && has(&rows, "Requirements") && has(&rows, "2 how it is built"), "{shown:?}");
         }
         assert!(has(&screen(&app, 80, 24).0, "Security review"));
         let mut plan = app.plan.clone();
@@ -924,7 +1021,8 @@ mod tests {
         let more = crowded.plan.without_length().len() - 12;
         assert!(has(&rows, &format!("and {more} more")), "{rows:#?}");
         let found = crate::actions::find(&app, "");
-        assert!(found.iter().all(|(action, _)| !matches!(action, crate::actions::Action::ChangeDate | crate::actions::Action::Why | crate::actions::Action::AddItem)));
+        assert!(found.iter().all(|(action, _)| !matches!(action, crate::actions::Action::ChangeDate | crate::actions::Action::Why)));
+        assert!(crate::actions::find(&app, "add").iter().any(|(action, _)| *action == crate::actions::Action::AddItem));
         assert!(crate::actions::find(&app, "gantt").iter().all(|(action, _)| *action != crate::actions::Action::Export(pchart_draw::View::Gantt)));
     }
 
@@ -947,6 +1045,34 @@ mod tests {
         app.try_length(1);
         let line = screen(&app, 170, 50).1.last().unwrap().svg.clone();
         assert!(line.contains("Requirements must start by") && !line.contains("Kickoff must"), "{line}");
+    }
+
+    #[test]
+    fn in_the_network_the_arrows_move_and_enter_gives_a_length_until_the_dates_come() {
+        let mut app = undated();
+        let (_, boxes, _) = pchart_draw::structure::layout(&app.plan, &app.schedule);
+        let start = app.plan.item("requirements").unwrap();
+        app.selected = start;
+        app.move_in_network(0.0, 1.0);
+        assert!(boxes[app.selected][1] > boxes[start][1]);
+        app.move_in_network(-1.0, 0.0);
+        app.move_in_network(-1.0, 0.0);
+        assert!(boxes[app.selected][0] <= boxes[start][0] + 1.0);
+        app.selected = app.plan.item("launch").unwrap();
+        app.start_length();
+        assert!(app.form.is_none() && app.message.as_deref() == Some("Launch is a milestone; it has no length"));
+        for index in app.plan.without_length() {
+            assert!(!app.dated());
+            app.selected = index;
+            app.start_length();
+            for c in "5".chars() {
+                app.form_type(c);
+            }
+            app.keep_form();
+            assert!(app.form.is_none(), "{:?}", app.message);
+        }
+        assert!(app.dated() && app.message.as_deref() == Some("Every piece of work has a length now"));
+        assert!(has(&screen(&app, 170, 50).0, "SWIMLANE ROADMAP") && has(&screen(&app, 170, 50).0, "2 Roadmap"));
     }
 
     #[test]

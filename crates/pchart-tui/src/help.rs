@@ -46,9 +46,16 @@ struct Help {
     legend: Vec<(Sign, &'static str)>,
 }
 
-fn help(screen: Screen) -> Help {
+fn help(screen: Screen, dated: bool) -> Help {
     let everywhere = [("u", "Undo the last change"), ("Ctrl+P", "Find any action by typing"), ("1–4", "Situation, Roadmap, Checks, Export"), ("q", "Quit; every change is saved already")];
     match screen {
+        Screen::Roadmap if !dated => Help {
+            title: "HELP · NETWORK",
+            lead: "How the plan is built: who waits on whom. Dates come once every piece of work has a length.",
+            keys: [("↑↓←→", "Choose an item"), ("Enter", "Give it a length"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it")].into_iter().chain(everywhere).collect(),
+            legend_title: "WHAT THE PICTURE SHOWS",
+            legend: vec![(Sign::Milestone, "a milestone")],
+        },
         Screen::Roadmap => Help {
             title: "HELP · ROADMAP",
             lead: "When each piece of work happens, and which ones decide the date.",
@@ -169,7 +176,7 @@ fn sign(s: &mut Scene, sign: Sign, x: f32, y: f32, u: f32, p: &Palette) {
 
 /// Draws the help of this screen over it.
 pub fn draw(app: &App, frame: &mut Frame, area: Rect, placements: &mut Vec<Placement>) {
-    let h = help(app.screen);
+    let h = help(app.screen, app.dated());
     let p = app.palette;
     let (cw, ch) = (f32::from(app.cell.0), f32::from(app.cell.1));
     let u = ch / 21.0;

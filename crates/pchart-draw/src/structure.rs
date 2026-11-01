@@ -81,9 +81,9 @@ pub fn structure(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     page.finish()
 }
 
-/// The network diagram: every item as a box, below what it waits on, in the column of its lane, with
-/// an arrow for each item it waits on; the chain that decides the date in ink.
-pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
+/// Where the network diagram puts each item: its rank (how many steps of waiting come before it), its box
+/// on the page, and the height of the page.
+pub fn layout(plan: &Plan, schedule: &Schedule) -> (Vec<usize>, Vec<[f32; 4]>, f32) {
     let mut rank = vec![0usize; plan.items.len()];
     for &index in &schedule.order {
         rank[index] = plan.items[index].after.iter().filter_map(|id| plan.item(id)).map(|pred| rank[pred] + 1).max().unwrap_or(0);
@@ -91,16 +91,8 @@ pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     let lanes: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect();
     let ranks = rank.iter().max().map_or(0, |&most| most + 1);
     let (top, row, boxh) = (200.0, 78.0, 42.0);
-    let mut page = Page::plain(plan, today, "Network diagram", top + ranks as f32 * row + 120.0);
     let columns = plan.lanes.len().max(1);
     let cw = (X1 - X0) / columns as f32;
-    for (lane, it) in plan.lanes.iter().enumerate() {
-        let xc = X0 + cw * (lane as f32 + 0.5);
-        page.text(xc, 156.0, &fit(&it.name, 14.0, true, cw - 8.0), 14.0, INK, true, Anchor::Middle, None);
-        if let Some(city) = &it.city {
-            page.text(xc, 174.0, &fit(city, 12.0, false, cw - 8.0), 12.0, GRAY, false, Anchor::Middle, None);
-        }
-    }
     let mut boxes = vec![[0.0f32; 4]; plan.items.len()];
     for lane in 0..columns {
         for r in 0..ranks {
@@ -111,6 +103,24 @@ pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
                 let y0 = top + r as f32 * row;
                 boxes[index] = [x0, y0, x0 + share - 8.0, y0 + boxh];
             }
+        }
+    }
+    (rank, boxes, top + ranks as f32 * row + 120.0)
+}
+
+/// The network diagram: every item as a box, below what it waits on, in the column of its lane, with
+/// an arrow for each item it waits on; the chain that decides the date in ink.
+pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
+    let (rank, boxes, height) = layout(plan, schedule);
+    let lanes: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).unwrap_or(0)).collect();
+    let mut page = Page::plain(plan, today, "Network diagram", height);
+    let columns = plan.lanes.len().max(1);
+    let cw = (X1 - X0) / columns as f32;
+    for (lane, it) in plan.lanes.iter().enumerate() {
+        let xc = X0 + cw * (lane as f32 + 0.5);
+        page.text(xc, 156.0, &fit(&it.name, 14.0, true, cw - 8.0), 14.0, INK, true, Anchor::Middle, None);
+        if let Some(city) = &it.city {
+            page.text(xc, 174.0, &fit(city, 12.0, false, cw - 8.0), 12.0, GRAY, false, Anchor::Middle, None);
         }
     }
     let chain = |index: usize| schedule.chain.contains(&index);
