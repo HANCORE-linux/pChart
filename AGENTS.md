@@ -16,6 +16,7 @@ Rules for AI agents working on pChart. The maintainer decides; when in doubt, as
 - Never commit personal data: no real email addresses, and no screenshots or recordings of a real system. Pictures in `docs/` come from the sample plans.
 - No AI attribution in commits: no Co-Authored-By lines for agents, no "Generated with" footers.
 - Commit messages have a short imperative subject in English, like the existing history.
+- The README shows pChart in use with at most three pictures, one of them the GIF (`docs/pchart.gif`, made with `tools/video`). They come from the sample plan and are taken anew when the screens they show change.
 - The plan file is the only source of truth. Everything else (SVG, PNG, PDF, Markdown, the index) is output and can be rebuilt from it.
 - `pchart-core` never reads the clock or the disk: today, holidays and files are passed in. Dependencies between the crates point downwards only: `pchart` → `pchart-tui` → `pchart-draw` → `pchart-store` → `pchart-core`.
 - pChart never moves a fixed date on its own and never changes a plan behind the user's back; it warns.

@@ -10,6 +10,11 @@ Pick a template, set the target date, and pChart schedules the rest backwards an
 
 ![pChart in use: the situation, a date changed, a what-if, a note, the Harbor theme, the checks and the export](docs/pchart.gif)
 
+<p>
+  <img src="docs/roadmap.png" width="49%" alt="The swimlane roadmap of the sample plan: phases, lanes per team, milestones and the chain that decides the date">
+  <img src="docs/export.png" width="49%" alt="The export screen: the milestone chart as it will be written to PDF and SVG">
+</p>
+
 ## Try the spike
 
 ```sh

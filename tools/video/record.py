@@ -60,7 +60,7 @@ while [ ! -e {state}/go ]; do sleep 0.05; done
 cd {plan}
 exec kitty -o background_opacity=1.0 -o font_size={font} -o window_padding_width=0 -o remember_window_size=no -o cursor_blink_interval=0 \\
   -o background={labra["background"]} -o foreground={labra["foreground"]} -o allow_remote_control=socket-only --listen-on unix:{state}/kitty.sock \\
-  python3 -I {HERE}/drive.py {state}/start {state}/done env HOME={home} {PCHART} customer-portal.pchart --today 2026-10-29
+  python3 -I {HERE}/drive.py {state}/start {state}/done env HOME={home} XDG_STATE_HOME={home}/.local/state XDG_CONFIG_HOME={home}/.config {PCHART} customer-portal.pchart --today 2026-10-29
 """)
 inner.chmod(0o755)
 env = dict(os.environ, WLR_BACKENDS="headless", WLR_LIBINPUT_NO_DEVICES="1", WLR_HEADLESS_OUTPUTS="1")
