@@ -143,6 +143,26 @@ fn a_plan_without_lengths_shows_how_it_is_built_until_each_has_one() {
 }
 
 #[test]
+fn read_writes_how_a_folder_is_built_once_and_never_reads_the_system() {
+    let dir = copy("read").parent().unwrap().to_path_buf();
+    let source = dir.join("config");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("hyprland.conf"), "source = ./bindings.conf\n").unwrap();
+    std::fs::write(source.join("bindings.conf"), "").unwrap();
+    let plan = dir.join("config.pchart");
+    let output = pchart(&["read", source.to_str().unwrap(), "--out", plan.to_str().unwrap()], None);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout(&output).starts_with("Read 2 files (2 Hyprland) in 1 lane: 1 of them use others, 1 use in all."), "{}", stdout(&output));
+    assert!(std::fs::read_to_string(&plan).unwrap().contains("after = [\"bindings-conf\"]"));
+    assert_eq!(pchart(&["read", source.to_str().unwrap(), "--out", plan.to_str().unwrap()], None).status.code(), Some(4));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["read", source.to_str().unwrap(), "--dry-run", "--json"], None))).unwrap();
+    assert_eq!((json["items"].as_u64(), json["waits"].as_u64(), json["written"].as_bool()), (Some(2), Some(1), Some(false)));
+    let output = pchart(&["read", "/"], None);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not the system or a whole home"));
+}
+
+#[test]
 fn the_milestone_chart_is_a_page_without_detail_levels() {
     let path = copy("milestones");
     let svg = path.with_file_name("milestones.svg");

@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 use pchart_core::{Error, Plan};
 
+pub mod read;
+pub use read::{Progress, Read, read};
+
 fn failed(path: &Path, err: impl std::fmt::Display) -> Error {
     Error::File(format!("{}: {err}", path.display()))
 }
