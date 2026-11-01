@@ -100,11 +100,11 @@ for index, (start, end, _) in enumerate(bands):
 graph += [
     f"[m{len(bands)}]format=rgb24,fade=t=in:st=0:d=0.4,fade=t=out:st={main - FADE:.3f}:d={FADE},setsar=1[main]",
     f"[{end_input}:v]fps={FPS},format=rgb24,fade=t=in:st=0:d={FADE},setsar=1[end]",
-    "[main][end]concat=n=2:v=1:a=0,format=yuv420p[out]",
+    "[main][end]concat=n=2:v=1:a=0,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[out]",
 ]
 mp4, gif = recording / "pchart.mp4", recording / "pchart.gif"
 subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(graph), "-map", "[out]", "-map", f"{audio_input}:a",
-                "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(mp4)], check=True)
+                "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-x264-params", "colorprim=bt709:transfer=bt709:colormatrix=bt709", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", str(mp4)], check=True)
 palette = work / "palette.png"
 subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4), "-vf", "fps=12,scale=1280:-1:flags=lanczos,palettegen=stats_mode=diff:max_colors=128", str(palette)], check=True)
 subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp4), "-i", str(palette), "-lavfi", "fps=12,scale=1280:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle", "-an", str(gif)], check=True)
