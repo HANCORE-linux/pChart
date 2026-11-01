@@ -95,10 +95,39 @@ pub fn sans_width(text: &str, size: f32, bold: bool) -> f32 {
 /// Advance of one character in JetBrains Mono, in font sizes.
 pub const ADVANCE: f32 = 0.6;
 
+/// The left and right end of the room for text in a phase arrow from `x0` to `x1`, `h` high with a tip
+/// `tip` deep, when the text reaches `far` above or below the arrow's middle: clear of the notch on the
+/// left and of the slant of the tip on the right by `air`.
+pub fn arrow_room(x0: f32, x1: f32, h: f32, tip: f32, far: f32, air: f32) -> (f32, f32) {
+    (x0 + tip + air, x1 - tip * (2.0 * far / h).min(1.0) - air)
+}
+
+/// A phase name in its arrow on a page, as `phase_label` sets it: its lines, their size and the middle
+/// they are centred on, so that no line reaches the notch or the tip. Its lines are 1.2 sizes apart
+/// with their middle on the arrow's middle; None when not even the cut name fits.
+#[allow(clippy::too_many_arguments)]
+pub fn arrow_label(name: &str, short: Option<&str>, x0: f32, x1: f32, h: f32, tip: f32, most: f32, least: f32) -> Option<(Vec<String>, f32, f32)> {
+    let width = |text: &str, size: f32| sans_width(text, size, false);
+    let room = |lines: usize, size: f32| arrow_room(x0, x1, h, tip, (0.36 + 0.24 + 0.6 * (lines - 1) as f32) * size, 3.0);
+    let (left, right) = room(1, most);
+    let mut wide = right - left;
+    for _ in 0..4 {
+        let (lines, size) = phase_label(name, short, wide, h, most, least, width);
+        let (left, right) = room(lines.len(), size);
+        let widest = lines.iter().map(|line| width(line, size)).fold(0.0, f32::max);
+        if widest <= right - left {
+            return Some((lines, size, (left + right) / 2.0));
+        }
+        wide -= widest - (right - left);
+    }
+    None
+}
+
 /// The lines and text size of a phase name in its arrow, `room` wide and `height` high: the whole name
 /// on one line, as large as `most` and as small as `least`; else on two lines, broken at a space; else
 /// the plan's short name the same way; else its first three letters in capitals ("REQ"), or the first
-/// letters of its words ("B&A"); else the name cut with "…" at `least`. `width` measures text.
+/// letters of its words ("B&A"); else the name cut with "…" at `least`; else nothing, since "…" alone
+/// says nothing. `width` measures text.
 pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most: f32, least: f32, width: impl Fn(&str, f32) -> f32) -> (Vec<String>, f32) {
     let one = |text: &str| most.min(most * room / width(text, most).max(0.01));
     let two = |text: &str| {
@@ -126,8 +155,10 @@ pub fn phase_label(name: &str, short: Option<&str>, room: f32, height: f32, most
         }
     }
     let chars: Vec<char> = name.chars().collect();
-    let keep = (0..chars.len()).rev().find(|&keep| width(&(chars[..keep].iter().collect::<String>() + "…"), least) <= room).unwrap_or(0);
-    (vec![chars[..keep].iter().collect::<String>().trim_end().to_string() + "…"], least)
+    match (1..chars.len()).rev().find(|&keep| width(&(chars[..keep].iter().collect::<String>() + "…"), least) <= room) {
+        Some(keep) => (vec![chars[..keep].iter().collect::<String>().trim_end().to_string() + "…"], least),
+        None => (Vec::new(), least),
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +191,7 @@ mod tests {
         assert_eq!(phase_label("Requirements", Some("Reqs"), 30.0, 52.0, 17.0, 8.0, width).0, ["Reqs"]);
         assert_eq!(phase_label("Requirements", None, 30.0, 52.0, 17.0, 8.0, width).0, ["REQ"]);
         assert_eq!(phase_label("Requirements", None, 12.0, 52.0, 17.0, 8.0, width).0, ["R…"]);
+        assert!(phase_label("Requirements", None, 4.0, 52.0, 17.0, 8.0, width).0.is_empty());
         assert_eq!(phase_label("Beta & acceptance", None, 30.0, 52.0, 17.0, 8.0, width).0, ["B&A"]);
         assert_eq!(phase_label("Discovery and research", None, 30.0, 18.0, 12.0, 10.0, width).0, ["D&R"]);
     }

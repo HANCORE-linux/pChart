@@ -6,7 +6,7 @@ use pchart_core::{Plan, Schedule};
 
 use crate::page::{Axis, FIXED, GRAY, INK, Key, LATE, LIGHT, MID, Page, SHADES, SOFT, WARN_LINE, X0, X1, fit, rows, wrap};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
-use crate::style::{phase_label, sans_width};
+use crate::style::{arrow_label, sans_width};
 use crate::views::Audience;
 
 const LANE: f32 = 51.0;
@@ -56,11 +56,11 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
         let (x0, x1) = (axis.x(from), axis.xe(to));
         let tip = page.chevron(x0, x1, PHASES_Y, 18.0, SHADES[index % SHADES.len()], 7.0);
-        let (lines, size) = phase_label(&name, phase.short.as_deref(), x1 - x0 - tip - 4.0, 18.0, 12.0, 10.0, |text, size| sans_width(text, size, false));
+        let Some((lines, size, middle)) = arrow_label(&name, phase.short.as_deref(), x0, x1, 18.0, tip, 12.0, 10.0) else { continue };
         let pitch = size * 1.2;
         let first = PHASES_Y + 9.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
         for (line, text) in lines.iter().enumerate() {
-            page.text((x0 + x1) / 2.0 + tip / 2.0, first + pitch * line as f32, text, size, INK, false, Anchor::Middle, None);
+            page.text(middle, first + pitch * line as f32, text, size, INK, false, Anchor::Middle, None);
         }
     }
 

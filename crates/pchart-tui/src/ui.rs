@@ -775,6 +775,56 @@ mod tests {
     }
 
     #[test]
+    fn no_text_runs_over_the_edge_of_its_shape_on_any_screen() {
+        let output = pchart_draw::Output::default();
+        let mut found = Vec::new();
+        let mut look = |app: &mut App, what: &str| {
+            for cell in [(8, 17), (10, 21), (7, 16)] {
+                app.cell = cell;
+                for (width, height) in [(170, 50), (182, 43), (150, 44), (120, 40), (91, 43), (80, 24), (200, 60)] {
+                    for placement in screen(app, width, height).1 {
+                        found.extend(output.crossings(&placement.svg).unwrap().into_iter().map(|crossing| format!("{what} {width}x{height} {cell:?}: {crossing}")));
+                    }
+                }
+            }
+        };
+        for shown in [Screen::Situation, Screen::Roadmap, Screen::Checks, Screen::Export] {
+            let mut app = app();
+            app.screen = shown;
+            look(&mut app, &format!("{shown:?}"));
+            app.help = true;
+            look(&mut app, &format!("{shown:?} help"));
+            app.help = false;
+            for typed in ["", "move launch"] {
+                app.finder = Some(crate::app::Finder { typed: typed.into(), chosen: 0 });
+                look(&mut app, &format!("{shown:?} finder \"{typed}\""));
+            }
+        }
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        for level in [Level::Overview, Level::Full, Level::Standard] {
+            app.level = level;
+            look(&mut app, &format!("roadmap {level:?}"));
+        }
+        for item in ["frontend", "launch", "requirements", "sdk-integration"] {
+            app.selected = app.plan.item(item).unwrap();
+            look(&mut app, item);
+            for (dialog, start) in [("add", App::start_add as fn(&mut App)), ("rename", App::start_rename), ("waits on", App::start_waits), ("remove", App::start_remove)] {
+                start(&mut app);
+                look(&mut app, &format!("{dialog} {item}"));
+                app.form = None;
+            }
+            app.ask();
+            look(&mut app, &format!("question {item}"));
+            app.question = None;
+            app.toggle_details(200);
+            look(&mut app, &format!("details {item}"));
+            app.side = false;
+        }
+        assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
+    }
+
+    #[test]
     fn the_checks_screen_lists_by_weight_and_says_what_a_check_means() {
         let mut app = app();
         app.screen = Screen::Checks;

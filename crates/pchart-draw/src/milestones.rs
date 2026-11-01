@@ -3,7 +3,7 @@ use pchart_core::{Plan, Schedule};
 
 use crate::page::{Axis, FIXED, GRAY, HEIGHT, INK, LATE, MID, Page, SHADES, X0, X1, wrap};
 use crate::scene::{Anchor, Color, Fill, Scene, Shape};
-use crate::style::{phase_label, sans_width};
+use crate::style::{arrow_label, sans_width};
 use crate::views::Audience;
 
 /// The milestone chart for export: phases on a time line and every milestone with its date, on a
@@ -61,10 +61,10 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date, audience: Audie
 #[allow(clippy::too_many_arguments)]
 fn chevron(page: &mut Page, x0: f32, x1: f32, y: f32, h: f32, name: &str, short: Option<&str>, fill: Color) {
     let tip = page.chevron(x0, x1, y, h, fill, 14.0);
-    let (lines, size) = phase_label(name, short, x1 - x0 - tip - 4.0, h, 17.0, 10.0, |text, size| sans_width(text, size, false));
+    let Some((lines, size, middle)) = arrow_label(name, short, x0, x1, h, tip, 17.0, 9.0) else { return };
     let pitch = size * 1.2;
     let first = y + h / 2.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
     for (index, line) in lines.iter().enumerate() {
-        page.text((x0 + x1) / 2.0 + tip / 2.0, first + pitch * index as f32, line, size, INK, false, Anchor::Middle, None);
+        page.text(middle, first + pitch * index as f32, line, size, INK, false, Anchor::Middle, None);
     }
 }

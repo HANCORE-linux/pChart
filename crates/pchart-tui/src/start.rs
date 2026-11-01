@@ -410,6 +410,33 @@ mod tests {
     }
 
     #[test]
+    fn no_text_runs_over_the_edge_of_its_shape_on_the_start() {
+        let dir = folder("edges");
+        let path = dir.join("portal.pchart");
+        std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/customer-portal.pchart"), &path).unwrap();
+        let mut start = start(&dir, vec![path]);
+        let output = pchart_draw::Output::default();
+        let mut found = Vec::new();
+        for (cell, chosen) in [(7, 16), (8, 17), (10, 21)].into_iter().flat_map(|cell| (0..5).map(move |chosen| (cell, chosen))) {
+            start.cell = cell;
+            start.chosen = chosen;
+            for (typed, forwards) in [("", false), ("1 mar", false), ("1 jan", false), ("2 nov", true)] {
+                (start.typed, start.forwards) = (typed.into(), forwards);
+                for (width, height) in [(160, 47), (200, 60), (120, 40), (91, 43), (80, 24)] {
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    let mut placements = Vec::new();
+                    terminal.draw(|frame| placements = draw(&start, frame)).unwrap();
+                    for placement in placements {
+                        found.extend(output.crossings(&placement.svg).unwrap().into_iter().map(|crossing| format!("{chosen} \"{typed}\" {width}x{height} {cell:?}: {crossing}")));
+                    }
+                }
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+        assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
+    }
+
+    #[test]
     fn a_small_window_leaves_out_the_preview() {
         let dir = folder("small");
         let (rows, _) = screen(&start(&dir, Vec::new()), 80, 24);

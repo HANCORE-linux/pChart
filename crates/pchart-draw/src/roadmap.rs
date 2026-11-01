@@ -6,7 +6,7 @@ use pchart_core::calendar::{Calendar, next, previous};
 use pchart_core::{Plan, Schedule, analyse};
 
 use crate::scene::{Anchor, Color, Fill, Mark, Scene, Shape, Stroke};
-use crate::style::{ADVANCE, FONT, Palette};
+use crate::style::{ADVANCE, FONT, Palette, arrow_room};
 
 /// How much a roadmap shows. Overview folds each lane into one bar; Full adds dependencies, holidays,
 /// free slack, the date of every milestone and the place of every lane.
@@ -153,15 +153,18 @@ impl Chart<'_> {
         if self.plan.items[index].on.is_some() { x + self.g.px / 2.0 } else { x + self.g.px }
     }
 
-    /// What the bar or diamond of an item covers, with the pin of a fixed date.
+    /// What the bar or diamond of an item covers, with the pin of a fixed date. A diamond is kept free with
+    /// 2 units of air, as four boxes in steps, which hold every point of it and little more.
     fn area(&self, index: usize) -> Vec<Area> {
         let u = self.u;
         let (x0, x1, y) = self.bar(index);
-        if !self.plan.items[index].milestone {
+        let item = &self.plan.items[index];
+        if !item.milestone {
             return vec![[x0, y - 7.0 * u, x1, y + 7.0 * u]];
         }
-        let mut out = vec![[x0 - 8.0 * u, y - 8.0 * u, x0 + 8.0 * u, y + 8.0 * u]];
-        if self.plan.items[index].on.is_some() {
+        let r = if item.on.is_some() { 10.0 * u } else { 9.0 * u } + if item.important { 2.0 * u } else { 0.0 };
+        let mut out: Vec<Area> = (0..4).map(|step| (r * (4 - step) as f32 / 4.0, r * (step + 1) as f32 / 4.0)).map(|(w, h)| [x0 - w, y - h, x0 + w, y + h]).collect();
+        if item.on.is_some() {
             out.push([x0 - 4.0 * u, y - 27.0 * u, x0 + 4.0 * u, y - 8.0 * u]);
         }
         out
@@ -240,7 +243,7 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
     } else {
         let mut taken: Vec<Area> = (0..plan.items.len()).filter(|&index| c.shown(index)).flat_map(|index| c.area(index)).collect();
         if c.level == Level::Full {
-            arrows(&mut s, &c);
+            arrows(&mut s, &c, &mut taken);
             free_slack(&mut s, &c, &mut taken);
         }
         if let Some(before) = before {
@@ -413,8 +416,8 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     let mut monday = g.start;
     let mut count = 0;
     while step > 0 && monday <= end {
-        if count % step == 0 {
-            let week = format!("{}{:02}", if count == 0 { "W" } else { "" }, monday.iso_week_date().week());
+        let week = format!("{}{:02}", if count == 0 { "W" } else { "" }, monday.iso_week_date().week());
+        if count % step == 0 && g.x(monday) + 2.0 * u + c.text_width(&week, 12.5) <= g.x1 {
             s.add(text(g.x(monday) + 2.0 * u, top + 33.0 * u, week, 12.5, p.muted));
         }
         count += 1;
@@ -449,7 +452,7 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
 }
 
 /// Who waits on whom, as arrows from the end of an item to the start of the next.
-fn arrows(s: &mut Scene, c: &Chart) {
+fn arrows(s: &mut Scene, c: &Chart, taken: &mut Vec<Area>) {
     let u = c.u;
     for (index, item) in c.plan.items.iter().enumerate() {
         for pred in item.after.iter().filter_map(|id| c.plan.item(id)).filter(|&pred| c.shown(pred) && c.shown(index)) {
@@ -473,6 +476,7 @@ fn arrows(s: &mut Scene, c: &Chart) {
                 s.marks.push(line(vec![(x1, ay), (xm, ay), (xm, by), (x2 - u, by)]));
             }
             let head = vec![(x2, by), (x2 - 5.0 * u, by - 3.0 * u), (x2 - 5.0 * u, by + 3.0 * u)];
+            taken.push([x2 - 5.0 * u, by - 3.0 * u, x2, by + 3.0 * u]);
             s.marks.push(Mark { shape: Shape::Path { points: head, closed: true, fill: Fill::Color(color), stroke: None }, opacity, item: None });
         }
     }
@@ -677,7 +681,9 @@ fn folded(s: &mut Scene, c: &Chart) {
     let (p, u) = (c.p, c.u);
     let size = 14.5;
     let selected_lane = c.selected.map(|index| c.lanes[index]);
-    let mut taken: Vec<Area> = Vec::new();
+    let mut milestones: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.plan.items[index].milestone && c.shown(index)).collect();
+    milestones.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
+    let mut taken: Vec<Area> = milestones.iter().flat_map(|&index| c.area(index)).collect();
     let mut ends = vec![None; c.visible.len()];
     for (lane, end) in ends.iter_mut().enumerate() {
         let tasks: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.lanes[index] == lane && !c.plan.items[index].milestone).collect();
@@ -699,12 +705,12 @@ fn folded(s: &mut Scene, c: &Chart) {
             corners(s, c, x0, x1, y, 14.0 * u);
         }
         let count = if tasks.len() == 1 { "1 item".to_string() } else { format!("{} items", tasks.len()) };
-        taken.push([x0, y - 27.0 * u, x0 + c.text_width(&count, 12.5), y - 14.0 * u]);
-        s.add(Shape::Text { x: x0, y: y - 17.0 * u, text: count, size: 12.5 * u, color: p.muted, bold: false, anchor: Anchor::Start });
+        let area = [x0, y - 27.0 * u, x0 + c.text_width(&count, 12.5), y - 14.0 * u];
+        if !taken.iter().any(|other| hits(&area, other)) {
+            taken.push(area);
+            s.add(Shape::Text { x: x0, y: y - 17.0 * u, text: count, size: 12.5 * u, color: p.muted, bold: false, anchor: Anchor::Start });
+        }
     }
-    let mut milestones: Vec<usize> = (0..c.plan.items.len()).filter(|&index| c.plan.items[index].milestone && c.shown(index)).collect();
-    milestones.sort_by(|&a, &b| c.bar(a).0.total_cmp(&c.bar(b).0));
-    taken.extend(milestones.iter().flat_map(|&index| c.area(index)));
     for index in milestones {
         milestone(s, c, index);
         let item = &c.plan.items[index];
@@ -769,7 +775,8 @@ fn chevron(s: &mut Scene, p: &Palette, u: f32, x0: f32, x1: f32, y: f32, h: f32,
     let tip = (8.0 * u).min((x1 - x0) / 2.0);
     let points = vec![(x0, y), (x1 - tip, y), (x1, y + h / 2.0), (x1 - tip, y + h), (x0, y + h), (x0 + tip, y + h / 2.0)];
     s.add(Shape::Path { points, closed: true, fill: Fill::Color(p.raised), stroke: Some(Stroke { color: p.muted, width: u, dash: None }) });
-    let room = x1 - x0 - tip - 8.0 * u;
+    let (left, right) = arrow_room(x0, x1, h, tip, 0.56 * 13.5 * u, 2.0 * u);
+    let room = right - left;
     let count = label.chars().count();
     let size = (room / (count as f32 * ADVANCE)).clamp(10.5 * u, 13.5 * u);
     let fits = |chars: usize| chars as f32 * size * ADVANCE <= room;
@@ -781,7 +788,7 @@ fn chevron(s: &mut Scene, p: &Palette, u: f32, x0: f32, x1: f32, y: f32, h: f32,
             None => return,
         }
     };
-    s.add(Shape::Text { x: (x0 + x1) / 2.0 + tip / 2.0, y: y + h / 2.0 + size * 0.36, text: label, size, color: p.dim, bold: false, anchor: Anchor::Middle });
+    s.add(Shape::Text { x: (left + right) / 2.0, y: y + h / 2.0 + size * 0.36, text: label, size, color: p.dim, bold: false, anchor: Anchor::Middle });
 }
 
 fn days(from: Date, to: Date) -> i32 {
