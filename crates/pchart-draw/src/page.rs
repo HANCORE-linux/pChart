@@ -92,12 +92,8 @@ impl Page {
     /// A page with the plan's name, the view and the day as title, and where the dates come from at
     /// the foot. `height` is at least that of a slide.
     pub fn new(plan: &Plan, schedule: &Schedule, today: Date, view: &str, height: f32) -> Page {
-        let height = height.max(HEIGHT);
-        let scene = Scene { width: WIDTH, height, background: Some(PAPER), hatch: (LIGHT, MID), hatch_alert: (LIGHT, LATE), spare: MID, font: SANS, marks: Vec::new() };
-        let mut page = Page { scene, texts: Vec::new(), shapes: Vec::new(), grids: Vec::new() };
-        page.text(X0, 70.0, &plan.name, 34.0, INK, true, Anchor::Start, None);
-        page.text(X0, 102.0, &format!("{view} · as of {}", today.strftime("%d %b %Y")), 17.0, GRAY, false, Anchor::Start, None);
-        page.line(X0, height - 60.0, X1, height - 60.0, LIGHT, 1.5);
+        let mut page = Page::plain(plan, today, view, height);
+        let height = page.height();
         let source = match schedule.target {
             Some(target) => format!("Dates scheduled backwards from the fixed {} date", common(&plan.items[target].name)),
             None => "Dates scheduled forwards from the start of the plan".to_string(),
@@ -107,6 +103,17 @@ impl Page {
             page.star(end + 30.0, height - 35.0, 7.0, GRAY, None, None);
             page.text(end + 42.0, height - 30.0, "important", 14.0, GRAY, false, Anchor::Start, None);
         }
+        page
+    }
+
+    /// A page with the title and the foot, for a view without dates.
+    pub fn plain(plan: &Plan, today: Date, view: &str, height: f32) -> Page {
+        let height = height.max(HEIGHT);
+        let scene = Scene { width: WIDTH, height, background: Some(PAPER), hatch: (LIGHT, MID), hatch_alert: (LIGHT, LATE), spare: MID, font: SANS, marks: Vec::new() };
+        let mut page = Page { scene, texts: Vec::new(), shapes: Vec::new(), grids: Vec::new() };
+        page.text(X0, 70.0, &plan.name, 34.0, INK, true, Anchor::Start, None);
+        page.text(X0, 102.0, &format!("{view} · as of {}", today.strftime("%d %b %Y")), 17.0, GRAY, false, Anchor::Start, None);
+        page.line(X0, height - 60.0, X1, height - 60.0, LIGHT, 1.5);
         page.text(X1, height - 30.0, "pChart", 14.0, GRAY, true, Anchor::End, None);
         page
     }

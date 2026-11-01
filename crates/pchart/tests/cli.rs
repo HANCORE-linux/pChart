@@ -113,7 +113,7 @@ fn the_milestone_chart_is_a_page_without_detail_levels() {
 fn every_view_exports_and_light_pages_refuse_terminal_options() {
     let path = copy("views");
     let svg = path.with_file_name("view.svg");
-    for (view, style) in [("gantt", None), ("phases", None), ("now-next-later", None), ("milestones", None), ("roadmap", Some("light")), ("roadmap", None)] {
+    for (view, style) in [("gantt", None), ("phases", None), ("now-next-later", None), ("milestones", None), ("structure", None), ("network", None), ("roadmap", Some("light")), ("roadmap", None)] {
         let mut args = vec!["export", path.to_str().unwrap(), "--view", view, "--svg", svg.to_str().unwrap()];
         if let Some(style) = style {
             args.extend(["--style", style]);

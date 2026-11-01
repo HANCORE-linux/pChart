@@ -2,7 +2,7 @@ use jiff::civil::date;
 use pchart_core::{Holidays, Plan, Schedule, analyse, schedule};
 use pchart_draw::scene::{Anchor, Scene, Shape};
 use pchart_draw::style::sans_width;
-use pchart_draw::{Audience, gantt, milestones, now_next_later, phase_plan, swimlanes};
+use pchart_draw::{Audience, gantt, milestones, network, now_next_later, phase_plan, structure, swimlanes};
 
 fn pages() -> Vec<(String, Scene)> {
     let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
@@ -20,6 +20,8 @@ fn pages() -> Vec<(String, Scene)> {
         }
         out.push((format!("{} phases", plan.name), phase_plan(&plan, &schedule, today)));
         out.push((format!("{} now-next-later", plan.name), now_next_later(&plan, &schedule, today)));
+        out.push((format!("{} structure", plan.name), structure(&plan, &schedule, today)));
+        out.push((format!("{} network", plan.name), network(&plan, &schedule, today)));
     }
     out
 }
@@ -78,3 +80,25 @@ fn notes_show_for_the_team_and_not_for_the_client() {
     assert!(team.contains("workshop in New York.") && !client.contains("workshop") && team.contains(">important<") && client.contains(">important<"));
 }
 
+
+#[test]
+fn the_structure_and_the_network_show_how_the_plan_is_built_without_dates() {
+    let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
+    let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+    let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+    let today = jiff::civil::date(2026, 10, 29);
+    let schedule: Schedule = schedule(&plan, &calendars, today).unwrap();
+    let texts = |scene: &Scene| -> Vec<String> { scene.marks.iter().filter_map(|mark| if let Shape::Text { text, .. } = &mark.shape { Some(text.clone()) } else { None }).collect() };
+    let built = texts(&structure(&plan, &schedule, today));
+    for text in ["Project structure · as of 29 Oct 2026", "1", "Requirements", "1.1 · Product · 10 wd", "4", "Beta & acceptance", "4.4 · Client"] {
+        assert!(built.contains(&text.to_string()), "{text}");
+    }
+    let network = network(&plan, &schedule, today);
+    let words = texts(&network);
+    for text in ["Network diagram · as of 29 Oct 2026", "Product", "Berlin", "Requirements", "10 wd", "Launch", "decides the date", "waits on"] {
+        assert!(words.contains(&text.to_string()), "{text}");
+    }
+    assert!(built.iter().chain(&words).all(|text| !text.contains("Dates scheduled") && !text.contains("Mar 2027")));
+    let top = |name: &str| network.marks.iter().find_map(|mark| match &mark.shape { Shape::Text { text, y, .. } if text == name => Some(*y), _ => None }).unwrap();
+    assert!(top("Requirements") < top("UX concept") && top("UX concept") < top("UI design") && top("Feature freeze") < top("Beta test") && top("Beta test") < top("Launch"));
+}

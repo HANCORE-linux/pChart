@@ -77,6 +77,8 @@ impl Action {
                 View::Roadmap => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "roadmap", "swimlane", "swimlanes"],
                 View::Phases => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "phase", "phases"],
                 View::NowNextLater => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "now", "next", "later"],
+                View::Structure => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "structure", "breakdown", "wbs", "psp", "built", "tree"],
+                View::Network => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "network", "netzplan", "dependencies", "graph", "pert"],
             },
             Action::Help => &["help", "explain", "keys", "legend", "symbols", "what"],
             Action::Quit => &["quit", "exit", "close", "leave"],

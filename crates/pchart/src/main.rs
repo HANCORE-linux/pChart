@@ -584,7 +584,7 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
         }
         other => match View::from_id(other) {
             Some(view) => view.page(&ctx.plan, &ctx.schedule, ctx.today, &checks(), audience),
-            None => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases or now-next-later"), args)),
+            None => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases, now-next-later, structure or network"), args)),
         },
     };
     let svg = scene.svg();
