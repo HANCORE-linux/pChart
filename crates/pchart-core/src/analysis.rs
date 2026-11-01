@@ -157,7 +157,7 @@ pub fn analyse(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: 
 fn verdict(plan: &Plan, schedule: &Schedule) -> Option<Verdict> {
     let target = schedule.target?;
     let spare = schedule.spare()?;
-    let first = *schedule.chain.first()?;
+    let first = schedule.first?;
     let state = if spare < 0 {
         State::DoesNotHold
     } else if spare < TIGHT {
@@ -167,7 +167,7 @@ fn verdict(plan: &Plan, schedule: &Schedule) -> Option<Verdict> {
     };
     let item = &plan.items[target];
     let date = item.on.or(item.no_later_than).unwrap_or(schedule.slots[target].planned.finish);
-    Some(Verdict { state, target, date, spare, first, latest_start: schedule.slots[first].latest.start })
+    Some(Verdict { state, target, date, spare, first, latest_start: schedule.start_by? })
 }
 
 fn checks(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date, verdict: Option<&Verdict>) -> Vec<Check> {

@@ -39,13 +39,19 @@ pub struct Schedule {
     pub target: Option<usize>,
     /// The day the planned dates start from.
     pub start: Date,
+    /// The item of the chain on which what the chain has to spare is measured: its first, or the first
+    /// after the last fixed date on it, since a fixed date has nothing to spare.
+    pub first: Option<usize>,
+    /// The latest day `first` can start and still hold the target.
+    pub start_by: Option<Date>,
+    room: Option<i32>,
 }
 
 impl Schedule {
     /// Working days to spare before the target; negative when the target cannot be held.
     pub fn spare(&self) -> Option<i32> {
         self.target?;
-        self.chain.first().map(|&first| self.slots[first].slack)
+        self.room
     }
 
     /// Each phase from its first item to the item that ends it.
@@ -97,21 +103,56 @@ pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Sche
         let item = &plan.items[index];
         item.no_later_than.is_some() || (item.milestone && item.on.is_some() && !preds[index].is_empty())
     });
-    let target = targets.min_by_key(|&index| bound_slack(trace(index)[0]).unwrap_or(i32::MAX));
+    let after_fixed = |chain: &[usize]| chain.split_last().map_or(0, |(_, before)| before.iter().rposition(|&index| plan.items[index].on.is_some()).map_or(0, |at| at + 1));
+    let fixed_room = |index: usize| {
+        plan.items[index].on.map(|day| {
+            let ready = preds[index].iter().map(|&pred| available(plan, pred, earliest[pred].0)).max().unwrap_or(day);
+            if ready > day { cal(index).between(ready, day).min(-1) } else { cal(index).between(ready, day) }
+        })
+    };
+    let holds = |target: usize| {
+        let chain = trace(target);
+        let first = chain[after_fixed(&chain)];
+        let late = toward(plan, &succs, &order, &cal, target)[first].expect("the chain leads to the target");
+        (fixed_room(first).unwrap_or_else(|| gap(first, earliest[first].0, late)), late.start)
+    };
+    let target = targets.min_by_key(|&index| holds(index).0);
     let chain = match target {
         Some(target) => trace(target),
         None => (0..plan.items.len()).max_by_key(|&index| earliest[index].0.finish).map(trace).unwrap_or_default(),
     };
 
-    let start = match (plan.start, target, chain.first()) {
+    let shifted = match (plan.start, target, chain.first()) {
         (None, Some(_), Some(&first)) if bound_slack(first).is_some_and(|slack| slack > 0) => bound[first].expect("the chain leads to the target").start,
         _ => base,
     };
-    let planned = if start == base { earliest.clone() } else { forward(plan, &preds, &order, &cal, start) };
+    let fits = |planned: &[(Span, Option<usize>)]| (0..plan.items.len()).all(|index| bound[index].is_none_or(|late| planned[index].0.start <= late.start.max(earliest[index].0.start)));
+    let (mut early, mut late) = (0, base.until(shifted).map_or(0, |span| span.get_days()));
+    let mut planned = if shifted == base { earliest.clone() } else { forward(plan, &preds, &order, &cal, shifted) };
+    let mut start = shifted;
+    if !fits(&planned) {
+        while late - early > 1 {
+            let middle = (early + late) / 2;
+            let day = base.checked_add(jiff::Span::new().days(middle)).unwrap_or(base);
+            if fits(&forward(plan, &preds, &order, &cal, day)) { early = middle } else { late = middle }
+        }
+        start = base.checked_add(jiff::Span::new().days(early)).unwrap_or(base);
+        planned = forward(plan, &preds, &order, &cal, start);
+    }
     let end = planned.iter().map(|(span, _)| span.finish).max().unwrap_or(start);
     let soft = backward(plan, &succs, &order, &cal, Some(end));
     let latest: Vec<Span> = bound.iter().zip(&soft).map(|(bound, soft)| bound.or(*soft).expect("the planned last day limits every item")).collect();
     let slack: Vec<i32> = (0..plan.items.len()).map(|index| gap(index, earliest[index].0, latest[index])).collect();
+    let from = after_fixed(&chain);
+    let first = chain.get(from).copied();
+    let (room, start_by) = match (target, first) {
+        (Some(target), _) => {
+            let (room, by) = holds(target);
+            (Some(room), Some(by))
+        }
+        (None, Some(first)) => (Some(slack[first]), Some(latest[first].start)),
+        _ => (None, None),
+    };
 
     let slots = (0..plan.items.len())
         .map(|index| Slot {
@@ -119,11 +160,14 @@ pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Sche
             earliest: earliest[index].0,
             latest: latest[index],
             slack: slack[index],
-            spare: if chain.contains(&index) { slack[chain[0]] } else { gap(index, planned[index].0, latest[index]) },
+            spare: match (chain.iter().position(|&step| step == index), room) {
+                (Some(at), Some(room)) if at >= from => room,
+                _ => gap(index, planned[index].0, latest[index]),
+            },
             driver: earliest[index].1,
         })
         .collect();
-    Ok(Schedule { slots, order, chain, target, start })
+    Ok(Schedule { slots, order, chain, target, start, first, start_by, room })
 }
 
 fn order(plan: &Plan, preds: &[Vec<usize>]) -> Result<Vec<usize>, Error> {
@@ -164,6 +208,13 @@ pub(crate) fn available(plan: &Plan, index: usize, span: Span) -> Date {
     if item.milestone && item.on.is_some() { span.start } else { next(span.finish) }
 }
 
+/// The day by which an item is reached: a fixed milestone on its day, everything else at the end of its
+/// last day.
+fn reached(plan: &Plan, index: usize, span: Span) -> Date {
+    let item = &plan.items[index];
+    if item.milestone && item.on.is_some() { span.start } else { span.finish }
+}
+
 /// The last day by which predecessors of an item must have finished.
 fn required(plan: &Plan, index: usize, span: Span) -> Date {
     let item = &plan.items[index];
@@ -175,22 +226,50 @@ fn forward<'a>(plan: &Plan, preds: &[Vec<usize>], order: &[usize], cal: &impl Fn
     for &index in order {
         let item = &plan.items[index];
         let mut from = base.max(item.no_earlier_than.unwrap_or(base));
+        if item.milestone && item.on.is_none() {
+            from = cal(index).on_or_after(from);
+            let reached = preds[index].iter().map(|&pred| (reached(plan, pred, out[pred].0), pred)).max_by_key(|(day, _)| *day);
+            let (day, driver) = match reached {
+                Some((day, pred)) if day >= from => (cal(index).on_or_after(day), Some(pred)),
+                _ => (from, None),
+            };
+            out[index] = (Span { start: day, finish: day }, driver);
+            continue;
+        }
         let driver = preds[index].iter().map(|&pred| (available(plan, pred, out[pred].0), pred)).max_by_key(|(day, _)| *day).filter(|(day, _)| *day >= from).map(|(day, pred)| {
             from = day;
             pred
         });
-        let span = match (item.milestone, item.on) {
-            (true, Some(day)) => Span { start: day, finish: day },
-            (true, None) => {
-                let day = if driver.is_some() { previous(from) } else { from };
-                Span { start: day, finish: day }
-            }
-            (false, fixed) => {
+        let span = match item.on {
+            Some(day) if item.milestone => Span { start: day, finish: day },
+            fixed => {
                 let start = fixed.unwrap_or_else(|| cal(index).on_or_after(from));
                 Span { start, finish: cal(index).finish(start, item.duration) }
             }
         };
         out[index] = (span, driver);
+    }
+    out
+}
+
+/// Latest spans that hold `target` alone: from its own date back through what waits before it. A fixed
+/// date on the way does not move, so the target binds nothing before it through that date.
+fn toward<'a>(plan: &Plan, succs: &[Vec<usize>], order: &[usize], cal: &impl Fn(usize) -> &'a Calendar, target: usize) -> Vec<Option<Span>> {
+    let by = |index: usize, day: Date| {
+        let item = &plan.items[index];
+        let finish = cal(index).on_or_before(day);
+        Span { start: if item.milestone { finish } else { cal(index).start(finish, item.duration) }, finish }
+    };
+    let mut out: Vec<Option<Span>> = vec![None; plan.items.len()];
+    let item = &plan.items[target];
+    out[target] = Some(match item.on {
+        Some(day) => Span { start: day, finish: if item.milestone { day } else { cal(target).finish(day, item.duration) } },
+        None => by(target, item.no_later_than.expect("a target is fixed or has a latest date")),
+    });
+    for &index in order.iter().rev() {
+        if index != target && plan.items[index].on.is_none() {
+            out[index] = succs[index].iter().filter_map(|&succ| out[succ].map(|span| required(plan, succ, span))).min().map(|day| by(index, day));
+        }
     }
     out
 }
@@ -275,6 +354,74 @@ on = 2026-11-16
         let test = &s.slots[p.item("test").unwrap()];
         assert_eq!(done.earliest.finish, date(2026, 11, 6));
         assert_eq!(test.earliest.start, date(2026, 11, 9));
+    }
+
+    #[test]
+    fn a_milestone_after_a_fixed_milestone_is_on_its_day() {
+        let p = plan(&format!("{CHAIN}[[items]]\nid = \"review\"\nlane = \"a\"\nname = \"Review\"\nmilestone = true\nafter = [\"launch\"]\n"));
+        let s = run(&p, date(2026, 11, 2));
+        let review = &s.slots[p.item("review").unwrap()];
+        assert_eq!((review.planned.finish, review.earliest.finish, review.latest.finish), (date(2026, 11, 16), date(2026, 11, 16), date(2026, 11, 16)));
+    }
+
+    fn work(id: &str, days: u32, after: &[&str], extra: &str) -> String {
+        let after: Vec<String> = after.iter().map(|id| format!("\"{id}\"")).collect();
+        format!("[[items]]\nid = \"{id}\"\nlane = \"a\"\nname = \"{id}\"\nduration = \"{days}wd\"\nafter = [{}]\n{extra}", after.join(", "))
+    }
+
+    fn milestone(id: &str, after: &[&str], extra: &str) -> String {
+        let after: Vec<String> = after.iter().map(|id| format!("\"{id}\"")).collect();
+        format!("[[items]]\nid = \"{id}\"\nlane = \"a\"\nname = \"{id}\"\nmilestone = true\nafter = [{}]\n{extra}", after.join(", "))
+    }
+
+    #[test]
+    fn a_milestone_is_on_the_last_day_it_waits_for_even_when_a_fixed_date_ties_with_work() {
+        let p = plan(&[work("build", 1, &[], ""), milestone("fixed", &[], "on = 2026-11-03\n"), milestone("done", &["fixed", "build"], "")].concat());
+        let s = run(&p, date(2026, 11, 2));
+        assert_eq!(s.slots[p.item("done").unwrap()].planned.finish, date(2026, 11, 3));
+    }
+
+    #[test]
+    fn a_milestone_is_not_before_its_earliest_date_nor_on_a_weekend() {
+        let p = plan(&[work("build", 1, &[], ""), milestone("done", &["build"], "no_earlier_than = 2026-11-03\n"), milestone("kickoff", &[], "")].concat());
+        let s = run(&p, date(2026, 11, 2));
+        assert_eq!(s.slots[p.item("done").unwrap()].earliest.finish, date(2026, 11, 3));
+        let s = run(&p, date(2026, 11, 7));
+        assert_eq!(s.slots[p.item("kickoff").unwrap()].earliest.finish, date(2026, 11, 9));
+    }
+
+    #[test]
+    fn a_milestone_is_on_a_working_day_of_its_own_lane() {
+        let text = format!("format = 1\nname = \"t\"\n[[lanes]]\nid = \"a\"\nname = \"A\"\n[[lanes]]\nid = \"b\"\nname = \"B\"\n{}{}", work("build", 5, &[], ""), milestone("done", &["build"], "").replace("lane = \"a\"", "lane = \"b\""));
+        let p = Plan::parse(&text).unwrap();
+        let off = Calendar::new([(date(2026, 11, 6), "Day off".to_string())].into());
+        let s = schedule(&p, &[Calendar::default(), off], date(2026, 11, 2)).unwrap();
+        assert_eq!(s.slots[p.item("build").unwrap()].planned.finish, date(2026, 11, 6));
+        assert_eq!(s.slots[p.item("done").unwrap()].planned.finish, date(2026, 11, 9));
+    }
+
+    #[test]
+    fn a_fixed_start_of_the_chain_has_nothing_to_spare_so_the_work_after_it_is_measured() {
+        let p = plan(&[milestone("kickoff", &[], "on = 2026-11-16\n"), work("build", 10, &["kickoff"], ""), milestone("launch", &["build"], "on = 2026-11-20\n")].concat());
+        let s = run(&p, date(2026, 11, 2));
+        assert_eq!((s.spare(), s.first.map(|first| p.items[first].id.as_str()), s.start_by), (Some(-6), Some("build"), Some(date(2026, 11, 6))));
+        let p = plan(&[milestone("early", &[], "on = 2026-11-09\n"), milestone("launch", &["early"], "on = 2026-11-07\n")].concat());
+        assert_eq!(run(&p, date(2026, 11, 2)).spare(), Some(-1));
+    }
+
+    #[test]
+    fn the_plan_starts_no_later_than_every_item_allows() {
+        let p = plan(&[work("prepare", 5, &[], ""), work("build", 5, &["prepare"], "no_earlier_than = 2026-11-30\n"), work("ship", 5, &["build"], "no_later_than = 2026-12-18\n")].concat());
+        let s = run(&p, date(2026, 11, 2));
+        assert_eq!(s.spare(), Some(5));
+        assert!(s.slots[p.item("ship").unwrap()].planned.finish <= date(2026, 12, 18));
+    }
+
+    #[test]
+    fn the_target_has_what_its_own_date_leaves_and_not_what_another_fixed_date_takes() {
+        let p = plan(&[work("build", 5, &[], ""), work("fixed", 2, &["build"], "on = 2026-11-04\n"), milestone("launch", &["build"], "no_later_than = 2026-12-31\n")].concat());
+        let s = run(&p, date(2026, 11, 2));
+        assert!(s.spare().is_some_and(|spare| spare > 0), "{:?}", s.spare());
     }
 
     #[test]
