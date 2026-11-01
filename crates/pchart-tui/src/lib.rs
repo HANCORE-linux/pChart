@@ -248,6 +248,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (Screen::Checks, KeyCode::Up) => app.choose_check(-1),
                 (Screen::Checks, KeyCode::Down) => app.choose_check(1),
                 (Screen::Checks, KeyCode::Enter) => app.show_check_in_roadmap(),
+                (Screen::Checks, KeyCode::Char('b')) if app.buffer_here() => app.add_buffer(),
                 (Screen::Export, KeyCode::Up) => app.export_part(-1),
                 (Screen::Export, KeyCode::Down) => app.export_part(1),
                 (Screen::Export, KeyCode::Left) => app.export_change(-1),

@@ -267,6 +267,26 @@ impl App {
         self.check = (self.check as isize + step).rem_euclid(count) as usize;
     }
 
+    /// `b` on the Checks screen: the buffer the chosen check suggests, as one change that `u` takes back.
+    pub fn add_buffer(&mut self) {
+        let Some(&index) = self.checks().get(self.check) else { return };
+        let pchart_core::Check::NoBuffer { before, target } = self.analysis.checks[index] else { return };
+        let target_name = self.plan.items[target].name.clone();
+        let Some(edits) = pchart_core::text::buffer_edits(&self.plan, before, target) else { return };
+        match self.apply_all(&edits, format!("buffer before {target_name}")) {
+            Ok(()) => {
+                self.check = self.check.min((self.analysis.checks.len() + 1).saturating_sub(1));
+                self.message = Some("Buffer added · u takes it back".into());
+            }
+            Err(err) => self.message = Some(err),
+        }
+    }
+
+    /// Whether `b` adds a buffer: the chosen check is a missing one.
+    pub fn buffer_here(&self) -> bool {
+        self.checks().get(self.check).is_some_and(|&index| matches!(self.analysis.checks[index], pchart_core::Check::NoBuffer { .. }))
+    }
+
     /// The roadmap, with the first item of the chosen check selected; nothing on the two quiet lines.
     pub fn show_check_in_roadmap(&mut self) {
         let Some(&index) = self.checks().get(self.check) else { return };

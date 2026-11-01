@@ -149,12 +149,17 @@ pub fn advice(plan: &Plan, calendars: &[Calendar], today: Date, check: &Check) -
     }
 }
 
-/// The verdict with a buffer of `BUFFER` working days between `before` and the fixed `target`.
-fn with_buffer(plan: &Plan, calendars: &[Calendar], today: Date, before: usize, target: usize) -> Option<Verdict> {
+/// The edits that put a buffer of `BUFFER` working days between `before` and the fixed `target`.
+pub fn buffer_edits(plan: &Plan, before: usize, target: usize) -> Option<Vec<Edit>> {
     let (from, to) = (plan.items[before].id.clone(), plan.items[target].id.clone());
     let id = (0..).map(|n| if n == 0 { format!("buffer-before-{to}") } else { format!("buffer-before-{to}-{n}") }).find(|id| plan.item(id).is_none())?;
     let buffer = Item { id: id.clone(), lane: plan.items[before].lane.clone(), name: "Buffer".into(), duration: BUFFER, after: vec![from.clone()], buffer: true, ..Item::default() };
-    let plan = apply_all(plan, &[Edit::Add { item: buffer }, Edit::Unlink { from: from.clone(), to: to.clone() }, Edit::Link { from: id, to }]).ok()?;
+    Some(vec![Edit::Add { item: buffer }, Edit::Unlink { from: from.clone(), to: to.clone() }, Edit::Link { from: id, to }])
+}
+
+/// The verdict with a buffer of `BUFFER` working days between `before` and the fixed `target`.
+fn with_buffer(plan: &Plan, calendars: &[Calendar], today: Date, before: usize, target: usize) -> Option<Verdict> {
+    let plan = apply_all(plan, &buffer_edits(plan, before, target)?).ok()?;
     let schedule = crate::schedule(&plan, calendars, today).ok()?;
     analyse(&plan, calendars, &schedule, today).verdict
 }

@@ -93,7 +93,7 @@ fn help(screen: Screen, dated: bool) -> Help {
         Screen::Checks => Help {
             title: "HELP · CHECKS",
             lead: "What to look at in the plan, what it means, and what you can do about it.",
-            keys: [("↑↓", "Choose a check"), ("Enter", "Show it in the roadmap")].into_iter().chain(everywhere).collect(),
+            keys: [("↑↓", "Choose a check"), ("Enter", "Show it in the roadmap"), ("b", "Add the buffer a missing one asks for")].into_iter().chain(everywhere).collect(),
             legend_title: "WHAT THE SYMBOLS SAY",
             legend: vec![
                 (Sign::Icon(Icon::Cross, Tone::Alert), "a problem: the plan cannot hold"),

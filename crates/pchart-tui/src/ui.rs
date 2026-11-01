@@ -495,6 +495,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
         Screen::Roadmap if app.why => vec![("↑↓", "another item"), ("Esc", "back"), ("?", "help")],
         Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
+        Screen::Checks if app.buffer_here() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("b", "add the buffer"), ("?", "help")],
         Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Checks => vec![("↑↓", "check"), ("?", "help")],
         Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back"), ("?", "help")],
@@ -1091,6 +1092,26 @@ mod tests {
         app.selected = app.plan.item("requirements").unwrap();
         assert!(screen(&app, 170, 50).1.last().unwrap().svg.contains("nothing comes before it"));
         assert!(has(&screen(&app, 80, 24).0, ":: WHY THIS DATE · LANES"));
+    }
+
+    #[test]
+    fn b_adds_the_buffer_the_check_suggests_and_u_takes_it_back() {
+        let mut app = app();
+        app.screen = Screen::Checks;
+        app.check = 0;
+        assert!(app.buffer_here() && has(&screen(&app, 170, 50).0, "b add the buffer"));
+        let promised = pchart_core::text::advice(&app.plan, &app.calendars, app.today, &app.analysis.checks[app.checks()[0]]).then;
+        app.add_buffer();
+        let buffer = app.plan.item("buffer-before-launch").unwrap();
+        assert!(app.plan.items[buffer].buffer && app.plan.items[buffer].duration == pchart_core::text::BUFFER);
+        assert!(app.plan.items[app.plan.item("launch").unwrap()].after.contains(&"buffer-before-launch".to_string()));
+        assert!(!app.analysis.checks.iter().any(|check| matches!(check, pchart_core::Check::NoBuffer { .. })));
+        let spare = app.analysis.verdict.as_ref().unwrap().spare;
+        assert!(promised.iter().any(|(text, _)| text == &format!("{spare} working days")), "{promised:?} {spare}");
+        let rows = screen(&app, 80, 24).0;
+        assert!(has(&rows, "Buffer added · u takes it back") && !app.buffer_here(), "{rows:#?}");
+        app.undo();
+        assert!(app.plan.item("buffer-before-launch").is_none() && app.buffer_here());
     }
 
     #[test]
