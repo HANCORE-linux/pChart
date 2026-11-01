@@ -159,7 +159,23 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false }
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false };
+        if !app.dated() {
+            app.screen = Screen::Export;
+            app.export.view = View::Network;
+            app.export.formats[3] = false;
+        }
+        app
+    }
+
+    /// Whether every piece of work has a length, so the plan has dates.
+    pub fn dated(&self) -> bool {
+        self.plan.without_length().is_empty()
+    }
+
+    /// The formats the Export screen offers: Markdown only with dates.
+    pub fn formats(&self) -> usize {
+        if self.dated() { FORMATS.len() } else { FORMATS.len() - 1 }
     }
 
     /// The colours of the screen under the help or the finder: dimmed while one of them is open.
@@ -268,14 +284,18 @@ impl App {
     /// `←→` on the Export screen: another view, another audience, or the next format.
     pub fn export_change(&mut self, step: isize) {
         let next = |at: usize, count: usize| (at as isize + step).rem_euclid(count as isize) as usize;
+        let formats = self.formats();
         let e = &mut self.export;
         match e.part {
-            Part::View => e.view = View::ALL[next(View::ALL.iter().position(|&view| view == e.view).unwrap_or(0), View::ALL.len())],
+            Part::View => {
+                let views = View::of(&self.plan);
+                e.view = views[next(views.iter().position(|&view| view == e.view).unwrap_or(0), views.len())];
+            }
             Part::Audience => {
                 let audiences = [Audience::Team, Audience::Management, Audience::Client];
                 e.audience = audiences[next(audiences.iter().position(|&audience| audience == e.audience).unwrap_or(0), audiences.len())];
             }
-            Part::Format => e.format = next(e.format, FORMATS.len()),
+            Part::Format => e.format = next(e.format, formats),
         }
     }
 

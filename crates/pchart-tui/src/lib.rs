@@ -231,6 +231,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
                 (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
                 (_, KeyCode::Char('4')) => app.screen = Screen::Export,
+                (Screen::Situation | Screen::Roadmap | Screen::Checks, _) if !app.dated() => {}
                 (Screen::Situation, KeyCode::Up) => app.choose(-1),
                 (Screen::Situation, KeyCode::Down) => app.choose(1),
                 (Screen::Situation, KeyCode::Enter) => app.show_in_roadmap(),
@@ -312,16 +313,17 @@ pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) ->
                     KeyCode::Esc => break Ok(None),
                     KeyCode::Up => start.choose(-1),
                     KeyCode::Down => start.choose(1),
-                    KeyCode::Left | KeyCode::Right => start.forwards ^= true,
+                    KeyCode::Left => start.from(-1),
+                    KeyCode::Right => start.from(1),
                     KeyCode::Tab | KeyCode::BackTab => start.naming ^= true,
                     KeyCode::Enter => {
                         if let Some(path) = start.enter() {
                             break Ok(Some(path));
                         }
                     }
-                    KeyCode::Backspace if start.naming => drop(start.name.pop()),
+                    KeyCode::Backspace if start.naming || start.undated => drop(start.name.pop()),
                     KeyCode::Backspace => drop(start.typed.pop()),
-                    KeyCode::Char(c) if start.naming => start.name.push(c),
+                    KeyCode::Char(c) if start.naming || start.undated => start.name.push(c),
                     KeyCode::Char(c) => start.typed.push(c),
                     _ => {}
                 }

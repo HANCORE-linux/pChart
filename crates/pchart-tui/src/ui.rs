@@ -99,6 +99,7 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
     title_bar(app, frame, &inks, area);
     let under = Inks::of(app.shown());
     match app.screen {
+        Screen::Situation | Screen::Roadmap | Screen::Checks if !app.dated() => undated(app, frame, &under, area),
         Screen::Situation => crate::situation::draw(app, frame, &under, area, &mut placements),
         Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
@@ -360,6 +361,24 @@ fn summary(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     put(frame, 1, 1, room, join(&groups));
 }
 
+/// The situation, the roadmap and the checks of a plan whose work has no length yet: what is missing.
+fn undated(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
+    let rect = Rect { x: 0, y: 1, width: area.width, height: area.height - 2 };
+    panel(frame, inks, rect, "NO DATES YET", false);
+    let missing = app.plan.without_length();
+    let work = app.plan.items.iter().filter(|item| !item.milestone).count();
+    let (x, room) = (4, area.width.saturating_sub(8));
+    put(frame, x, 4, room, vec![Span::styled(format!("{} of {work} pieces of work have no length yet.", missing.len()), bold(inks.bright))]);
+    put(frame, x, 5, room, vec![Span::styled("Dates, the roadmap and the checks come once each has one.", inks.dim)]);
+    put(frame, x, 7, room, vec![Span::styled("Without a length", inks.dim)]);
+    let rows = usize::from(rect.height.saturating_sub(9));
+    for (row, &index) in missing.iter().enumerate().take(rows) {
+        let more = missing.len() - row - 1;
+        let text = if row + 1 == rows && more > 0 { format!("and {} more", more + 1) } else { app.plan.items[index].name.clone() };
+        put(frame, x + 2, 8 + row as u16, room, vec![Span::styled(cut(&text, usize::from(room)), inks.ink)]);
+    }
+}
+
 fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let item = if app.level == Level::Overview { "lane" } else { "item" };
     let notes = |spot: Option<Spot>| {
@@ -379,6 +398,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let mut hints: Vec<(&str, &str)> = match app.screen {
         _ if app.finder.is_some() => vec![("↑↓", "choose"), ("Enter", "run"), ("Esc", "close")],
         _ if app.help => vec![("Esc", "close"), ("Ctrl+P", "find an action")],
+        Screen::Situation | Screen::Roadmap | Screen::Checks if !app.dated() => vec![("4", "how it is built"), ("?", "help")],
         Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.form.is_some() => match &app.form {
@@ -793,6 +813,14 @@ mod tests {
         App::new(plan, calendars, today, "portal.pchart".into(), schedule, (7, 16))
     }
 
+    fn undated() -> App {
+        let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap().structure_only();
+        let calendars = vec![pchart_core::Calendar::default(); plan.lanes.len()];
+        let today = jiff::civil::date(2026, 10, 29);
+        let schedule = pchart_core::schedule(&plan, &calendars, today).unwrap();
+        App::new(plan, calendars, today, "portal.pchart".into(), schedule, (7, 16))
+    }
+
     fn screen(app: &App, width: u16, height: u16) -> (Vec<String>, Vec<Placement>) {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut placements = Vec::new();
@@ -831,6 +859,19 @@ mod tests {
                 look(&mut app, &format!("{shown:?} finder \"{typed}\""));
             }
         }
+        for view in pchart_draw::View::ALL {
+            let mut app = app();
+            app.screen = Screen::Export;
+            app.export.view = view;
+            look(&mut app, &format!("export {view:?}"));
+        }
+        for shown in [Screen::Situation, Screen::Roadmap, Screen::Checks, Screen::Export] {
+            let mut app = undated();
+            app.screen = shown;
+            look(&mut app, &format!("no dates {shown:?}"));
+            app.finder = Some(crate::app::Finder { typed: String::new(), chosen: 0 });
+            look(&mut app, &format!("no dates {shown:?} finder"));
+        }
         let mut app = app();
         app.screen = Screen::Roadmap;
         for level in [Level::Overview, Level::Full, Level::Standard] {
@@ -856,6 +897,35 @@ mod tests {
             app.why = false;
         }
         assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
+    }
+
+    #[test]
+    fn a_plan_without_lengths_opens_with_how_it_is_built_and_says_what_is_missing() {
+        let mut app = undated();
+        assert_eq!((app.screen, app.export.view, app.formats()), (Screen::Export, pchart_draw::View::Network, 3));
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, ":: EXPORT") && placements.iter().any(|placement| placement.svg.contains("Network diagram")));
+        assert!(placements.iter().any(|placement| !placement.svg.contains("Gantt chart") && placement.svg.contains("Dependency matrix")));
+        assert!(!placements.iter().any(|placement| placement.svg.contains("Markdown")));
+        for shown in [Screen::Situation, Screen::Roadmap, Screen::Checks] {
+            app.screen = shown;
+            let rows = screen(&app, 170, 50).0;
+            assert!(has(&rows, ":: NO DATES YET") && has(&rows, "10 of 10 pieces of work have no length yet.") && has(&rows, "Requirements") && has(&rows, "4 how it is built"), "{shown:?}");
+        }
+        assert!(has(&screen(&app, 80, 24).0, "Security review"));
+        let mut plan = app.plan.clone();
+        let api = plan.items[plan.item("api").unwrap()].clone();
+        plan.items.extend((0..10).map(|number| pchart_core::model::Item { id: format!("more-{number}"), name: format!("More {number}"), after: Vec::new(), ..api.clone() }));
+        let calendars = vec![pchart_core::Calendar::default(); plan.lanes.len()];
+        let schedule = pchart_core::schedule(&plan, &calendars, app.today).unwrap();
+        let mut crowded = App::new(plan, calendars, app.today, "crowded.pchart".into(), schedule, (7, 16));
+        crowded.screen = Screen::Situation;
+        let rows = screen(&crowded, 80, 24).0;
+        let more = crowded.plan.without_length().len() - 12;
+        assert!(has(&rows, &format!("and {more} more")), "{rows:#?}");
+        let found = crate::actions::find(&app, "");
+        assert!(found.iter().all(|(action, _)| !matches!(action, crate::actions::Action::ChangeDate | crate::actions::Action::Why | crate::actions::Action::AddItem)));
+        assert!(crate::actions::find(&app, "gantt").iter().all(|(action, _)| *action != crate::actions::Action::Export(pchart_draw::View::Gantt)));
     }
 
     #[test]

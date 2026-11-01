@@ -108,6 +108,41 @@ fn the_plan_exports_as_a_graphviz_file() {
 }
 
 #[test]
+fn a_plan_without_lengths_shows_how_it_is_built_until_each_has_one() {
+    let dir = copy("structure").parent().unwrap().to_path_buf();
+    let path = dir.join("app.pchart");
+    let file = path.to_str().unwrap();
+    let output = pchart(&["new", file, "--template", "new-application", "--no-dates"], None);
+    assert!(stdout(&output).contains("New application has no dates yet: 11 of 11 pieces of work have no length."), "{}", stdout(&output));
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("duration"));
+    assert_eq!(pchart(&["new", dir.join("other.pchart").to_str().unwrap(), "--template", "empty", "--no-dates", "--target", "2027-03-01"], None).status.code(), Some(3));
+    let output = pchart(&["add", file, "contract", "--lane", "product", "--name", "Contract", "--after", "requirements"], None);
+    assert!(output.status.success() && stdout(&output).contains("12 of 12"), "{}", String::from_utf8_lossy(&output.stderr));
+    let situation = stdout(&pchart(&["situation", file], None));
+    assert!(situation.contains("Without a length: Requirements, UX concept") && situation.ends_with("Contract.\n"), "{situation}");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["situation", file, "--json"], None))).unwrap();
+    assert_eq!((json["dates"].as_bool(), json["without_length"].as_array().map(Vec::len)), (Some(false), Some(12)));
+    for args in [vec!["export", file, "--view", "gantt", "--svg", dir.join("g.svg").to_str().unwrap()], vec!["export", file, "--view", "structure", "--md", dir.join("R.md").to_str().unwrap()], vec!["schedule", file], vec!["why", file, "launch"]] {
+        let output = pchart(&args, None);
+        assert_eq!(output.status.code(), Some(3), "{args:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("needs dates, and 12 of 12 pieces of work have no length yet"), "{args:?}");
+    }
+    let output = pchart(&["export", file, "--view", "network", "--svg", dir.join("n.svg").to_str().unwrap(), "--dot", dir.join("n.dot").to_str().unwrap()], None);
+    assert!(output.status.success() && dir.join("n.svg").exists() && dir.join("n.dot").exists());
+    loop {
+        let json: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["situation", file, "--json"], None))).unwrap();
+        let Some(missing) = json["without_length"].as_array() else { break };
+        let id = missing[0].as_str().unwrap().to_string();
+        let output = pchart(&["set", file, &id, "--duration", "3"], None);
+        assert!(output.status.success(), "{id}: {}", String::from_utf8_lossy(&output.stderr));
+        if missing.len() == 1 {
+            assert!(stdout(&output).contains("Every piece of work has a length now."), "{}", stdout(&output));
+        }
+    }
+    assert!(stdout(&pchart(&["situation", file], None)).contains("no fixed target date"));
+}
+
+#[test]
 fn the_milestone_chart_is_a_page_without_detail_levels() {
     let path = copy("milestones");
     let svg = path.with_file_name("milestones.svg");

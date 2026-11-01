@@ -111,6 +111,22 @@ impl Plan {
         plan
     }
 
+    /// The work whose length is not known yet. Until every piece of work has one, the plan has no dates.
+    pub fn without_length(&self) -> Vec<usize> {
+        (0..self.items.len()).filter(|&index| !self.items[index].milestone && self.items[index].duration == 0).collect()
+    }
+
+    /// This plan with its structure only: the work without lengths and nothing fixed on a date.
+    pub fn structure_only(&self) -> Plan {
+        let mut plan = self.clone();
+        plan.start = None;
+        for item in &mut plan.items {
+            item.duration = 0;
+            (item.on, item.no_earlier_than, item.no_later_than) = (None, None, None);
+        }
+        plan
+    }
+
     pub fn parse(text: &str) -> Result<Plan, Error> {
         let plan: Plan = toml::from_str(text).map_err(|err| Error::File(err.to_string()))?;
         if plan.format > FORMAT {
@@ -146,7 +162,7 @@ impl Plan {
             let _ = write!(out, "\n[[items]]\nid = {}\nlane = {}\nname = {}\n", quote(&item.id), quote(&item.lane), quote(&item.name));
             if item.milestone {
                 out.push_str("milestone = true\n");
-            } else {
+            } else if item.duration > 0 {
                 let _ = writeln!(out, "duration = \"{}wd\"", item.duration);
             }
             if item.buffer {
@@ -200,9 +216,6 @@ impl Plan {
             }
             if item.milestone && item.duration > 0 {
                 return Err(Error::Plan(format!("the milestone \"{}\" has a duration", item.id)));
-            }
-            if !item.milestone && item.duration == 0 {
-                return Err(Error::Plan(format!("\"{}\" has no duration", item.id)));
             }
             if item.milestone && item.buffer {
                 return Err(Error::Plan(format!("the milestone \"{}\" cannot be a buffer; a buffer takes time", item.id)));
@@ -338,6 +351,17 @@ mod tests {
         let forwards = template.new_plan("Portal", Some(day), true);
         assert_eq!((forwards.items[launch].on, forwards.start), (None, Some(day)));
         assert_eq!(template.new_plan("Portal", None, false).items, template.items);
+    }
+
+    #[test]
+    fn a_plan_can_be_built_before_its_lengths_are_known() {
+        let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap().structure_only();
+        let work: Vec<usize> = (0..plan.items.len()).filter(|&index| !plan.items[index].milestone).collect();
+        assert_eq!(plan.without_length(), work);
+        assert!(plan.start.is_none() && plan.items.iter().all(|item| item.on.is_none() && item.no_earlier_than.is_none() && item.no_later_than.is_none()));
+        let text = plan.to_toml();
+        assert!(!text.contains("duration"));
+        assert_eq!(Plan::parse(&text).unwrap(), plan);
     }
 
     #[test]

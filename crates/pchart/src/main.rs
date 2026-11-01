@@ -43,9 +43,23 @@ impl Failure {
         Failure { code: 4, kind: "file", message: message.into(), hint: None }
     }
 
+    /// A plan with work whose length is not known yet: it has no dates.
+    fn undated(plan: &Plan, what: &str) -> Failure {
+        let work = plan.items.iter().filter(|item| !item.milestone).count();
+        Failure { code: 3, kind: "dates", message: format!("{what} needs dates, and {} of {work} pieces of work have no length yet", plan.without_length().len()), hint: Some("pchart situation PLAN names them; pchart set PLAN ID --duration DAYS gives one its length".into()) }
+    }
+
     fn edit(message: impl Into<String>) -> Failure {
         Failure { code: 3, kind: "edit", message: message.into(), hint: Some("pchart help --json lists every command and edit".into()) }
     }
+}
+
+/// What a plan without dates says about itself: how much work has no length yet, and which.
+fn undated(plan: &Plan) -> Vec<String> {
+    let missing = plan.without_length();
+    let work = plan.items.iter().filter(|item| !item.milestone).count();
+    let names: Vec<&str> = missing.iter().map(|&index| plan.items[index].name.as_str()).collect();
+    vec![format!("{} has no dates yet: {} of {work} pieces of work have no length.", plan.name, missing.len()), format!("Without a length: {}.", names.join(", "))]
 }
 
 fn main() -> ExitCode {
@@ -181,6 +195,20 @@ fn run(args: &Args) -> Result<u8, Failure> {
         ctx.plan.item(id).map(|_| id).ok_or_else(|| Failure::edit(format!("there is no item \"{id}\"")))
     };
     let analysis = || analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today);
+    let dated = ctx.plan.without_length().is_empty();
+    if !dated && matches!(args.command, "situation" | "next" | "check") {
+        if json {
+            print_json(&json!({ "schema": 1, "dates": false, "without_length": ctx.plan.without_length().iter().map(|&index| &ctx.plan.items[index].id).collect::<Vec<_>>() }));
+        } else {
+            for line in undated(&ctx.plan) {
+                say!("{line}");
+            }
+        }
+        return Ok(0);
+    }
+    if !dated && matches!(args.command, "why" | "schedule" | "holidays") {
+        return Err(Failure::undated(&ctx.plan, &format!("pchart {}", args.command)));
+    }
 
     match args.command {
         "situation" => {
@@ -316,7 +344,11 @@ fn new(args: &Args) -> Result<u8, Failure> {
         (Some(text), None) | (None, Some(text)) => Some(date(text, args)?),
         (None, None) => None,
     };
+    if args.flag("--no-dates") && date.is_some() {
+        return Err(Failure::usage("a plan without dates has no --target or --start", args));
+    }
     let plan = template.new_plan(args.option("--name").unwrap_or(&template.name), date, args.option("--start").is_some());
+    let plan = if args.flag("--no-dates") { plan.structure_only() } else { plan };
     let today = today(args)?;
     let calendars = calendars(&holidays_for(&holiday_text(args)?, &plan), &plan);
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(|err| Failure::edit(err.to_string()))?;
@@ -335,6 +367,10 @@ fn new(args: &Args) -> Result<u8, Failure> {
         return Ok(0);
     }
     say!("{}", if dry { "Dry run, nothing written." } else { "Saved." });
+    if !plan.without_length().is_empty() {
+        say!("{}", undated(&plan)[0]);
+        return Ok(0);
+    }
     match &analysis.verdict {
         Some(verdict) => {
             let (headline, detail) = text::verdict(&plan, verdict);
@@ -419,8 +455,8 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
             let milestone = args.flag("--milestone");
             let duration = match (args.option("--duration"), milestone) {
                 (Some(text), false) => days(text)?,
-                (None, true) => 0,
-                _ => return Err(Failure::usage("give either --duration DAYS or --milestone", args)),
+                (None, _) => 0,
+                (Some(_), true) => return Err(Failure::usage("a milestone has no --duration", args)),
             };
             let mut item = Item {
                 id,
@@ -470,6 +506,22 @@ fn change(args: &Args, ctx: &Context, edits: &[Edit], json: bool) -> Result<u8, 
     let dry = args.flag("--dry-run");
     if !dry {
         pchart_store::save(&ctx.path, &plan).map_err(|err| Failure::file(err.to_string()))?;
+    }
+    if !plan.without_length().is_empty() || !ctx.plan.without_length().is_empty() {
+        if json {
+            print_json(&json!({ "schema": 1, "written": !dry, "dates": plan.without_length().is_empty(), "without_length": plan.without_length().iter().map(|&index| &plan.items[index].id).collect::<Vec<_>>() }));
+            return Ok(0);
+        }
+        say!("{}", if dry { "Dry run, nothing written." } else { "Saved." });
+        match analysis.verdict.as_ref().filter(|_| plan.without_length().is_empty()) {
+            Some(verdict) => {
+                let (headline, detail) = text::verdict(&plan, verdict);
+                say!("Every piece of work has a length now. {headline} {detail}");
+            }
+            None if plan.without_length().is_empty() => say!("Every piece of work has a length now."),
+            None => say!("{}", undated(&plan)[0]),
+        }
+        return Ok(0);
     }
     let moved = report::moved((&ctx.plan, &ctx.schedule), (&plan, &schedule));
     if json {
@@ -561,6 +613,15 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
         None => Audience::Team,
     };
     let view = args.option("--view").unwrap_or("roadmap");
+    if !ctx.plan.without_length().is_empty() {
+        let pictures = ["--svg", "--png", "--pdf"].iter().any(|option| args.option(option).is_some());
+        if pictures && View::from_id(view).is_none_or(View::dated) {
+            return Err(Failure::undated(&ctx.plan, &format!("the {view} view")));
+        }
+        if args.option("--md").is_some() {
+            return Err(Failure::undated(&ctx.plan, "Markdown"));
+        }
+    }
     let light = match args.option("--style").unwrap_or(if view == "roadmap" { "dark" } else { "light" }) {
         "light" => true,
         "dark" if view == "roadmap" => false,

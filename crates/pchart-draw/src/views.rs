@@ -88,6 +88,17 @@ impl View {
         }
     }
 
+    /// Whether the page shows dates; a plan with work whose length is not known yet has only the others.
+    pub fn dated(self) -> bool {
+        !matches!(self, View::Structure | View::Network | View::Matrix)
+    }
+
+    /// The views a plan has, in the order of `ALL`.
+    pub fn of(plan: &Plan) -> Vec<View> {
+        let dated = plan.without_length().is_empty();
+        View::ALL.into_iter().filter(|view| dated || !view.dated()).collect()
+    }
+
     pub fn from_id(id: &str) -> Option<View> {
         View::ALL.into_iter().find(|view| view.id() == id)
     }

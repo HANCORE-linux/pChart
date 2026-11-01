@@ -102,13 +102,13 @@ fn options(app: &App, width: f32, height: f32, unit: f32, compact: bool, wide: b
     };
     label(&mut s, y, "View", Some(Part::View));
     y += row;
-    for view in View::ALL {
+    for view in View::of(&app.plan) {
         let on = view == e.view;
         if on {
             let w = view.name().chars().count() as f32 * size * ADVANCE + 24.0 * u;
-            s.add(Shape::Rect { x: x - 12.0 * u, y: y + u, w, h: row - 2.0 * u, radius: 5.0 * u, fill: Fill::Color(p.ink), stroke: None });
+            s.add(Shape::Rect { x: x - 12.0 * u, y, w, h: row, radius: 5.0 * u, fill: Fill::Color(p.ink), stroke: None });
         }
-        bits::runs(&mut s, x, y + 15.0 * u, size, &[(view.name(), if on { p.page } else { p.ink }, on)]);
+        bits::runs(&mut s, x, y + 15.5 * u, size, &[(view.name(), if on { p.page } else { p.ink }, on)]);
         y += row;
     }
     y += if compact { 0.0 } else { row };
@@ -140,7 +140,7 @@ fn options(app: &App, width: f32, height: f32, unit: f32, compact: bool, wide: b
     label(&mut s, y, "Format", Some(Part::Format));
     y += row;
     let mut cx = x;
-    for (index, (name, on)) in FORMATS.into_iter().zip(e.formats).enumerate() {
+    for (index, (name, on)) in FORMATS.into_iter().zip(e.formats).enumerate().take(app.formats()) {
         cx = bits::chip(&mut s, cx, y + 19.0 * u, name, on, e.part == Part::Format && e.format == index, u, &p) + 10.0 * u;
     }
     y += if compact { 1.5 * row } else { 2.5 * row };

@@ -6,7 +6,7 @@ pub struct Command {
 
 pub const COMMANDS: &[Command] = &[
     Command { name: "open", usage: "pchart [PLAN] [--theme NAME]", about: "Open the plan in the terminal, in the colours of the current Omarchy theme, which it follows while it changes, or in Labra without Omarchy. --theme NAME takes a theme by name instead, such as labra or harbor. Without PLAN it starts: a new plan from a template, written to this folder, or a plan opened before." },
-    Command { name: "new", usage: "pchart new PLAN --template ID [--name NAME] [--target DATE | --start DATE]", about: "Write a new plan from a template: new-application, website-relaunch, product-launch or empty. --target puts the date on its last milestone and plans backwards from it, --start plans forwards from it; without either it starts today. Never writes over a file." },
+    Command { name: "new", usage: "pchart new PLAN --template ID [--name NAME] [--target DATE | --start DATE | --no-dates]", about: "Write a new plan from a template: new-application, website-relaunch, product-launch or empty. --target puts the date on its last milestone and plans backwards from it, --start plans forwards from it; without either it starts today. --no-dates keeps only how it is built: the work without lengths, so the plan has no dates until each has one. Never writes over a file." },
     Command { name: "situation", usage: "pchart situation PLAN", about: "Where the plan stands: does the date hold, who waits on whom, what is next." },
     Command { name: "why", usage: "pchart why PLAN ITEM", about: "The chain of items that sets the date of ITEM." },
     Command { name: "waits", usage: "pchart waits PLAN", about: "Every lane that waits on another lane, and for what." },
@@ -19,7 +19,7 @@ pub const COMMANDS: &[Command] = &[
         usage: "pchart set PLAN ITEM [--duration DAYS] [--on DATE | --no-earlier-than DATE | --no-later-than DATE | --calculated] [--done | --not-done] [--buffer | --no-buffer] [--important | --not-important] [--name NAME] [--lane LANE] [--who WHO] [--note TEXT]",
         about: "Change an item.",
     },
-    Command { name: "add", usage: "pchart add PLAN ID --lane LANE --name NAME (--duration DAYS [--buffer] | --milestone) [--after ID,ID] [--on DATE] [--who WHO]", about: "Add an item." },
+    Command { name: "add", usage: "pchart add PLAN ID --lane LANE --name NAME ([--duration DAYS] [--buffer] | --milestone) [--after ID,ID] [--on DATE] [--who WHO]", about: "Add an item." },
     Command { name: "remove", usage: "pchart remove PLAN ITEM", about: "Remove an item that nothing waits on." },
     Command { name: "link", usage: "pchart link PLAN FROM TO", about: "Let TO wait on FROM." },
     Command { name: "unlink", usage: "pchart unlink PLAN FROM TO", about: "TO no longer waits on FROM." },
@@ -61,7 +61,7 @@ pub const EDITS: &[(&str, &str)] = &[
     ("phase", r#"{"op": "phase", "phase": NAME, "until": ID}"#),
 ];
 
-const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important"];
+const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important", "--no-dates"];
 
 pub struct Args {
     pub command: &'static str,

@@ -27,6 +27,8 @@ pub struct Start {
     pub name: String,
     /// Scheduled forwards from a start date instead of backwards from a target date.
     pub forwards: bool,
+    /// Only how it is built: the work without lengths, so the plan has no dates yet.
+    pub undated: bool,
     pub typed: String,
     /// The field typing goes to: the date, or the name.
     pub naming: bool,
@@ -41,7 +43,7 @@ impl Start {
     pub fn new(dir: PathBuf, recent: Vec<PathBuf>, calendars: &dyn Fn(&Plan) -> Vec<Calendar>, today: Date, palette: Palette, cell: (u16, u16)) -> Start {
         let templates = pchart_store::templates().into_iter().map(|(_, plan)| plan).collect();
         let recent = recent.into_iter().filter_map(|path| pchart_store::load(&path).ok().map(|plan| (path, calendars(&plan), plan)).map(|(path, calendars, plan)| (path, plan, calendars))).collect();
-        Start { templates, recent, chosen: 0, name: String::new(), forwards: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
+        Start { templates, recent, chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
     }
 
     pub fn template(&self) -> Option<&Plan> {
@@ -54,6 +56,12 @@ impl Start {
     }
 
     /// The date as typed, understood.
+    /// `←→`: from a target date, from a start date, or without dates.
+    pub fn from(&mut self, step: isize) {
+        let at = (if self.undated { 2 } else { isize::from(self.forwards) } + step).rem_euclid(3);
+        (self.forwards, self.undated) = (at == 1, at == 2);
+    }
+
     pub fn date(&self) -> Option<Date> {
         pchart_core::input::date(&self.typed, self.today)
     }
@@ -66,7 +74,8 @@ impl Start {
 
     /// The plan Enter would write: the template with its name and its date. Without a date it starts today.
     pub fn plan(&self) -> Option<Plan> {
-        Some(self.template()?.new_plan(&self.name(), self.date(), self.forwards))
+        let plan = self.template()?.new_plan(&self.name(), self.date().filter(|_| !self.undated), self.forwards);
+        Some(if self.undated { plan.structure_only() } else { plan })
     }
 
     /// Where the new plan is written: its name in small letters, numbered when the file is there.
@@ -137,7 +146,11 @@ pub fn draw(start: &Start, frame: &mut Frame) -> Vec<Placement> {
         how_to_start(start, frame, &inks, rest, &mut placements);
     }
     let hints: Vec<(&str, &str)> = if start.chosen < start.templates.len() {
-        vec![("↑↓", "template"), ("←→", "target or start"), ("Tab", if start.naming { "date" } else { "name" }), ("Enter", "create"), ("Esc", "quit")]
+        let mut hints = vec![("↑↓", "template"), ("←→", "target, start or none"), ("Tab", if start.naming { "date" } else { "name" }), ("Enter", "create"), ("Esc", "quit")];
+        if start.undated {
+            hints.remove(2);
+        }
+        hints
     } else {
         vec![("↑↓", "plan"), ("Enter", "open"), ("Esc", "quit")]
     };
@@ -210,6 +223,18 @@ fn shown(start: &Start) -> Option<(Plan, Vec<Calendar>)> {
 fn preview(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &mut Vec<Placement>) {
     let Some((plan, calendars)) = shown(start) else { return };
     let Ok(schedule) = pchart_core::schedule(&plan, &calendars, start.today) else { return };
+    if !plan.without_length().is_empty() {
+        panel(frame, inks, rect, &format!("PREVIEW · {} · PROJECT STRUCTURE", plan.name.to_uppercase()), false);
+        let chart = Rect { x: rect.x + 2, y: rect.y + 2, width: rect.width.saturating_sub(4), height: rect.height.saturating_sub(3) };
+        if chart.width < 20 || chart.height < 6 {
+            return;
+        }
+        let (cw, ch) = start.cell;
+        let page = pchart_draw::structure(&plan, &schedule, start.today);
+        let svg = bits::sheet(&page, f32::from(chart.width) * f32::from(cw), f32::from(chart.height) * f32::from(ch), f32::from(ch) / 21.0);
+        placements.push(Placement { rect: chart, svg, paper: true });
+        return;
+    }
     let title = format!("PREVIEW · {} · {} WEEKS", plan.name.to_uppercase(), weeks(&schedule));
     panel(frame, inks, rect, &title, false);
     let chart = Rect { x: rect.x + 1, y: rect.y + 2, width: rect.width.saturating_sub(2), height: rect.height.saturating_sub(3) };
@@ -289,22 +314,33 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
                 s.add(Shape::Rect { x: x + u, y: y + 5.0 * u, w: 2.0 * u, h: 17.0 * u, radius: 0.0, fill: pchart_draw::scene::Fill::Color(p.bright), stroke: None });
             }
         };
-        bits::runs(&mut s, left, 22.0 * u, size, &[("Name", if start.naming { p.bright } else { p.dim }, start.naming)]);
-        field(&mut s, 3.0 * u, (w - value - 8.0 * u).min(420.0 * u), &start.name, &placeholder, start.naming);
+        let naming = start.naming || start.undated;
+        bits::runs(&mut s, left, 22.0 * u, size, &[("Name", if naming { p.bright } else { p.dim }, naming)]);
+        field(&mut s, 3.0 * u, (w - value - 8.0 * u).min(420.0 * u), &start.name, &placeholder, naming);
         bits::runs(&mut s, left, 62.0 * u, size, &[("From", p.dim, false)]);
-        let end = bits::chip(&mut s, value, 62.0 * u, "Target date", !start.forwards, false, u, &p);
-        bits::chip(&mut s, end + 12.0 * u, 62.0 * u, "Start date", start.forwards, false, u, &p);
-        bits::runs(&mut s, left, 102.0 * u, size, &[("Date", if start.naming { p.dim } else { p.bright }, !start.naming)]);
-        let box_w = 160.0 * u;
-        field(&mut s, 83.0 * u, box_w, &start.typed, "such as 1 mar", !start.naming);
-        let echo = match start.date() {
-            Some(date) => (format!("→  {}", date.strftime("%a %d %b %Y")), p.bright, true),
-            None if start.typed.trim().is_empty() => (if start.forwards { "starts today".to_string() } else { "no target yet: it starts today".to_string() }, p.muted, false),
-            None => ("not a date yet".to_string(), p.muted, false),
-        };
-        bits::runs(&mut s, value + box_w + 20.0 * u, 102.0 * u, size, &[(&echo.0, echo.1, echo.2)]);
-        let mut y = 150.0 * u;
-        if let (Some(plan), Some(schedule), Some(analysis)) = (&plan, &schedule, &analysis) {
+        let long = value + 29.0 * size * ADVANCE + 96.0 * u <= w;
+        let end = bits::chip(&mut s, value, 62.0 * u, if long { "Target date" } else { "Target" }, !start.forwards && !start.undated, false, u, &p);
+        let end = bits::chip(&mut s, end + 12.0 * u, 62.0 * u, if long { "Start date" } else { "Start" }, start.forwards, false, u, &p);
+        bits::chip(&mut s, end + 12.0 * u, 62.0 * u, "No dates", start.undated, false, u, &p);
+        let mut y = 110.0 * u;
+        if start.undated {
+            bits::draw_icon(&mut s, Icon::Calendar, left + 10.0 * u, y - 6.0 * u, 20.0 * u, p.dim, p.page);
+            let words = "Dates come once every piece of work has a length.";
+            bits::runs(&mut s, left + 30.0 * u, y, size.min((w - left - 40.0 * u) / (words.chars().count() as f32 * ADVANCE)), &[(words, p.ink, false)]);
+            y += 34.0 * u;
+        } else {
+            bits::runs(&mut s, left, 102.0 * u, size, &[("Date", if start.naming { p.dim } else { p.bright }, !start.naming)]);
+            let box_w = 160.0 * u;
+            field(&mut s, 83.0 * u, box_w, &start.typed, "such as 1 mar", !start.naming);
+            let echo = match start.date() {
+                Some(date) => (format!("→  {}", date.strftime("%a %d %b %Y")), p.bright, true),
+                None if start.typed.trim().is_empty() => (if start.forwards { "starts today".to_string() } else { "no target yet: it starts today".to_string() }, p.muted, false),
+                None => ("not a date yet".to_string(), p.muted, false),
+            };
+            bits::runs(&mut s, value + box_w + 20.0 * u, 102.0 * u, size, &[(&echo.0, echo.1, echo.2)]);
+            y = 150.0 * u;
+        }
+        if let (false, Some(plan), Some(schedule), Some(analysis)) = (start.undated, &plan, &schedule, &analysis) {
             let first = schedule.chain.first().copied().or_else(|| schedule.order.first().copied());
             let last = (0..plan.items.len()).max_by_key(|&index| schedule.slots[index].planned.finish);
             let (icon, tone, words): (Icon, _, Vec<(String, _, bool)>) = match (&analysis.verdict, start.date().filter(|_| !start.forwards)) {
@@ -394,6 +430,26 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_without_dates_starts_with_its_structure_only() {
+        let dir = folder("undated");
+        let mut start = start(&dir, Vec::new());
+        start.typed = "1 mar".into();
+        start.from(1);
+        start.from(1);
+        assert!(start.undated && !start.forwards);
+        let (rows, svg) = screen(&start, 160, 47);
+        assert!(rows.contains(":: PREVIEW · NEW APPLICATION · PROJECT STRUCTURE") && rows.contains("←→ target, start or none") && !rows.contains("Tab "), "{rows}");
+        assert!(svg.contains("No dates") && svg.contains("Dates come once every piece of work has a length.") && !svg.contains("such as 1 mar"));
+        let plan = start.plan().unwrap();
+        assert!(plan.without_length().len() == plan.items.iter().filter(|item| !item.milestone).count() && plan.items.iter().all(|item| item.on.is_none()));
+        start.from(1);
+        assert!(!start.undated && !start.forwards);
+        start.from(-1);
+        assert!(start.undated);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_plan_opened_before_says_how_it_stands_and_opens_as_it_is() {
         let dir = folder("recent");
         let path = dir.join("portal.pchart");
@@ -420,8 +476,8 @@ mod tests {
         for (cell, chosen) in [(7, 16), (8, 17), (10, 21)].into_iter().flat_map(|cell| (0..5).map(move |chosen| (cell, chosen))) {
             start.cell = cell;
             start.chosen = chosen;
-            for (typed, forwards) in [("", false), ("1 mar", false), ("1 jan", false), ("2 nov", true)] {
-                (start.typed, start.forwards) = (typed.into(), forwards);
+            for (typed, forwards, undated) in [("", false, false), ("1 mar", false, false), ("1 jan", false, false), ("2 nov", true, false), ("", false, true)] {
+                (start.typed, start.forwards, start.undated) = (typed.into(), forwards, undated);
                 for (width, height) in [(160, 47), (200, 60), (120, 40), (91, 43), (80, 24)] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                     let mut placements = Vec::new();

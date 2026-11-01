@@ -58,6 +58,14 @@ fn no_text_runs_over_the_edge_of_its_shape() {
                 found.push(format!("{} {view}: {crossing}", plan.name));
             }
         }
+        let undated = plan.structure_only();
+        let schedule = pchart_core::schedule(&undated, &calendars, today).unwrap();
+        for (view, scene) in [("structure", pchart_draw::structure(&undated, &schedule, today)), ("network", pchart_draw::network(&undated, &schedule, today)), ("matrix", pchart_draw::matrix(&undated, &schedule, today))] {
+            let svg = scene.svg();
+            for crossing in output.crossings(&svg).unwrap().into_iter().chain(svg.contains(">…</text>").then(|| "a lone \"…\"".to_string())) {
+                found.push(format!("{} {view} without dates: {crossing}", plan.name));
+            }
+        }
     }
     assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
 }

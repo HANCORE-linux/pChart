@@ -59,7 +59,8 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | Command | Use |
 |---|---|
 | `pchart help --json` | every command, option, exit code and edit |
-| `pchart new PLAN --template ID --target DATE` | a new plan from a template (`new-application`, `website-relaunch`, `product-launch`, `empty`); never writes over a file |
+| `pchart new PLAN --template ID --target DATE` | a new plan from a template (`new-application`, `website-relaunch`, `product-launch`, `empty`); never writes over a file; `--no-dates` keeps only how it is built, without lengths |
+| `pchart add PLAN ID --lane L --name N` | work without `--duration` has no length yet; the plan has no dates until every piece of work has one, and `situation` names what is missing |
 | `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |
 | `pchart check PLAN` | problems, warnings and hints; exit code 1 or 2 |
 | `pchart set … --dry-run`, `pchart apply PLAN - --dry-run` | try a change and read what it does, without writing |

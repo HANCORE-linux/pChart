@@ -69,8 +69,25 @@ impl Schedule {
     }
 }
 
-/// Schedules every item that has no fixed date. `calendars` holds one calendar per lane.
+/// Schedules every item that has no fixed date. `calendars` holds one calendar per lane. A plan with work
+/// whose length is not known yet is only put in order: nothing decides a date and nothing has time to spare.
 pub fn schedule(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Schedule, Error> {
+    if plan.without_length().is_empty() {
+        return dated(plan, calendars, today);
+    }
+    let mut ordered = plan.clone();
+    for index in plan.without_length() {
+        ordered.items[index].duration = 1;
+    }
+    let mut schedule = dated(&ordered, calendars, today)?;
+    (schedule.chain, schedule.target, schedule.first, schedule.start_by, schedule.room) = (Vec::new(), None, None, None, None);
+    for slot in &mut schedule.slots {
+        (slot.slack, slot.spare, slot.driver) = (0, 0, None);
+    }
+    Ok(schedule)
+}
+
+fn dated(plan: &Plan, calendars: &[Calendar], today: Date) -> Result<Schedule, Error> {
     let lanes: Vec<usize> = plan.items.iter().map(|item| plan.lane(&item.lane).expect("checked when the plan was read")).collect();
     let preds: Vec<Vec<usize>> = plan.items.iter().map(|item| item.after.iter().filter_map(|id| plan.item(id)).collect()).collect();
     let mut succs = vec![Vec::new(); plan.items.len()];
@@ -422,6 +439,19 @@ on = 2026-11-16
         let p = plan(&[work("build", 5, &[], ""), work("fixed", 2, &["build"], "on = 2026-11-04\n"), milestone("launch", &["build"], "no_later_than = 2026-12-31\n")].concat());
         let s = run(&p, date(2026, 11, 2));
         assert!(s.spare().is_some_and(|spare| spare > 0), "{:?}", s.spare());
+    }
+
+    #[test]
+    fn a_plan_without_lengths_is_only_put_in_order() {
+        let p = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap().structure_only();
+        let calendars = vec![Calendar::default(); p.lanes.len()];
+        let s = schedule(&p, &calendars, date(2026, 11, 2)).unwrap();
+        assert!(s.chain.is_empty() && s.target.is_none() && s.spare().is_none() && s.first.is_none());
+        assert!(s.slots.iter().all(|slot| slot.spare == 0 && slot.driver.is_none()));
+        let at = |id: &str| s.order.iter().position(|&index| p.items[index].id == id).unwrap();
+        assert!(p.items.iter().all(|item| item.after.iter().all(|before| at(before) < at(&item.id))));
+        let analysis = crate::analyse(&p, &calendars, &s, date(2026, 11, 2));
+        assert!(analysis.verdict.is_none() && analysis.checks.is_empty() && analysis.next.is_empty());
     }
 
     #[test]

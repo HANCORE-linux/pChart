@@ -35,9 +35,13 @@ pub type Found = (Action, Option<usize>);
 
 impl Action {
     fn all(app: &App) -> Vec<Action> {
-        let mut all = vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays];
+        let mut all = if app.dated() {
+            vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
+        } else {
+            vec![Action::Situation, Action::Roadmap, Action::Checks]
+        };
         all.push(Action::Export(app.export.view));
-        all.extend(View::ALL.into_iter().filter(|&view| view != app.export.view).map(Action::Export));
+        all.extend(View::of(&app.plan).into_iter().filter(|&view| view != app.export.view).map(Action::Export));
         all.extend([Action::Help, Action::Quit]);
         all
     }
@@ -321,7 +325,7 @@ fn formats(app: &App, typed: &str) -> [bool; 4] {
             "pdf" => formats[0] = true,
             "svg" => formats[1] = true,
             "png" => formats[2] = true,
-            "markdown" | "md" => formats[3] = true,
+            "markdown" | "md" if app.dated() => formats[3] = true,
             _ => {}
         }
     }
@@ -349,6 +353,7 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
             Screen::Situation => vec![(Action::Undo, None)],
         };
         found.retain(|&(action, _)| action != Action::Undo || !app.history.is_empty());
+        found.retain(|(action, _)| Action::all(app).contains(action));
         found.retain(|&(action, item)| item.is_none_or(|index| action.fits(app, index)));
         found.extend([(Action::Situation, None), (Action::Roadmap, None), (Action::Checks, None), (Action::Export(app.export.view), None), (Action::Help, None), (Action::Quit, None)].into_iter().filter(|found_one| !(found_one.0 == Action::Situation && app.screen == Screen::Situation) && !(found_one.0 == Action::Roadmap && app.screen == Screen::Roadmap) && !(found_one.0 == Action::Checks && app.screen == Screen::Checks) && !(matches!(found_one.0, Action::Export(_)) && app.screen == Screen::Export)));
         return found;

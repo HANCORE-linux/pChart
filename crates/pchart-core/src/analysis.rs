@@ -114,6 +114,9 @@ pub struct Analysis {
 }
 
 pub fn analyse(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date) -> Analysis {
+    if !plan.without_length().is_empty() {
+        return Analysis { verdict: None, handoffs: Vec::new(), checks: Vec::new(), next: Vec::new() };
+    }
     let lane = |index: usize| plan.lane(&plan.items[index].lane).unwrap_or(0);
     let cal = |index: usize| &calendars[lane(index)];
     let verdict = verdict(plan, schedule);

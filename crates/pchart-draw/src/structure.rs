@@ -12,7 +12,7 @@ use crate::style::sans_width;
 fn about(plan: &Plan, index: usize) -> String {
     let item = &plan.items[index];
     let lane = plan.lane(&item.lane).map_or("", |lane| plan.lanes[lane].name.as_str());
-    if item.milestone { lane.to_string() } else { format!("{lane} · {} wd", item.duration) }
+    if item.milestone || item.duration == 0 { lane.to_string() } else { format!("{lane} · {} wd", item.duration) }
 }
 
 /// The groups of the first level: the phases, each with the items that end in it, the items after the
@@ -164,11 +164,19 @@ pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         page.scene.add(Shape::Rect { x: x0, y: y0, w: x1 - x0, h: y1 - y0, radius: 4.0, fill: Fill::Color(fill), stroke: Some(stroke) });
         page.shape([x0, y0, x1, y1], Some(index));
         let xc = (x0 + x1) / 2.0;
+        if item.duration == 0 {
+            page.text(xc, y0 + 26.0, &fit(&item.name, 12.5, true, room), 12.5, INK, true, Anchor::Middle, Some(index));
+            continue;
+        }
         page.text(xc, y0 + 18.0, &fit(&item.name, 12.5, true, room), 12.5, INK, true, Anchor::Middle, Some(index));
         page.text(xc, y0 + 34.0, &fit(&format!("{} wd", item.duration), 11.5, false, room), 11.5, GRAY, false, Anchor::Middle, Some(index));
     }
     let y = page.height() - 92.0;
-    page.legend(y, &[(Key::Chain, "decides the date"), (Key::Soft, "has time to spare"), (Key::Link, "waits on"), (Key::Milestone, "milestone"), (Key::Fixed, "fixed date")]);
+    if schedule.chain.is_empty() {
+        page.legend(y, &[(Key::Link, "waits on"), (Key::Milestone, "milestone")]);
+    } else {
+        page.legend(y, &[(Key::Chain, "decides the date"), (Key::Soft, "has time to spare"), (Key::Link, "waits on"), (Key::Milestone, "milestone"), (Key::Fixed, "fixed date")]);
+    }
     page.finish()
 }
 
@@ -229,6 +237,11 @@ pub fn matrix(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
         page.line(x(column), top + 26.0 + head, x(column), y, PAPER, 1.0);
     }
     let ly = page.height() - 92.0;
+    if schedule.chain.is_empty() {
+        page.scene.add(Shape::Circle { x: X0 + 6.0, y: ly - 4.0, r: 5.0, fill: LINK });
+        page.text(X0 + 18.0, ly, "the row waits on the column", 13.0, GRAY, false, Anchor::Start, None);
+        return page.finish();
+    }
     page.scene.add(Shape::Circle { x: X0 + 6.0, y: ly - 4.0, r: 5.0, fill: INK });
     let end = page.text(X0 + 18.0, ly, "the row waits on the column, on the chain that decides the date", 13.0, GRAY, false, Anchor::Start, None);
     page.scene.add(Shape::Circle { x: end + 32.0, y: ly - 4.0, r: 5.0, fill: LINK });
