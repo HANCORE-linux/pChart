@@ -1,4 +1,5 @@
 pub mod bits;
+pub mod dot;
 pub mod gantt;
 pub mod later;
 pub mod markdown;
@@ -14,6 +15,7 @@ pub mod style;
 pub mod swimlanes;
 pub mod views;
 
+pub use dot::dot;
 pub use gantt::gantt;
 pub use later::now_next_later;
 pub use markdown::markdown;
@@ -22,7 +24,7 @@ pub use output::Output;
 pub use phases::phase_plan;
 pub use roadmap::{Cut, Level, Settings, natural_height, part, roadmap, shown, what_if, why};
 pub use scene::Scene;
-pub use structure::{network, structure};
+pub use structure::{matrix, network, structure};
 pub use style::Palette;
 pub use swimlanes::swimlanes;
 pub use views::{Audience, View};

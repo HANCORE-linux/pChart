@@ -1,8 +1,9 @@
 use jiff::civil::date;
 use pchart_core::{Holidays, Plan, Schedule, analyse, schedule};
-use pchart_draw::scene::{Anchor, Scene, Shape};
+use pchart_draw::page::{INK, MID};
+use pchart_draw::scene::{Anchor, Fill, Scene, Shape};
 use pchart_draw::style::sans_width;
-use pchart_draw::{Audience, gantt, milestones, network, now_next_later, phase_plan, structure, swimlanes};
+use pchart_draw::{Audience, dot, gantt, matrix, milestones, network, now_next_later, phase_plan, structure, swimlanes};
 
 fn pages() -> Vec<(String, Scene)> {
     let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
@@ -22,6 +23,7 @@ fn pages() -> Vec<(String, Scene)> {
         out.push((format!("{} now-next-later", plan.name), now_next_later(&plan, &schedule, today)));
         out.push((format!("{} structure", plan.name), structure(&plan, &schedule, today)));
         out.push((format!("{} network", plan.name), network(&plan, &schedule, today)));
+        out.push((format!("{} matrix", plan.name), matrix(&plan, &schedule, today)));
     }
     out
 }
@@ -101,4 +103,55 @@ fn the_structure_and_the_network_show_how_the_plan_is_built_without_dates() {
     assert!(built.iter().chain(&words).all(|text| !text.contains("Dates scheduled") && !text.contains("Mar 2027")));
     let top = |name: &str| network.marks.iter().find_map(|mark| match &mark.shape { Shape::Text { text, y, .. } if text == name => Some(*y), _ => None }).unwrap();
     assert!(top("Requirements") < top("UX concept") && top("UX concept") < top("UI design") && top("Feature freeze") < top("Beta test") && top("Beta test") < top("Launch"));
+}
+
+#[test]
+fn the_matrix_puts_a_dot_below_the_diagonal_where_a_row_waits_on_a_column() {
+    let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
+    let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+    let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+    let today = date(2026, 10, 29);
+    let schedule: Schedule = schedule(&plan, &calendars, today).unwrap();
+    let scene = matrix(&plan, &schedule, today);
+    let texts: Vec<&str> = scene.marks.iter().filter_map(|mark| if let Shape::Text { text, .. } = &mark.shape { Some(text.as_str()) } else { None }).collect();
+    for text in ["Dependency matrix · as of 29 Oct 2026", "1 Requirements", "Requirements", "Launch", "waits on, with time to spare"] {
+        assert!(texts.contains(&text), "{text}");
+    }
+    assert!(texts.iter().all(|text| !text.contains("Dates scheduled") && !text.contains("Mar 2027")));
+    let diagonal: Vec<(f32, f32, f32)> = scene.marks.iter().filter_map(|mark| match mark.shape {
+        Shape::Rect { x, y, w, fill: Fill::Color(MID), .. } => Some((x, y, w)),
+        _ => None,
+    }).collect();
+    assert_eq!(diagonal.len(), plan.items.len());
+    let dots: Vec<(f32, f32, bool)> = scene.marks.iter().filter_map(|mark| match mark.shape {
+        Shape::Circle { x, y, fill, .. } if y < scene.height - 120.0 => Some((x, y, fill == INK)),
+        _ => None,
+    }).collect();
+    let links: Vec<(usize, usize)> = plan.items.iter().enumerate().flat_map(|(index, item)| item.after.iter().filter_map(|id| plan.item(id)).map(move |pred| (pred, index))).collect();
+    let chain = links.iter().filter(|(pred, index)| schedule.chain.contains(pred) && schedule.chain.contains(index)).count();
+    assert_eq!(dots.len(), links.len());
+    assert_eq!(dots.iter().filter(|(_, _, ink)| *ink).count(), chain);
+    assert!(chain > 0 && dots.iter().any(|(_, _, ink)| !ink));
+    for (x, y, _) in dots {
+        let &(dx, _, _) = diagonal.iter().find(|(_, dy, w)| y > *dy && y < dy + w).unwrap();
+        assert!(x < dx, "a dot on or above the diagonal at {x} {y}");
+    }
+}
+
+#[test]
+fn the_dot_file_has_a_cluster_per_lane_and_an_arrow_per_wait() {
+    let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
+    let mut plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+    plan.items[0].name = "Say \"hi\" \\ go".into();
+    let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+    let schedule: Schedule = schedule(&plan, &calendars, date(2026, 10, 29)).unwrap();
+    let text = dot(&plan, &schedule);
+    assert!(text.starts_with("digraph \"Customer portal v1\" {\n") && text.ends_with("}\n"), "{text}");
+    assert_eq!(text.matches("subgraph \"cluster_").count(), plan.lanes.len());
+    let links: usize = plan.items.iter().map(|item| item.after.iter().filter(|id| plan.item(id).is_some()).count()).sum();
+    assert_eq!(text.matches(" -> ").count(), links);
+    assert!(text.contains(r#"label="Say \"hi\" \\ go\n"#), "{text}");
+    assert!(text.contains(r#"label="Product · Berlin""#));
+    assert!(text.contains(r#""launch" [shape=diamond"#) && text.contains(r#"xlabel="Launch""#));
+    assert!(text.contains(r##"-> "ux-concept" [color="#1f2421", penwidth=2];"##));
 }

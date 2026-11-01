@@ -97,6 +97,17 @@ fn markdown_comes_with_the_milestone_chart_next_to_it() {
 }
 
 #[test]
+fn the_plan_exports_as_a_graphviz_file() {
+    let path = copy("dot");
+    let file = path.with_file_name("portal.dot");
+    let output = pchart(&["export", path.to_str().unwrap(), "--dot", file.to_str().unwrap()], None);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.starts_with("digraph \"Customer portal v1\" {") && text.contains("\"requirements\" -> \"ux-concept\""), "{text}");
+    assert!(!path.with_file_name("portal.svg").exists());
+}
+
+#[test]
 fn the_milestone_chart_is_a_page_without_detail_levels() {
     let path = copy("milestones");
     let svg = path.with_file_name("milestones.svg");
@@ -113,7 +124,7 @@ fn the_milestone_chart_is_a_page_without_detail_levels() {
 fn every_view_exports_and_light_pages_refuse_terminal_options() {
     let path = copy("views");
     let svg = path.with_file_name("view.svg");
-    for (view, style) in [("gantt", None), ("phases", None), ("now-next-later", None), ("milestones", None), ("structure", None), ("network", None), ("roadmap", Some("light")), ("roadmap", None)] {
+    for (view, style) in [("gantt", None), ("phases", None), ("now-next-later", None), ("milestones", None), ("structure", None), ("network", None), ("matrix", None), ("roadmap", Some("light")), ("roadmap", None)] {
         let mut args = vec!["export", path.to_str().unwrap(), "--view", view, "--svg", svg.to_str().unwrap()];
         if let Some(style) = style {
             args.extend(["--style", style]);

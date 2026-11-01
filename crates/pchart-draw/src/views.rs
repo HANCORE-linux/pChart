@@ -55,10 +55,11 @@ pub enum View {
     NowNextLater,
     Structure,
     Network,
+    Matrix,
 }
 
 impl View {
-    pub const ALL: [View; 7] = [View::Gantt, View::Milestones, View::Roadmap, View::Phases, View::NowNextLater, View::Structure, View::Network];
+    pub const ALL: [View; 8] = [View::Gantt, View::Milestones, View::Roadmap, View::Phases, View::NowNextLater, View::Structure, View::Network, View::Matrix];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -69,6 +70,7 @@ impl View {
             View::NowNextLater => "Now / Next / Later",
             View::Structure => "Project structure",
             View::Network => "Network diagram",
+            View::Matrix => "Dependency matrix",
         }
     }
 
@@ -82,6 +84,7 @@ impl View {
             View::NowNextLater => "now-next-later",
             View::Structure => "structure",
             View::Network => "network",
+            View::Matrix => "matrix",
         }
     }
 
@@ -99,6 +102,7 @@ impl View {
             View::NowNextLater => crate::now_next_later(plan, schedule, today),
             View::Structure => crate::structure(plan, schedule, today),
             View::Network => crate::network(plan, schedule, today),
+            View::Matrix => crate::matrix(plan, schedule, today),
         }
     }
 }

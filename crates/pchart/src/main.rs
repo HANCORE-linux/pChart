@@ -159,7 +159,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
     let known: &[&str] = match args.command {
         "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who", "--note"],
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
-        "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--audience"],
+        "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--dot", "--audience"],
         "bench" => &["--frames", "--out"],
         "open" => &["--theme"],
         "new" => &["--template", "--name", "--target", "--start"],
@@ -553,8 +553,8 @@ fn print_schedule(plan: &Plan, schedule: &Schedule, json: bool) {
 }
 
 fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
-    if ["--svg", "--png", "--pdf", "--md"].iter().all(|option| args.option(option).is_none()) {
-        return Err(Failure::usage("export needs at least one of --svg, --png, --pdf and --md", args));
+    if ["--svg", "--png", "--pdf", "--md", "--dot"].iter().all(|option| args.option(option).is_none()) {
+        return Err(Failure::usage("export needs at least one of --svg, --png, --pdf, --md and --dot", args));
     }
     let audience = match args.option("--audience") {
         Some(id) => Audience::from_id(id).ok_or_else(|| Failure::usage(format!("\"{id}\" is not an audience; use team, management, client or agents"), args))?,
@@ -590,7 +590,7 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
         }
         other => match View::from_id(other) {
             Some(view) => view.page(&ctx.plan, &ctx.schedule, ctx.today, &checks(), audience),
-            None => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases, now-next-later, structure or network"), args)),
+            None => return Err(Failure::usage(format!("\"{other}\" is not a view; use roadmap, milestones, gantt, phases, now-next-later, structure, network or matrix"), args)),
         },
     };
     let svg = scene.svg();
@@ -607,6 +607,9 @@ fn export(args: &Args, ctx: &Context) -> Result<(), Failure> {
         if let Some(path) = args.option("--pdf") {
             write(Path::new(path), &output.pdf(&tree).map_err(Failure::file)?)?;
         }
+    }
+    if let Some(path) = args.option("--dot") {
+        write(Path::new(path), pchart_draw::dot(&ctx.plan, &ctx.schedule).as_bytes())?;
     }
     if let Some(path) = args.option("--md") {
         let stem = ctx.path.file_stem().map_or("plan".into(), |stem| stem.to_string_lossy());

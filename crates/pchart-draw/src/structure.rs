@@ -1,11 +1,12 @@
-//! How a project is built, without dates (pictures 57): the project structure (work breakdown,
-//! DIN 69901) and the network diagram (DIN 69900).
+//! How a project is built, without dates (pictures 57 and 58): the project structure (work breakdown,
+//! DIN 69901), the network diagram (DIN 69900) and the dependency matrix (design structure matrix).
 
 use jiff::civil::Date;
 use pchart_core::{Plan, Schedule};
 
 use crate::page::{CARD, GRAY, INK, Key, LATE, LINK, MID, PAPER, Page, SHADES, SOFT, X0, X1, fit};
 use crate::scene::{Anchor, Fill, Scene, Shape, Stroke};
+use crate::style::sans_width;
 
 /// What an item is in a box: its lane and, for work, its length.
 fn about(plan: &Plan, index: usize) -> String {
@@ -168,5 +169,69 @@ pub fn network(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     }
     let y = page.height() - 92.0;
     page.legend(y, &[(Key::Chain, "decides the date"), (Key::Soft, "has time to spare"), (Key::Link, "waits on"), (Key::Milestone, "milestone"), (Key::Fixed, "fixed date")]);
+    page.finish()
+}
+
+/// The dependency matrix (design structure matrix): the items as rows and as columns in the same order,
+/// phase by phase, and a dot where the row waits on the column, in ink on the chain that decides the
+/// date. A plan has no circles, so every dot lies below the diagonal; one far from it waits across phases.
+pub fn matrix(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
+    let groups = groups(plan, schedule);
+    let order: Vec<usize> = groups.iter().flat_map(|(_, items)| items.iter().copied()).collect();
+    let count = order.len().max(1);
+    let label = order.iter().map(|&index| sans_width(&plan.items[index].name, 13.0, false)).fold(0.0, f32::max).min(260.0) + 40.0;
+    let gx = X0 + label;
+    let cell = ((X1 - gx) / count as f32).clamp(10.0, 32.0);
+    let (top, head) = (176.0, 26.0);
+    let height = top + 26.0 + count as f32 * cell + groups.len() as f32 * head + 130.0;
+    let mut page = Page::plain(plan, today, "Dependency matrix", height);
+    let at: Vec<usize> = {
+        let mut at = vec![0; plan.items.len()];
+        for (row, &index) in order.iter().enumerate() {
+            at[index] = row;
+        }
+        at
+    };
+    let mut ys = vec![0.0f32; count];
+    let mut y = top + 26.0;
+    let mut row = 0;
+    for (number, (name, items)) in groups.iter().enumerate() {
+        page.text(X0, y + 18.0, &format!("{} {}", number + 1, fit(name, 13.0, true, label + count as f32 * cell)), 13.0, GRAY, true, Anchor::Start, None);
+        y += head;
+        let block = items.len() as f32 * cell;
+        page.scene.add(Shape::Rect { x: gx, y, w: count as f32 * cell, h: block, radius: 0.0, fill: Fill::Color(CARD), stroke: None });
+        page.scene.add(Shape::Rect { x: gx + row as f32 * cell, y, w: block, h: block, radius: 0.0, fill: Fill::Color(SHADES[number % SHADES.len()]), stroke: None });
+        for _ in items {
+            ys[row] = y;
+            row += 1;
+            y += cell;
+        }
+    }
+    let x = |column: usize| gx + column as f32 * cell;
+    let every = if cell >= 18.0 { 1 } else { 5 };
+    for (column, &index) in order.iter().enumerate() {
+        if (column + 1) % every == 0 || every == 1 {
+            page.text(x(column) + cell / 2.0, top + 14.0, &format!("{}", column + 1), 11.0, GRAY, false, Anchor::Middle, None);
+        }
+        let row_y = ys[column];
+        page.text(gx - 30.0, row_y + cell / 2.0 + 4.0, &fit(&plan.items[index].name, 13.0, false, label - 34.0), 13.0, INK, false, Anchor::End, Some(index));
+        page.text(gx - 6.0, row_y + cell / 2.0 + 4.0, &format!("{}", column + 1), 11.0, GRAY, false, Anchor::End, None);
+        page.scene.add(Shape::Rect { x: x(column), y: row_y, w: cell, h: cell, radius: 0.0, fill: Fill::Color(MID), stroke: None });
+    }
+    for (row, &index) in order.iter().enumerate() {
+        page.line(gx, ys[row], gx + count as f32 * cell, ys[row], PAPER, 1.0);
+        for pred in plan.items[index].after.iter().filter_map(|id| plan.item(id)) {
+            let on = schedule.chain.contains(&index) && schedule.chain.contains(&pred);
+            page.scene.add(Shape::Circle { x: x(at[pred]) + cell / 2.0, y: ys[row] + cell / 2.0, r: cell * 0.26, fill: if on { INK } else { LINK } });
+        }
+    }
+    for column in 0..=count {
+        page.line(x(column), top + 26.0 + head, x(column), y, PAPER, 1.0);
+    }
+    let ly = page.height() - 92.0;
+    page.scene.add(Shape::Circle { x: X0 + 6.0, y: ly - 4.0, r: 5.0, fill: INK });
+    let end = page.text(X0 + 18.0, ly, "the row waits on the column, on the chain that decides the date", 13.0, GRAY, false, Anchor::Start, None);
+    page.scene.add(Shape::Circle { x: end + 32.0, y: ly - 4.0, r: 5.0, fill: LINK });
+    page.text(end + 44.0, ly, "waits on, with time to spare", 13.0, GRAY, false, Anchor::Start, None);
     page.finish()
 }

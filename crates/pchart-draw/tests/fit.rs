@@ -47,7 +47,7 @@ fn no_text_runs_over_the_edge_of_its_shape() {
                 }
             }
         }
-        let mut pages = vec![("milestones", milestones(&plan, &schedule, today, Audience::Team)), ("phases", phase_plan(&plan, &schedule, today)), ("now-next-later", now_next_later(&plan, &schedule, today)), ("structure", pchart_draw::structure(&plan, &schedule, today)), ("network", pchart_draw::network(&plan, &schedule, today))];
+        let mut pages = vec![("milestones", milestones(&plan, &schedule, today, Audience::Team)), ("phases", phase_plan(&plan, &schedule, today)), ("now-next-later", now_next_later(&plan, &schedule, today)), ("structure", pchart_draw::structure(&plan, &schedule, today)), ("network", pchart_draw::network(&plan, &schedule, today)), ("matrix", pchart_draw::matrix(&plan, &schedule, today))];
         for audience in [Audience::Team, Audience::Client] {
             pages.push(("gantt", gantt(&plan, &schedule, today, &checks, audience)));
             pages.push(("swimlanes", swimlanes(&plan, &schedule, today, &checks, audience)));

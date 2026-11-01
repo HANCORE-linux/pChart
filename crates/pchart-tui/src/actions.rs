@@ -81,6 +81,7 @@ impl Action {
                 View::NowNextLater => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "now", "next", "later"],
                 View::Structure => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "structure", "breakdown", "wbs", "psp", "built", "tree"],
                 View::Network => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "network", "netzplan", "dependencies", "graph", "pert"],
+                View::Matrix => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "matrix", "dsm", "dependencies", "structure"],
             },
             Action::Help => &["help", "explain", "keys", "legend", "symbols", "what"],
             Action::Quit => &["quit", "exit", "close", "leave"],
