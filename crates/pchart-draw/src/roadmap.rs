@@ -277,7 +277,7 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
     if (c.g.start..=c.g.end).contains(&today) {
         let xt = c.g.x(today);
         s.add(Shape::Line { x1: xt, y1: c.g.top + 42.0 * u, x2: xt, y2: c.g.bottom(), stroke: c.rule(p.ink, 1.5) });
-        s.add(Shape::Text { x: xt - 5.0 * u, y: c.g.top + 14.0 * u, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor: Anchor::End });
+        today_label(&mut s, &c, xt);
     }
     if why.is_some() {
         for mark in s.marks.iter_mut().filter(|mark| mark.item.is_some_and(|index| !c.chain.contains(&index))) {
@@ -285,6 +285,59 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
         }
     }
     s
+}
+
+/// "today" on the line of the months, left of the today line; where that covers the name of a month or
+/// leaves the chart, right of it; where both do, left of it with the month's name moved past it, or left
+/// out when its month has no room after "today".
+fn today_label(s: &mut Scene, c: &Chart, xt: f32) {
+    let (p, u, g) = (c.p, c.u, &c.g);
+    let (y, w, gap) = (g.top + 14.0 * u, c.text_width("today", 13.5), 6.0 * u);
+    let months: Vec<(usize, f32, f32)> = s
+        .marks
+        .iter()
+        .enumerate()
+        .filter_map(|(at, mark)| match &mark.shape {
+            Shape::Text { x, y: ty, text, size, .. } if (ty - y).abs() < 0.01 => Some((at, *x, x + text.chars().count() as f32 * size * ADVANCE)),
+            _ => None,
+        })
+        .collect();
+    let clear = |left: f32, right: f32| left >= 0.0 && right <= g.x1 && months.iter().all(|&(_, a, b)| right + gap <= a || b + gap <= left);
+    let (left, right) = ((xt - 5.0 * u - w, xt - 5.0 * u), (xt + 5.0 * u, xt + 5.0 * u + w));
+    let (x, anchor) = if clear(left.0, left.1) || !clear(right.0, right.1) { (left.1, Anchor::End) } else { (right.0, Anchor::Start) };
+    if anchor == Anchor::End {
+        let mut ends = Vec::new();
+        let mut month = g.start.first_of_month();
+        while month <= g.end {
+            month = next(month.last_of_month());
+            ends.push(g.x(month.min(g.end)).min(g.x1));
+        }
+        let mut gone = Vec::new();
+        for &(at, a, b) in months.iter().filter(|&&(_, a, b)| !(left.1 + gap <= a || b + gap <= left.0)) {
+            let moved = a.max(xt + gap);
+            let end = ends.iter().copied().find(|&end| end > a + 0.5).unwrap_or(g.x1);
+            if moved + (b - a) + gap > end {
+                gone.push(at);
+            } else if let Shape::Text { x, .. } = &mut s.marks[at].shape {
+                *x = moved;
+            }
+        }
+        for &at in gone.iter().rev() {
+            let year = match &s.marks[at].shape {
+                Shape::Text { text, .. } => text.split_once(' ').map(|(_, year)| year.to_string()),
+                _ => None,
+            };
+            let after = months.iter().map(|&(other, ..)| other).find(|other| *other > at && !gone.contains(other));
+            if let (Some(year), Some(after)) = (year, after)
+                && let Shape::Text { text, .. } = &mut s.marks[after].shape
+                && !text.contains(' ')
+            {
+                text.push_str(&format!(" {year}"));
+            }
+            s.marks.remove(at);
+        }
+    }
+    s.add(Shape::Text { x, y, text: "today".into(), size: 13.5 * u, color: p.bright, bold: true, anchor });
 }
 
 /// The height at which every lane of the roadmap gets the room of the approved design.
