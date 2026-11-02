@@ -4,8 +4,7 @@ on the desktop, the keys of the timeline typed by drive.py, and a picture of the
 often as grim manages. pChart reads its Omarchy theme from a folder of its own, written from the
 themes pChart ships, which switches from Labra to Harbor at THEME together with the colours of that
 kitty, as Omarchy does on a desktop. The terminal opens on a shell with a plain prompt in a home of its
-own: the copied sample plan is among the plans opened before, and a copy of pChart's code lies in
-~/projects/pchart for pchart read. The recording changes only the copies.
+own: the copied sample plan is among the plans opened before. The recording changes only the copy.
 usage: record.py OUT [WIDTHxHEIGHT] [FONT_SIZE]"""
 
 import json
@@ -57,10 +56,6 @@ current = home / ".config/omarchy/current"
 theme(current, "labra")
 (home / ".local/state/pchart").mkdir(parents=True)
 (home / ".local/state/pchart/recent").write_text(f"{plan / 'customer-portal.pchart'}\n")
-source = plan / "pchart"
-source.mkdir()
-shutil.copy(ROOT / "Cargo.toml", source / "Cargo.toml")
-shutil.copytree(ROOT / "crates", source / "crates", ignore=shutil.ignore_patterns("target", "*.png", "*.pchart"))
 labra = THEMES["labra"]
 accent, ink = (labra[key].lstrip("#") for key in ("accent", "foreground"))
 rgb = lambda hex: ";".join(str(int(hex[at:at + 2], 16)) for at in (0, 2, 4))

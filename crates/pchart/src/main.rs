@@ -191,7 +191,6 @@ fn run(args: &Args) -> Result<u8, Failure> {
         "bench" => &["--frames", "--out"],
         "open" => &["--theme"],
         "new" => &["--template", "--name", "--target", "--start"],
-        "read" => &["--out", "--name"],
         "report" => &["--later", "--comment", "--by"],
         _ => &[],
     };
@@ -200,9 +199,6 @@ fn run(args: &Args) -> Result<u8, Failure> {
     }
     if args.command == "new" {
         return new(args);
-    }
-    if args.command == "read" {
-        return read(args);
     }
     if args.command == "list" {
         return list(args);
@@ -505,76 +501,6 @@ fn list(args: &Args) -> Result<u8, Failure> {
 }
 
 /// `pchart new`: a plan from a template, written where no file is.
-/// `pchart read DIR`: how a folder is built, as a plan without dates next to where pChart runs.
-fn read(args: &Args) -> Result<u8, Failure> {
-    let dir = PathBuf::from(args.words.first().ok_or_else(|| Failure::usage("which folder? Name it.", args))?);
-    let folder = std::fs::canonicalize(&dir).ok().and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned())).unwrap_or_else(|| "folder".into());
-    let name = args.option("--name").map_or(folder.clone(), str::to_string);
-    let shown = dir.display().to_string();
-    let shown = match std::env::var("HOME").ok().filter(|home| !home.is_empty() && shown.starts_with(home.as_str())) {
-        Some(home) => format!("~{}", &shown[home.len()..]),
-        None => shown,
-    };
-    let terminal = std::io::stderr().is_terminal() && !args.flag("--json");
-    let started = std::time::Instant::now();
-    let mut drawn = started;
-    let mut frame = 0;
-    let mut line = |text: String| {
-        let now = std::time::Instant::now();
-        if terminal && now.duration_since(started).as_millis() >= 150 && now.duration_since(drawn).as_millis() >= 80 {
-            drawn = now;
-            frame += 1;
-            eprint!("\r\x1b[2K{} {text}", ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][frame % 10]);
-        }
-    };
-    let reading_from = std::cell::Cell::new(None::<std::time::Instant>);
-    let line = std::cell::RefCell::new(&mut line);
-    let read = pchart_store::read(
-        &dir,
-        &name,
-        &mut |seen| (line.borrow_mut())(format!("Counting files in {shown} · {seen} so far")),
-        &mut |progress| {
-            let from = *reading_from.get().get_or_insert_with(std::time::Instant::now);
-            reading_from.set(Some(from));
-            let spent = from.elapsed().as_secs_f64();
-            let left = if progress.bytes == 0 { 0.0 } else { spent * (progress.of_bytes - progress.bytes) as f64 / progress.bytes as f64 };
-            let when = if left < 1.0 { "less than a second left".to_string() } else { format!("about {} s left", left.round()) };
-            (line.borrow_mut())(format!("Reading {shown} · {} of {} files · {when}", progress.files, progress.of_files));
-        },
-    );
-    if terminal && started.elapsed().as_millis() >= 150 {
-        eprint!("\r\x1b[2K");
-    }
-    let read = read.map_err(|err| Failure { code: 3, kind: "usage", message: err.to_string(), hint: None })?;
-    let path = PathBuf::from(args.option("--out").map_or_else(|| format!("{}.pchart", pchart_core::model::slug(&folder).unwrap_or_else(|| "folder".into())), str::to_string));
-    let dry = args.flag("--dry-run");
-    if !dry {
-        pchart_store::create(&path, &read.plan).map_err(|err| Failure::file(err.to_string()))?;
-    }
-    let waits: usize = read.plan.items.iter().map(|item| item.after.len()).sum();
-    if args.flag("--json") {
-        print_json(&json!({ "schema": 1, "written": !dry, "file": path.display().to_string(), "items": read.plan.items.len(), "lanes": read.plan.lanes.len(), "waits": waits, "kinds": read.kinds, "left_out": read.circles.iter().map(|(from, to)| json!({ "item": from, "uses": to })).collect::<Vec<_>>() }));
-        return Ok(0);
-    }
-    let kinds: Vec<String> = read.kinds.iter().map(|(kind, count)| format!("{count} {kind}")).collect();
-    let lanes = match read.plan.lanes.len() {
-        1 => "1 lane".to_string(),
-        count => format!("{count} lanes"),
-    };
-    say!("Read {} files ({}) in {lanes}: {} of them use others, {} in all.", read.plan.items.len(), kinds.join(", "), read.plan.items.iter().filter(|item| !item.after.is_empty()).count(), if waits == 1 { "1 use".to_string() } else { format!("{waits} uses") });
-    if !read.circles.is_empty() {
-        say!("{} uses were left out, since a plan cannot wait on itself in a circle:", read.circles.len());
-        for (from, to) in read.circles.iter().take(5) {
-            say!("  {from} uses {to}");
-        }
-        if read.circles.len() > 5 {
-            say!("  and {} more; --json lists them all", read.circles.len() - 5);
-        }
-    }
-    say!("{} {}. Open it with: pchart {}", if dry { "Dry run, nothing written:" } else { "Wrote" }, path.display(), path.display());
-    Ok(0)
-}
-
 fn new(args: &Args) -> Result<u8, Failure> {
     let path = PathBuf::from(args.words.first().ok_or_else(|| Failure::usage("where? Name the new plan file.", args))?);
     let templates = pchart_store::templates();

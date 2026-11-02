@@ -1,6 +1,7 @@
 """What the video shows: when each key is typed (seconds after the terminal opens), and the scenes with
 their captions and keys (picture 48, made anew as a use case on 2026-11-01: a terminal opens on the
-Omarchy desktop, pchart opens a plan from before, and pchart read shows how pChart's own code is built).
+Omarchy desktop, pchart opens a plan from before, and the export shows its pages; shortened on
+2026-11-02 when pchart read was parked).
 THEME after END keeps the video in Labra."""
 
 
@@ -18,18 +19,12 @@ KEYS = [
     (19.0, "3"), (21.4, "b"),
     (24.0, "4"), (25.4, "left"), *[(27.4 + index * 0.3, "right") for index in range(6)], (30.6, "right"),
     (33.0, "q"),
-    *typed(34.6, "pchart read ~/projects/pchart", 0.07), (37.0, "enter"),
-    *typed(40.0, "pchart pchart.pchart", 0.07), (41.7, "enter"),
-    (43.8, "down"), (44.8, "down"), (45.8, "right"), (46.8, "down"),
-    (48.6, "4"), (50.0, "right"),
 ]
-END = 54.5
+END = 35.0
 SCENES = [
     (LEAD, 6.6, "Open a terminal, type pchart, and pick up the plan you had open.", ["↑↓", "Enter"]),
     (6.6, 10.6, "A plan says where it stands, what is next and which chain decides the date.", ["↑↓"]),
     (10.6, 18.6, "y shows why a date is set: the chain before it, and what it has to spare.", ["2", "y", "↑↓", "Esc"]),
     (18.6, 23.6, "Checks say what to look at, and b adds the buffer they suggest.", ["3", "b"]),
-    (23.6, 33.6, "The preview is the file: Gantt chart, network diagram, dependency matrix.", ["4", "←→"]),
-    (33.6, 42.0, "pchart read shows how a folder is built. Here: pChart's own code.", ["Enter"]),
-    (42.0, END, "Each file a box, each use an arrow; the matrix shows the layers.", ["↑↓", "←→", "4"]),
+    (23.6, END, "The preview is the file: Gantt chart, network diagram, dependency matrix.", ["4", "←→"]),
 ]
