@@ -227,6 +227,11 @@ pub fn what_if(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], setting
     draw(plan, schedule, calendars, settings, None, Some(before), None)
 }
 
+/// A part of the roadmap of a plan tried as what-if, with the places items had in `before` dashed.
+pub fn what_if_part(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, cut: &Cut, before: &Schedule) -> Scene {
+    draw(plan, schedule, calendars, settings, Some(cut), Some(before), None)
+}
+
 /// Why this date? (picture 56): the roadmap with the chain of items that sets the date of `item`, each
 /// waiting on the one before with its arrow, and everything else stepping back.
 pub fn why(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Settings, item: usize) -> Scene {

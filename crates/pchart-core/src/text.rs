@@ -50,6 +50,16 @@ pub fn verdict(plan: &Plan, verdict: &Verdict) -> (String, String) {
     }
 }
 
+/// How the plan stands in one sentence: "Launch on Mon 01 Mar is on track, 9 working days to spare."
+pub fn stand(plan: &Plan, verdict: &Verdict) -> String {
+    let target = format!("{} on {}", name(plan, verdict.target), day(verdict.date));
+    match verdict.state {
+        State::Holds => format!("{target} is on track, {} to spare.", working_days(verdict.spare)),
+        State::Tight => format!("{target} is at risk, {} to spare.", working_days(verdict.spare)),
+        State::DoesNotHold => format!("{target} is {} late.", working_days(-verdict.spare)),
+    }
+}
+
 pub fn handoff(plan: &Plan, handoff: &Handoff) -> String {
     format!("{} waits on {}: {} due {}.", lane(plan, handoff.waiting), lane(plan, handoff.on), name(plan, handoff.item), day(handoff.due))
 }

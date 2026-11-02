@@ -62,7 +62,9 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | `pchart new PLAN --template ID --target DATE` | a new plan from a template (`new-application`, `website-relaunch`, `product-launch`, `empty`); never writes over a file; `--no-dates` keeps only how it is built, without lengths |
 | `pchart add PLAN ID --lane L --name N` | work without `--duration` has no length yet; the plan has no dates until every piece of work has one, and `situation` names what is missing |
 | `pchart list` | in a workspace (a folder with a `workspace.toml`), every project with how it stands, and the people to look at: over their capacity or away during their work; `--json` for agents |
-| `workspace.toml` | `name`, `teams = [{ name, city }]`, `people = [{ name, team, capacity, away = [{ from, to }] }]`; in a workspace `check`, `situation`, `next` and `list` look at people across all projects |
+| `workspace.toml` | `name`, `lead` (who answers reports), `teams = [{ name, city }]`, `people = [{ name, team, capacity, away = [{ from, to }] }]`; in a workspace `check`, `situation`, `next` and `list` look at people across all projects |
+| `pchart report PLAN ID (--done \| --on-track \| --risk \| --later DAYS) [--comment TEXT] [--by NAME]` | in a workspace, say how a piece of work stands; it waits in `reports/` as a file of its own and the plan stays as it is until the lead takes it; `--by` else `$PCHART_NAME` |
+| `pchart reports PLAN` | the reports about a plan, newest first, answered or not, with what taking each would do; `--json` |
 | `pchart set PLAN ID --who NAME --share 30` | who does a piece of work and the share of their time it takes (1–100, else all of it); the share counts only for how busy they are, never for dates |
 | `pchart read DIR` | how a folder is built, as a plan without dates: Rust crates and files, Hyprland, Lua and CSS that take in others; one project or config folder, at most 1,000 files, never the system |
 | `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |

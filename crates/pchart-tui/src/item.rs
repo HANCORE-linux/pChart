@@ -156,6 +156,75 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 }
             }
         }
+        Form::Report { item, status, days, comment, by, at, answering } => {
+            let name = &app.plan.items[*item].name;
+            let reported = answering.as_ref().and_then(|path| app.reports.iter().find(|(known, _)| known == path)).map(|(_, report)| report.clone());
+            match &reported {
+                Some(report) => head(app, s, x, y, width, height, u, &format!("CHANGE, THEN TAKE · {}", name.to_uppercase()), &format!("What do you take from {}?", report.by)),
+                None => head(app, s, x, y, width, height, u, &format!("REPORT · {}", name.to_uppercase()), &format!("How is {name} going?")),
+            }
+            let label_w = 9.0 * 16.6 * u * ADVANCE;
+            let step = 40.0 * u;
+            let later = crate::app::STATUSES[*status].0 == pchart_core::report::Status::Later;
+            let reporters = app.reporters();
+            for row in 0..4 {
+                let chosen = row == *at;
+                if chosen {
+                    band(s, x, top, width, step - 6.0 * u, u, &p);
+                }
+                let baseline = top + 22.0 * u;
+                bits::runs(s, left, baseline, 16.6 * u, &[(["It is", "More", "Comment", "From"][row], if chosen { p.bright } else { p.dim }, chosen)]);
+                let value_x = left + label_w;
+                match row {
+                    0 => {
+                        let mut chip_x = value_x;
+                        for (index, (_, words)) in crate::app::STATUSES.iter().enumerate() {
+                            chip_x = bits::chip(s, chip_x, baseline, words, index == *status, false, u, &p) + 12.0 * u;
+                        }
+                    }
+                    1 if later => {
+                        let box_w = 110.0 * u;
+                        field(s, value_x, top + 3.0 * u, box_w, days, chosen, u, p.ink, p.bright);
+                        let echo = match pchart_core::input::length(days) {
+                            Some(1) => ("→  1 working day more".to_string(), p.bright, true),
+                            Some(count) if count > 0 => (format!("→  {count} working days more"), p.bright, true),
+                            _ => ("such as 3 or 1w".to_string(), p.muted, false),
+                        };
+                        bits::runs(s, value_x + box_w + 20.0 * u, baseline, 16.6 * u, &[(&echo.0, echo.1, echo.2)]);
+                    }
+                    1 => {
+                        bits::runs(s, value_x, baseline, 16.6 * u, &[("only when it needs more time", p.muted, false)]);
+                    }
+                    2 => field(s, value_x, top + 3.0 * u, room - label_w, comment, chosen, u, p.ink, p.bright),
+                    _ if reported.is_some() => {
+                        let report = reported.as_ref().expect("checked");
+                        let words = format!("{} · reported {} {}", report.by, report.words(), report.at.strftime("%a %d %b"));
+                        bits::runs(s, value_x, baseline, 16.6 * u, &[(&fit(&words, 16.6 * u, room - label_w - 10.0 * u), p.dim, false)]);
+                    }
+                    _ => {
+                        let who = reporters.get(*by).map_or("the workspace names no people", String::as_str);
+                        bits::runs(s, value_x, baseline, 16.6 * u, &[(&fit(who, 16.6 * u, room - label_w - 40.0 * u), if chosen { p.bright } else { p.ink }, false)]);
+                    }
+                }
+                if chosen && (row == 0 || row == 3 && reported.is_none()) {
+                    bits::runs(s, x + width - 26.0 * u - 2.0 * 16.6 * u * ADVANCE, baseline, 16.6 * u, &[("←→", p.dim, true)]);
+                }
+                top += step;
+            }
+            top += 8.0 * u;
+            s.add(Shape::Line { x1: x + 16.0 * u, y1: top - 10.0 * u, x2: x + width - 16.0 * u, y2: top - 10.0 * u, stroke: Stroke { color: p.rule, width: u, dash: None } });
+            let note = match &reported {
+                Some(report) => format!("Enter takes this into the plan; {} sees what you took.", report.by),
+                None => "It goes to the project lead; the plan stays as it is until they take it.".to_string(),
+            };
+            bits::runs(s, left, top + 22.0 * u, 16.6 * u, &[(&fit(&note, 16.6 * u, room), p.ink, false)]);
+            let then = app.form_report().ok().and_then(|report| report.then(&app.plan, &app.calendars, app.today)).and_then(|(plan, _, analysis)| analysis.verdict.map(|verdict| pchart_core::text::stand(&plan, &verdict)));
+            if let Some(then) = then.filter(|_| later || reported.is_some()) {
+                let lead = if reported.is_some() { "Then" } else { "If it is taken" };
+                bits::runs(s, left, top + 50.0 * u, 15.0 * u, &[(&fit(&format!("{lead}: {then}"), 15.0 * u, room), p.dim, false)]);
+            }
+            return;
+        }
         Form::Who { item, at, share } => {
             let it = &app.plan.items[*item];
             head(app, s, x, y, width, height, u, &format!("WHO · {}", it.name.to_uppercase()), &format!("Who does {}?", it.name));

@@ -14,6 +14,8 @@ pub enum Screen {
     Export,
     /// In a workspace, everyone's work across its projects (picture 64).
     People,
+    /// In a workspace, what the team reports about the plan (pictures 65).
+    Reports,
 }
 
 /// The part of the Export screen that `↑↓` moves between and `←→` changes.
@@ -113,9 +115,28 @@ pub enum Form {
     /// Who does `item` (picture 64): the people `App::who_rows` offers, the one `↑↓` is on, and the
     /// share of their time it takes, which `←→` changes.
     Who { item: usize, at: usize, share: u32 },
+    /// A report on `item` (pictures 65): how it stands by its place in `STATUSES`, the days more it needs
+    /// as typed, the comment, who reports by their place in `App::reporters`, and the question `↑↓` is on.
+    Report { item: usize, status: usize, days: String, comment: String, by: usize, at: usize, answering: Option<PathBuf> },
 }
 
 pub use pchart_core::people::Crew;
+
+/// A step of "Next" on the situation screen: one of the analysis, or a report to answer by its place
+/// in `App::reports`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Next(usize),
+    Report(usize),
+}
+
+/// How a piece of work can stand in a report, in the order of the report dialog.
+pub const STATUSES: [(pchart_core::report::Status, &str); 4] = [
+    (pchart_core::report::Status::Done, "Done"),
+    (pchart_core::report::Status::OnTrack, "On track"),
+    (pchart_core::report::Status::Risk, "At risk"),
+    (pchart_core::report::Status::Later, "Needs more time"),
+];
 
 /// The plan as it was before a what-if, which Esc goes back to.
 pub struct Before {
@@ -166,13 +187,23 @@ pub struct App {
     /// The line and the week chosen on the People screen.
     pub person: usize,
     pub week: usize,
+    /// The workspace's folder, where reports go, and the reports about this plan, newest first
+    /// (pictures 65); the one chosen on the Reports screen.
+    pub root: Option<PathBuf>,
+    pub reports: Vec<(PathBuf, pchart_core::report::Report)>,
+    pub report: usize,
+    /// Who uses pChart here (`pchart_store::me`).
+    pub me: Option<String>,
+    /// The reports taken into the plan, each with the length `history` had after it, so `u` opens
+    /// it again.
+    pub taken: Vec<(usize, PathBuf)>,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, crew: None, person: 0, week: 0 };
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, crew: None, person: 0, week: 0, root: None, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
         if !app.dated() {
             app.screen = Screen::Roadmap;
             app.export.view = View::Network;
@@ -226,6 +257,200 @@ impl App {
         let now = self.plan.items[self.selected].who.clone();
         let at = rows.iter().position(|row| *row == now).unwrap_or(0);
         self.form = Some(Form::Who { item: self.selected, at, share: self.plan.items[self.selected].share.unwrap_or(100) });
+    }
+
+    /// The plan file's name, as reports name it.
+    pub fn file_name(&self) -> String {
+        std::path::Path::new(&self.path).file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    }
+
+    /// Who answers reports, when the workspace names one.
+    pub fn lead(&self) -> Option<&str> {
+        self.crew.as_ref()?.workspace.lead.as_deref()
+    }
+
+    /// Whether the one using pChart here may answer reports: the workspace's lead, or anyone when it
+    /// names none.
+    pub fn answers(&self) -> bool {
+        self.lead().is_none_or(|lead| self.me.as_deref() == Some(lead))
+    }
+
+    /// The reports not answered yet, by their place in `reports`.
+    pub fn open_reports(&self) -> Vec<usize> {
+        (0..self.reports.len()).filter(|&at| self.reports[at].1.answer.is_none()).collect()
+    }
+
+    /// Reads the reports again; a new one that is not answered yet is named in the key bar.
+    pub fn refresh_reports(&mut self) {
+        let Some(root) = &self.root else { return };
+        let found = pchart_store::reports(root, &self.file_name());
+        let new = found.iter().find(|(path, report)| report.answer.is_none() && !self.reports.iter().any(|(known, _)| known == path));
+        if let Some((_, report)) = new.filter(|_| !self.reports.is_empty() || self.message.is_none()) {
+            let name = self.plan.item(&report.item).map_or(report.item.clone(), |index| self.plan.items[index].name.clone());
+            self.message = Some(format!("{} reports: {name} {}", report.by, report.words()));
+        }
+        self.reports = found;
+        self.report = self.report.min(self.open_reports().len().saturating_sub(1));
+    }
+
+    /// Enter on the Reports screen: takes the chosen report into the plan as one change for `u`, and
+    /// writes the answer into its file.
+    pub fn take_report(&mut self) {
+        if !self.may_answer() {
+            return;
+        }
+        let Some((path, report)) = self.open_reports().get(self.report).map(|&at| self.reports[at].clone()) else { return };
+        self.take_into(&path, &report, None);
+    }
+
+    /// Enter in the report dialog opened with `e`: takes the report as changed there, and writes what
+    /// was taken into its file, so the reporter sees it.
+    fn take_edited(&mut self, path: &std::path::Path, edited: &pchart_core::report::Report) {
+        let Some((_, reported)) = self.reports.iter().find(|(known, _)| known == path).cloned() else { return };
+        let same = (edited.status, edited.days, &edited.comment) == (reported.status, reported.days, &reported.comment);
+        let taken = (!same).then(|| pchart_core::report::Taken { status: edited.status, days: edited.days, comment: edited.comment.clone() });
+        if self.take_into(path, edited, taken) {
+            self.form = None;
+            self.screen = Screen::Reports;
+        }
+    }
+
+    /// Takes `report` into the plan as one change for `u` and writes the answer; whether it worked.
+    fn take_into(&mut self, path: &std::path::Path, report: &pchart_core::report::Report, taken: Option<pchart_core::report::Taken>) -> bool {
+        let Some(edits) = report.edits(&self.plan) else {
+            self.message = Some(format!("{} is no longer in the plan", report.item));
+            return false;
+        };
+        if !edits.is_empty() {
+            if let Err(err) = self.apply_all(&edits, format!("{}'s report", report.by)) {
+                self.message = Some(err);
+                return false;
+            }
+            self.taken.push((self.history.len(), path.to_path_buf()));
+        }
+        let name = self.plan.item(&report.item).map_or(report.item.clone(), |index| self.plan.items[index].name.clone());
+        let changed = taken.is_some();
+        let done = match pchart_store::answer(path, pchart_core::report::Answer::Taken, taken) {
+            Ok(()) => {
+                self.message = Some(format!("{}: {name} {}", if changed { "Taken as changed" } else { "Taken" }, report.words()));
+                true
+            }
+            Err(err) => {
+                self.message = Some(err.to_string());
+                false
+            }
+        };
+        self.refresh_reports();
+        done
+    }
+
+    /// `x` on the Reports screen: declines the chosen report; the plan stays as it is.
+    pub fn decline_report(&mut self) {
+        if !self.may_answer() {
+            return;
+        }
+        let Some((path, _)) = self.open_reports().get(self.report).map(|&at| self.reports[at].clone()) else { return };
+        self.message = Some(match pchart_store::answer(&path, pchart_core::report::Answer::Declined, None) {
+            Ok(()) => "Declined; the plan stays as it is".to_string(),
+            Err(err) => err.to_string(),
+        });
+        self.refresh_reports();
+    }
+
+    /// Whether the one here may answer; if not, the key bar says who does.
+    fn may_answer(&mut self) -> bool {
+        if self.answers() {
+            return true;
+        }
+        self.message = Some(format!("{} answers reports", self.lead().unwrap_or("The project lead")));
+        false
+    }
+
+    /// Who can report: the people of the workspace.
+    pub fn reporters(&self) -> Vec<String> {
+        self.crew.as_ref().map(|crew| crew.workspace.people.iter().map(|person| person.name.clone()).collect()).unwrap_or_default()
+    }
+
+    /// `s` on the roadmap: a report on the selected item, from who does it.
+    pub fn start_report(&mut self) {
+        if self.root.is_none() {
+            self.message = Some("Reports go to a workspace".into());
+            return;
+        }
+        let reporters = self.reporters();
+        let who = self.me.clone().filter(|me| reporters.contains(me)).or_else(|| self.plan.items[self.selected].who.clone());
+        let by = who.and_then(|who| reporters.iter().position(|name| *name == who)).unwrap_or(0);
+        self.form = Some(Form::Report { item: self.selected, status: 1, days: String::new(), comment: String::new(), by, at: 0, answering: None });
+    }
+
+    /// `e` on the Reports screen: the chosen report in the report dialog over the roadmap, to change
+    /// before taking it.
+    pub fn edit_report(&mut self) {
+        if !self.may_answer() {
+            return;
+        }
+        let Some((path, report)) = self.open_reports().get(self.report).map(|&at| self.reports[at].clone()) else { return };
+        let Some(item) = self.plan.item(&report.item) else {
+            self.message = Some(format!("{} is no longer in the plan", report.item));
+            return;
+        };
+        self.selected = item;
+        self.screen = Screen::Roadmap;
+        let status = STATUSES.iter().position(|(status, _)| *status == report.status).unwrap_or(1);
+        let days = if report.days > 0 { report.days.to_string() } else { String::new() };
+        self.form = Some(Form::Report { item, status, days, comment: report.comment.clone().unwrap_or_default(), by: 0, at: 1, answering: Some(path) });
+    }
+
+    /// Esc in a dialog: closes it; one opened from the Reports screen goes back there.
+    pub fn close_form(&mut self) {
+        if matches!(self.form, Some(Form::Report { answering: Some(_), .. })) {
+            self.screen = Screen::Reports;
+        }
+        self.form = None;
+    }
+
+    /// The report the open dialog would send.
+    pub fn form_report(&self) -> Result<pchart_core::report::Report, String> {
+        let Some(Form::Report { item, status, days, comment, by, answering, .. }) = &self.form else { return Err(String::new()) };
+        let (status, _) = STATUSES[*status];
+        let days = if status == pchart_core::report::Status::Later { pchart_core::input::length(days).filter(|&days| days > 0).ok_or("Type how many days more, such as 3")? } else { 0 };
+        let reported = answering.as_ref().and_then(|path| self.reports.iter().find(|(known, _)| known == path)).map(|(_, report)| report.by.clone());
+        let by = match reported {
+            Some(by) => by,
+            None => self.reporters().get(*by).cloned().ok_or("The workspace names no people")?,
+        };
+        Ok(pchart_core::report::Report {
+            project: self.file_name(),
+            item: self.plan.items[*item].id.clone(),
+            by,
+            at: {
+                let now = jiff::Zoned::now().datetime();
+                self.today.at(now.hour(), now.minute(), 0, 0)
+            },
+            status,
+            days,
+            comment: Some(comment.trim().to_string()).filter(|comment| !comment.is_empty()),
+            answer: None,
+            taken: None,
+        })
+    }
+
+    /// Enter in the report dialog: writes the report for the project lead.
+    pub fn send_report(&mut self) {
+        let (Some(root), Ok(report)) = (self.root.clone(), self.form_report()) else {
+            if let Err(err) = self.form_report() {
+                self.message = Some(err);
+            }
+            return;
+        };
+        match pchart_store::report(&root, &report) {
+            Ok(_) => {
+                self.form = None;
+                self.refresh_reports();
+                self.message = Some("Reported; the plan stays as it is until the project lead takes it".into());
+            }
+            Err(err) => self.message = Some(err.to_string()),
+        }
     }
 
     /// Whether every piece of work has a length, so the plan has dates.
@@ -291,8 +516,20 @@ impl App {
     }
 
     /// The next or previous statement in "What is burning next".
+    /// The steps of "Next": what the analysis says, with the reports to answer after when to start.
+    pub fn steps(&self) -> Vec<Step> {
+        use pchart_core::analysis::Next;
+        let reports = self.open_reports();
+        let after = self.analysis.next.iter().take_while(|next| matches!(next, Next::StartBy { .. })).count();
+        let mut out: Vec<Step> = (0..self.analysis.next.len()).map(Step::Next).collect();
+        for (offset, at) in reports.into_iter().enumerate() {
+            out.insert(after + offset, Step::Report(at));
+        }
+        out
+    }
+
     pub fn choose(&mut self, step: isize) {
-        let count = self.analysis.next.len() as isize;
+        let count = self.steps().len() as isize;
         if count > 0 {
             self.statement = (self.statement as isize + step).rem_euclid(count) as usize;
         }
@@ -301,10 +538,18 @@ impl App {
     /// The roadmap, with the item of the chosen statement selected.
     pub fn show_in_roadmap(&mut self) {
         use pchart_core::analysis::Next;
-        let item = self.analysis.next.get(self.statement).and_then(|next| match next {
-            Next::StartBy { item, .. } | Next::Due { item, .. } => Some(*item),
-            Next::Check(index) => self.analysis.checks[*index].items().first().copied(),
-        });
+        let item = match self.steps().get(self.statement) {
+            Some(Step::Report(at)) => {
+                self.report = self.open_reports().iter().position(|open| open == at).unwrap_or(0);
+                self.screen = Screen::Reports;
+                return;
+            }
+            Some(Step::Next(index)) => match &self.analysis.next[*index] {
+                Next::StartBy { item, .. } | Next::Due { item, .. } => Some(*item),
+                Next::Check(index) => self.analysis.checks[*index].items().first().copied(),
+            },
+            None => None,
+        };
         if let Some(item) = item {
             self.selected = item;
         }
@@ -416,6 +661,12 @@ impl App {
                 self.message = Some(format!("Undone: {label}"));
             }
             Err(err) => self.message = Some(err.to_string()),
+        }
+        if let Some((_, path)) = self.taken.pop_if(|(after, _)| *after > self.history.len()) {
+            if let Err(err) = pchart_store::reopen(&path) {
+                self.message = Some(err.to_string());
+            }
+            self.refresh_reports();
         }
     }
 
@@ -594,6 +845,7 @@ impl App {
                 let days = pchart_core::input::length(typed).filter(|&days| days > 0).ok_or("Type a length, such as 5 or 2w")?;
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
+            Form::Report { .. } => Ok((Vec::new(), String::new())),
             Form::Who { item, at, share } => {
                 let it = &self.plan.items[*item];
                 let who = self.who_rows(*item).get(*at).cloned().flatten();
@@ -616,9 +868,10 @@ impl App {
             Some(Form::Add(_)) => 5,
             Some(Form::WaitsOn { item, .. }) => self.waits_order(*item).len(),
             Some(Form::Who { item, .. }) => self.who_rows(*item).len(),
+            Some(Form::Report { .. }) => 4,
             _ => return,
         };
-        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. } | Form::Who { at, .. }) = self.form.as_mut() {
+        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. } | Form::Who { at, .. } | Form::Report { at, .. }) = self.form.as_mut() {
             *at = (*at as isize + step).rem_euclid(count.max(1) as isize) as usize;
         }
     }
@@ -627,6 +880,15 @@ impl App {
     pub fn form_change(&mut self, step: isize) {
         if let Some(Form::Who { share, .. }) = self.form.as_mut() {
             *share = (*share as isize + step * 10).clamp(10, 100) as u32;
+            return;
+        }
+        let people = self.reporters().len().max(1) as isize;
+        if let Some(Form::Report { status, by, at, .. }) = self.form.as_mut() {
+            match at {
+                0 => *status = (*status as isize + step).rem_euclid(STATUSES.len() as isize) as usize,
+                3 => *by = (*by as isize + step).rem_euclid(people) as usize,
+                _ => {}
+            }
             return;
         }
         let lanes = self.plan.lanes.len() as isize;
@@ -655,6 +917,8 @@ impl App {
             Some(Form::Add(adding)) if adding.at == 0 => adding.name.push(c),
             Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
             Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => typed.push(c),
+            Some(Form::Report { days, at: 1, .. }) => days.push(c),
+            Some(Form::Report { comment, at: 2, .. }) => comment.push(c),
             Some(Form::WaitsOn { on, at, .. }) if c == ' ' => {
                 if let Some(&other) = order.get(*at) {
                     on[other] ^= true;
@@ -670,6 +934,8 @@ impl App {
             Some(Form::Add(adding)) if adding.at == 0 => drop(adding.name.pop()),
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
             Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => drop(typed.pop()),
+            Some(Form::Report { days, at: 1, .. }) => drop(days.pop()),
+            Some(Form::Report { comment, at: 2, .. }) => drop(comment.pop()),
             _ => {}
         }
     }
@@ -685,6 +951,18 @@ impl App {
 
     /// Enter in a dialog: makes its changes as one and closes it, or says what is missing.
     pub fn keep_form(&mut self) {
+        if let Some(Form::Report { answering: Some(path), .. }) = &self.form {
+            let path = path.clone();
+            match self.form_report() {
+                Ok(edited) => self.take_edited(&path, &edited),
+                Err(err) => self.message = Some(err),
+            }
+            return;
+        }
+        if matches!(self.form, Some(Form::Report { .. })) {
+            self.send_report();
+            return;
+        }
         match self.form_edits() {
             Ok((edits, _)) if edits.is_empty() => self.form = None,
             Ok((edits, label)) => {

@@ -7,6 +7,7 @@ mod help;
 mod item;
 mod note;
 mod people;
+mod reports;
 mod pictures;
 mod question;
 mod situation;
@@ -47,7 +48,12 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
     let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
     if let Some(crew) = crew {
         app.join(crew);
+        app.me = pchart_store::me();
+        app.root = pchart_store::workspace(path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."))).map(|(root, _)| root);
+        app.refresh_reports();
+        app.message = None;
     }
+    let mut looked = Instant::now();
     (app.palette, app.ground) = (theme.palette, theme.ground);
     let (written, results) = mpsc::channel();
     let (save, saves) = mpsc::channel::<Plan>();
@@ -90,6 +96,10 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
         if let Ok(err) = failures.try_recv() {
             app.message = Some(err);
         }
+        if app.root.is_some() && looked.elapsed() >= Duration::from_secs(3) {
+            looked = Instant::now();
+            app.refresh_reports();
+        }
         if let Ok(result) = results.try_recv() {
             app.export.busy = false;
             match result {
@@ -104,7 +114,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
         }) {
             break Err(err);
         }
-        let idle = if theme.live() { Duration::from_secs(1) } else { Duration::from_secs(60) };
+        let idle = if theme.live() { Duration::from_secs(1) } else if app.root.is_some() { Duration::from_secs(3) } else { Duration::from_secs(60) };
         match event::poll(if waiting || app.export.busy { Duration::from_millis(8) } else { idle }) {
             Ok(false) => continue,
             Ok(true) => {}
@@ -153,7 +163,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
             },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.form.is_some() => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
-                KeyCode::Esc => app.form = None,
+                KeyCode::Esc => app.close_form(),
                 KeyCode::Enter => app.keep_form(),
                 KeyCode::Up | KeyCode::BackTab => app.form_move(-1),
                 KeyCode::Down | KeyCode::Tab => app.form_move(1),
@@ -237,6 +247,13 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
                 (_, KeyCode::Char('4')) => app.screen = Screen::Export,
                 (_, KeyCode::Char('5')) if app.crew.is_some() => app.screen = Screen::People,
+                (_, KeyCode::Char('6')) if app.crew.is_some() => app.screen = Screen::Reports,
+                (Screen::Reports, KeyCode::Up) => app.report = app.report.saturating_sub(1),
+                (Screen::Reports, KeyCode::Down) => app.report = (app.report + 1).min(app.open_reports().len().saturating_sub(1)),
+                (Screen::Reports, KeyCode::Enter) => app.take_report(),
+                (Screen::Reports, KeyCode::Char('x')) => app.decline_report(),
+                (Screen::Reports, KeyCode::Char('e')) => app.edit_report(),
+                (Screen::Roadmap, KeyCode::Char('s')) => app.start_report(),
                 (Screen::People, KeyCode::Up) => app.person = app.person.saturating_sub(1),
                 (Screen::People, KeyCode::Down) => app.person = (app.person + 1).min(app.crew.as_ref().map_or(0, |crew| people::lines(&people::rows(crew, None)).len().saturating_sub(1))),
                 (Screen::People, KeyCode::Left) => app.week = app.week.saturating_sub(1),
@@ -319,6 +336,7 @@ pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) ->
     let mut start = start::Start::new(folder, plans, calendars, today, theme.palette, pictures.cell());
     if let Some((root, _)) = &workspace {
         start.people = pchart_store::people(root);
+        start.open = start.recent.iter().map(|(path, _, _)| pchart_store::reports(root, &path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned())).iter().filter(|(_, report)| report.answer.is_none()).count()).collect();
         start.crew = start.recent.iter().filter_map(|(_, plan, lanes)| pchart_core::schedule(plan, lanes, today).ok().map(|schedule| pchart_core::people::Project { name: plan.name.clone(), plan: plan.clone(), schedule, calendars: lanes.clone() })).collect();
     }
     start.workspace = workspace.map(|(_, name)| name);

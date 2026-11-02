@@ -23,7 +23,7 @@ pub use markdown::markdown;
 pub use milestones::milestones;
 pub use output::Output;
 pub use phases::phase_plan;
-pub use roadmap::{Cut, Level, Settings, natural_height, part, roadmap, shown, what_if, why};
+pub use roadmap::{Cut, Level, Settings, natural_height, part, roadmap, shown, what_if, what_if_part, why};
 pub use scene::Scene;
 pub use structure::{matrix, network, structure};
 pub use style::Palette;

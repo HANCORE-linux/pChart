@@ -192,6 +192,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         "open" => &["--theme"],
         "new" => &["--template", "--name", "--target", "--start"],
         "read" => &["--out", "--name"],
+        "report" => &["--later", "--comment", "--by"],
         _ => &[],
     };
     if let Some(option) = args.unknown_options(known) {
@@ -232,6 +233,82 @@ fn run(args: &Args) -> Result<u8, Failure> {
     }
 
     match args.command {
+        "report" => {
+            let id = item(1)?.to_string();
+            let dir = ctx.path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            let (root, _) = pchart_store::workspace(dir).ok_or_else(|| Failure::usage("reports go to a workspace: a folder with a workspace.toml, with the plan in it", args))?;
+            let (status, days) = match (args.flag("--done"), args.flag("--on-track"), args.flag("--risk"), args.option("--later")) {
+                (true, false, false, None) => (pchart_core::report::Status::Done, 0),
+                (false, true, false, None) => (pchart_core::report::Status::OnTrack, 0),
+                (false, false, true, None) => (pchart_core::report::Status::Risk, 0),
+                (false, false, false, Some(text)) => (pchart_core::report::Status::Later, text.parse::<u32>().ok().or_else(|| parse_workdays(text)).filter(|&days| days > 0).ok_or_else(|| Failure::usage(format!("\"{text}\" is not a number of working days"), args))?),
+                _ => return Err(Failure::usage("say one of --done, --on-track, --risk or --later DAYS", args)),
+            };
+            let by = args.option("--by").map(str::to_string).or_else(|| std::env::var("PCHART_NAME").ok()).filter(|name| !name.trim().is_empty()).ok_or_else(|| Failure::usage("who reports? Name yourself with --by NAME, or set PCHART_NAME", args))?;
+            let report = pchart_core::report::Report {
+                project: ctx.path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+                item: id,
+                by,
+                at: { let now = jiff::Zoned::now().datetime(); ctx.today.at(now.hour(), now.minute(), 0, 0) },
+                status,
+                days,
+                comment: args.option("--comment").map(str::to_string),
+                answer: None,
+                taken: None,
+            };
+            let dry = args.flag("--dry-run");
+            let file = if dry { None } else { Some(pchart_store::report(&root, &report).map_err(|err| Failure::file(err.to_string()))?) };
+            let then = report.then(&ctx.plan, &ctx.calendars, ctx.today).and_then(|(plan, _, analysis)| analysis.verdict.map(|verdict| text::stand(&plan, &verdict)));
+            let name = &ctx.plan.items[ctx.plan.item(&report.item).unwrap_or(0)].name;
+            if json {
+                print_json(&json!({ "schema": 1, "written": file.is_some(), "file": file.as_ref().map(|file| file.strip_prefix(&root).unwrap_or(file).display().to_string()), "item": report.item, "status": report.words(), "if_taken": then }));
+            } else {
+                say!("{}: {name} {}.", if dry { "Dry run, nothing written" } else { "Reported" }, report.words());
+                if let Some(file) = &file {
+                    say!("It waits in {} for the project lead; the plan stays as it is.", file.strip_prefix(&root).unwrap_or(file).display());
+                }
+                if let Some(then) = then {
+                    say!("If it is taken: {then}");
+                }
+            }
+            Ok(0)
+        }
+        "reports" => {
+            let dir = ctx.path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            let (root, _) = pchart_store::workspace(dir).ok_or_else(|| Failure::usage("reports live in a workspace: a folder with a workspace.toml, with the plan in it", args))?;
+            let project = ctx.path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            let found = pchart_store::reports(&root, &project);
+            let state = |report: &pchart_core::report::Report| match report.answer {
+                None => "to answer",
+                Some(pchart_core::report::Answer::Taken) if report.taken.is_some() => "changed",
+                Some(pchart_core::report::Answer::Taken) => "taken",
+                Some(pchart_core::report::Answer::Declined) => "declined",
+            };
+            if json {
+                let reports: Vec<_> = found
+                    .iter()
+                    .map(|(path, report)| {
+                        let then = report.then(&ctx.plan, &ctx.calendars, ctx.today).and_then(|(plan, _, analysis)| analysis.verdict.map(|verdict| text::stand(&plan, &verdict)));
+                        json!({ "file": path.strip_prefix(&root).unwrap_or(path).display().to_string(), "item": report.item, "by": report.by, "at": report.at.strftime("%Y-%m-%dT%H:%M").to_string(), "status": report.words(), "comment": report.comment, "answer": state(report), "if_taken": then })
+                    })
+                    .collect();
+                print_json(&json!({ "schema": 1, "reports": reports }));
+                return Ok(0);
+            }
+            let open = found.iter().filter(|(_, report)| report.answer.is_none()).count();
+            say!("{}: {}", ctx.plan.name, match open { 0 => "no reports to answer".to_string(), 1 => "1 report to answer".to_string(), count => format!("{count} reports to answer") });
+            for (_, report) in &found {
+                let name = ctx.plan.item(&report.item).map_or(report.item.as_str(), |index| ctx.plan.items[index].name.as_str());
+                let comment = report.comment.as_ref().map(|comment| format!(" \"{comment}\"")).unwrap_or_default();
+                say!("  {:<11} {}  {}: {name} {}.{comment}", state(report), report.at.strftime("%a %d %b %H:%M"), report.by, report.words());
+                if report.answer.is_none()
+                    && let Some(then) = report.then(&ctx.plan, &ctx.calendars, ctx.today).and_then(|(plan, _, analysis)| analysis.verdict.map(|verdict| text::stand(&plan, &verdict)))
+                {
+                    say!("              if taken: {then}");
+                }
+            }
+            Ok(0)
+        }
         "situation" => {
             let analysis = analysis()?;
             if json {
@@ -390,8 +467,10 @@ fn list(args: &Args) -> Result<u8, Failure> {
         let projects: Vec<_> = rows
             .iter()
             .map(|(path, plan, verdict, _, _)| {
+                let file = path.file_name().map_or_else(String::new, |file| file.to_string_lossy().into_owned());
+                let open = pchart_store::reports(&root, &file).iter().filter(|(_, report)| report.answer.is_none()).count();
                 let state = verdict.as_ref().map(|verdict| pchart_draw::situation::state_words(verdict.state));
-                json!({ "file": path.strip_prefix(&root).unwrap_or(path).display().to_string(), "name": plan.name, "state": state, "target": verdict.as_ref().map(|verdict| plan.items[verdict.target].id.clone()), "date": verdict.as_ref().map(|verdict| report::iso(verdict.date)), "spare_wd": verdict.as_ref().map(|verdict| verdict.spare), "dates": plan.without_length().is_empty() })
+                json!({ "file": path.strip_prefix(&root).unwrap_or(path).display().to_string(), "name": plan.name, "state": state, "target": verdict.as_ref().map(|verdict| plan.items[verdict.target].id.clone()), "date": verdict.as_ref().map(|verdict| report::iso(verdict.date)), "spare_wd": verdict.as_ref().map(|verdict| verdict.spare), "dates": plan.without_length().is_empty(), "reports_to_answer": open })
             })
             .collect();
         let people: Vec<_> = found.iter().map(|(who, kind, from, to, what)| json!({ "who": who, "kind": kind, "from": report::iso(*from), "to": report::iso(*to), "what": what })).collect();
@@ -401,13 +480,19 @@ fn list(args: &Args) -> Result<u8, Failure> {
     say!("{name}: {}", if rows.len() == 1 { "1 project".to_string() } else { format!("{} projects", rows.len()) });
     for (path, plan, verdict, _, _) in &rows {
         let file = path.file_name().map_or_else(String::new, |file| file.to_string_lossy().into_owned());
+        let open = pchart_store::reports(&root, &file).iter().filter(|(_, report)| report.answer.is_none()).count();
+        let asks = match open {
+            0 => String::new(),
+            1 => " · 1 report to answer".to_string(),
+            count => format!(" · {count} reports to answer"),
+        };
         let stands = match verdict {
             Some(verdict) if verdict.spare < 0 => format!("{} on {} is {} late", plan.items[verdict.target].name, text::day(verdict.date), text::working_days(-verdict.spare)),
             Some(verdict) => format!("{} on {} is {}, {} to spare", plan.items[verdict.target].name, text::day(verdict.date), pchart_draw::situation::state_words(verdict.state), text::working_days(verdict.spare)),
             None if !plan.without_length().is_empty() => "no dates yet".into(),
             None => "no fixed target date".into(),
         };
-        say!("  {:<28} {stands}  ({file})", plan.name);
+        say!("  {:<28} {stands}{asks}  ({file})", plan.name);
     }
     if !found.is_empty() {
         say!("People to look at:");

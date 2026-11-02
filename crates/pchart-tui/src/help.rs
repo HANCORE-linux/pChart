@@ -59,7 +59,7 @@ fn help(screen: Screen, dated: bool) -> Help {
         Screen::Roadmap => Help {
             title: "HELP · ROADMAP",
             lead: "When each piece of work happens, and which ones decide the date.",
-            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("y", "Why this date? The items that set it"), ("p", "Choose who does it"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
+            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("y", "Why this date? The items that set it"), ("p", "Choose who does it"), ("s", "Report how it is going"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
             legend_title: "WHAT THE PICTURE SHOWS",
             legend: vec![
                 (Sign::Chain, "decides the date"),
@@ -110,6 +110,13 @@ fn help(screen: Screen, dated: bool) -> Help {
             keys: [("↑↓", "Choose a team or a person"), ("←→", "Choose a week")].into_iter().chain(everywhere).collect(),
             legend_title: "WHAT THE TABLE SHOWS",
             legend: vec![(Sign::Spare, "planned, darker when fuller"), (Sign::Icon(Icon::Warn, Tone::Warn), "more than they can do, in yellow"), (Sign::Holiday, "away")],
+        },
+        Screen::Reports => Help {
+            title: "HELP · REPORTS",
+            lead: "What the team reports about the plan, and what taking a report would do. The plan changes only when you take one.",
+            keys: [("↑↓", "Choose a report"), ("Enter", "Take it into the plan"), ("e", "Change it first, then take it"), ("x", "Decline it; the plan stays as it is")].into_iter().chain(everywhere).collect(),
+            legend_title: "WHAT THE SYMBOLS SAY",
+            legend: vec![(Sign::Icon(Icon::Check, Tone::Bright), "done"), (Sign::Icon(Icon::Clock, Tone::Dim), "on track"), (Sign::Icon(Icon::Warn, Tone::Warn), "at risk, or needs more time"), (Sign::Icon(Icon::Play, Tone::Ink), "what you can do")],
         },
         Screen::Export => Help {
             title: "HELP · EXPORT",

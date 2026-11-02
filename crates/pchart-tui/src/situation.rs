@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Span;
 
-use crate::app::App;
+use crate::app::{App, Step};
 use crate::pictures::Placement;
 use crate::ui::{Inks, bold, day, panel, put};
 
@@ -87,25 +87,34 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     let roomy = (chain_w - 180.0 * unit(app)) / (steps - 1) as f32 / f32::from(app.cell.0) >= 14.0;
     let top = stand.y + stand.height;
     let fit = usize::from(bottom.saturating_sub(top + 3) / 5);
-    let shown = app.analysis.next.len().min(fit).max(1);
+    let steps = app.steps();
+    let shown = steps.len().min(fit).max(1);
     let next = Rect { x: 0, y: top, width: area.width, height: (3 + 5 * shown as u16).min(bottom - top) };
     let decides = Rect { x: 0, y: next.y + next.height, width: area.width, height: chain.height + 4 };
     let with_chain = roomy && decides.y + decides.height <= bottom;
 
     panel(frame, inks, next, "NEXT", true);
     let mut y = next.y + 2;
-    if app.analysis.next.is_empty() {
+    if steps.is_empty() {
         put(frame, text_x, y, w, vec![Span::styled("Nothing is due.", inks.dim)]);
     }
     let band = columns(app, 20.0).max(1);
     let band_w = area.width.saturating_sub(band + columns(app, 80.0));
-    for (index, step) in app.analysis.next.iter().enumerate().take(shown) {
+    for (index, step) in steps.iter().enumerate().take(shown) {
         if y + 4 > next.y + next.height {
             break;
         }
         let rect = Rect { x: band, y, width: band_w, height: 4 };
         let (pw, ph) = pixels(app, rect);
-        placements.push(Placement { rect, svg: situation::statement(&statement(app, step), index == app.statement, pw, ph, unit(app), &app.shown()).svg(), paper: false });
+        let said = match step {
+            Step::Next(at) => statement(app, &app.analysis.next[*at]),
+            Step::Report(at) => {
+                let report = &app.reports[*at].1;
+                let (icon, tone) = crate::reports::symbol(app, report);
+                Statement { icon, tone, title: crate::reports::title(app, report), strong: false, line: vec![(Some(Icon::Note), format!("reported {} · Enter answers it", crate::reports::place(report)))] }
+            }
+        };
+        placements.push(Placement { rect, svg: situation::statement(&said, index == app.statement, pw, ph, unit(app), &app.shown()).svg(), paper: false });
         y += 5;
     }
 

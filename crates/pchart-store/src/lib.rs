@@ -65,6 +65,54 @@ pub fn crew(path: &Path, plan: &Plan, schedule: &pchart_core::Schedule, today: j
     Some(Crew { name, workspace: people(&root), projects: found, here })
 }
 
+/// The reports about the plan file named `project` in the workspace at `root` (pictures 65), newest
+/// first; files that are no reports are left out.
+pub fn reports(root: &Path, project: &str) -> Vec<(PathBuf, pchart_core::report::Report)> {
+    let Ok(entries) = fs::read_dir(root.join("reports")) else { return Vec::new() };
+    let mut out: Vec<(PathBuf, pchart_core::report::Report)> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "toml"))
+        .filter_map(|path| fs::read_to_string(&path).ok().and_then(|text| pchart_core::report::Report::parse(&text).ok()).map(|report| (path, report)))
+        .filter(|(_, report)| report.project == project)
+        .collect();
+    out.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| b.0.cmp(&a.0)));
+    out
+}
+
+/// Writes a new report into the workspace at `root`, never over another one. Returns its file.
+pub fn report(root: &Path, report: &pchart_core::report::Report) -> Result<PathBuf, Error> {
+    let dir = root.join("reports");
+    fs::create_dir_all(&dir).map_err(|err| failed(&dir, err))?;
+    let name = report.file_name();
+    let stem = name.trim_end_matches(".toml");
+    for number in 1..100 {
+        let path = if number == 1 { dir.join(&name) } else { dir.join(format!("{stem}-{number}.toml")) };
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => return whole(&path, &report.to_toml()).map(|()| path),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(failed(&path, err)),
+        }
+    }
+    Err(failed(&dir, "has too many reports of that minute"))
+}
+
+/// Writes the project lead's answer into the report at `path`, with what they took when they changed it.
+pub fn answer(path: &Path, answer: pchart_core::report::Answer, taken: Option<pchart_core::report::Taken>) -> Result<(), Error> {
+    let text = fs::read_to_string(path).map_err(|err| failed(path, err))?;
+    let mut report = pchart_core::report::Report::parse(&text).map_err(|err| failed(path, err))?;
+    report.answer = Some(answer);
+    report.taken = taken;
+    whole(path, &report.to_toml())
+}
+
+/// Takes the answer out of the report at `path` again, as when taking it is undone.
+pub fn reopen(path: &Path) -> Result<(), Error> {
+    let text = fs::read_to_string(path).map_err(|err| failed(path, err))?;
+    let mut report = pchart_core::report::Report::parse(&text).map_err(|err| failed(path, err))?;
+    (report.answer, report.taken) = (None, None);
+    whole(path, &report.to_toml())
+}
+
 /// The projects of a workspace: the plans in its `projects` folder, by file name.
 pub fn projects(workspace: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(workspace.join("projects")) else { return Vec::new() };
@@ -84,11 +132,16 @@ pub fn load(path: &Path) -> Result<Plan, Error> {
 /// Writes the plan so that the file is always whole: a temporary file next to it, flushed to disk,
 /// then renamed over it. A lock keeps two writers (the TUI and an agent, say) from interleaving.
 pub fn save(path: &Path, plan: &Plan) -> Result<(), Error> {
+    whole(path, &plan.to_toml())
+}
+
+/// Writes `text` so that the file is always whole, as `save` does.
+fn whole(path: &Path, text: &str) -> Result<(), Error> {
     let _lock = Lock::take(path)?;
     let temporary = sibling(path, &format!("{}.tmp", std::process::id()));
     let written = (|| {
         let mut file = File::create(&temporary)?;
-        file.write_all(plan.to_toml().as_bytes())?;
+        file.write_all(text.as_bytes())?;
         file.sync_all()?;
         fs::rename(&temporary, path)
     })();
@@ -124,6 +177,17 @@ pub fn templates() -> Vec<(&'static str, Plan)> {
 fn state() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").filter(|dir| !dir.is_empty()).map(|home| PathBuf::from(home).join(".local/state")))?;
     Some(base.join("pchart"))
+}
+
+/// Who uses pChart on this computer, as the people of a workspace name them (pictures 65):
+/// `$PCHART_NAME`, else the first line of `$XDG_CONFIG_HOME/pchart/name`, else of `~/.config/pchart/name`.
+pub fn me() -> Option<String> {
+    let config = std::env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").filter(|dir| !dir.is_empty()).map(|home| PathBuf::from(home).join(".config")));
+    me_from(std::env::var("PCHART_NAME").ok(), config.as_deref())
+}
+
+fn me_from(named: Option<String>, config: Option<&Path>) -> Option<String> {
+    named.map(|name| name.trim().to_string()).filter(|name| !name.is_empty()).or_else(|| fs::read_to_string(config?.join("pchart/name")).ok()?.lines().next().map(|line| line.trim().to_string()).filter(|name| !name.is_empty()))
 }
 
 /// The plans opened last, newest first, those that still exist.
@@ -219,6 +283,41 @@ mod tests {
         fs::write(dir.join("workspace.toml"), "").unwrap();
         assert_eq!(workspace(&dir).map(|(_, name)| name), root.file_name().map(|name| name.to_string_lossy().into_owned()));
         assert_eq!(workspace(&std::env::temp_dir().join("pchart-nowhere-at-all")), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reports_are_written_one_file_each_and_answered_in_their_file() {
+        use pchart_core::report::{Answer, Report, Status, Taken};
+        let dir = folder("reports");
+        let made = |item: &str, at: &str| Report { project: "portal.pchart".into(), item: item.into(), by: "Priya Nair".into(), at: at.parse().unwrap(), status: Status::Later, days: 3, comment: None, answer: None, taken: None };
+        let first = report(&dir, &made("frontend", "2026-10-29T08:40")).unwrap();
+        let second = report(&dir, &made("frontend", "2026-10-29T08:40")).unwrap();
+        assert_eq!((first.file_name().unwrap(), second.file_name().unwrap()), ("2026-10-29-0840-priya-nair-frontend.toml".as_ref(), "2026-10-29-0840-priya-nair-frontend-2.toml".as_ref()));
+        report(&dir, &made("api", "2026-10-30T09:00")).unwrap();
+        let mut other = made("frontend", "2026-10-31T09:00");
+        other.project = "website.pchart".into();
+        report(&dir, &other).unwrap();
+        fs::write(dir.join("reports/notes.toml"), "not a report").unwrap();
+        let found = reports(&dir, "portal.pchart");
+        assert_eq!(found.iter().map(|(_, report)| report.item.as_str()).collect::<Vec<_>>(), ["api", "frontend", "frontend"]);
+        answer(&first, Answer::Taken, Some(Taken { status: Status::Later, days: 2, comment: None })).unwrap();
+        let answered = reports(&dir, "portal.pchart").into_iter().find(|(path, _)| *path == first).unwrap().1;
+        assert_eq!((answered.answer, answered.as_taken().days), (Some(Answer::Taken), 2));
+        assert!(reports(&dir.join("nowhere"), "portal.pchart").is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn who_uses_pchart_here_comes_from_pchart_name_or_the_config() {
+        let dir = folder("me");
+        assert_eq!(me_from(None, Some(&dir)), None);
+        fs::create_dir_all(dir.join("pchart")).unwrap();
+        fs::write(dir.join("pchart/name"), "  Anna Lead \nsecond line\n").unwrap();
+        assert_eq!(me_from(None, Some(&dir)).as_deref(), Some("Anna Lead"));
+        assert_eq!(me_from(Some(" Priya Nair ".into()), Some(&dir)).as_deref(), Some("Priya Nair"));
+        assert_eq!(me_from(Some("  ".into()), Some(&dir)).as_deref(), Some("Anna Lead"));
+        assert_eq!(me_from(None, None), None);
         fs::remove_dir_all(dir).unwrap();
     }
 

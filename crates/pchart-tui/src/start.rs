@@ -29,6 +29,8 @@ pub struct Start {
     /// checks of people look across them (pictures 64).
     pub people: pchart_core::people::Workspace,
     pub crew: Vec<pchart_core::people::Project>,
+    /// In a workspace, how many reports wait for an answer for each plan of `recent` (pictures 65).
+    pub open: Vec<usize>,
     /// The line `↑↓` is on: the templates, then the plans opened before; in a workspace its projects,
     /// then the templates.
     pub chosen: usize,
@@ -51,7 +53,7 @@ impl Start {
     pub fn new(dir: PathBuf, recent: Vec<PathBuf>, calendars: &dyn Fn(&Plan) -> Vec<Calendar>, today: Date, palette: Palette, cell: (u16, u16)) -> Start {
         let templates = pchart_store::templates().into_iter().map(|(_, plan)| plan).collect();
         let recent = recent.into_iter().filter_map(|path| pchart_store::load(&path).ok().map(|plan| (path, calendars(&plan), plan)).map(|(path, calendars, plan)| (path, plan, calendars))).collect();
-        Start { templates, recent, workspace: None, people: Default::default(), crew: Vec::new(), chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
+        Start { templates, recent, workspace: None, people: Default::default(), crew: Vec::new(), open: Vec::new(), chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
     }
 
     pub fn template(&self) -> Option<&Plan> {
@@ -341,6 +343,12 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
                 bits::runs(&mut s, 38.0 * u, y, size, &[(&format!("changed {changed}"), p.ink, false)]);
                 y += 30.0 * u;
             }
+            if let Some(&count) = start.plan_at().and_then(|at| start.open.get(at)).filter(|&&count| count > 0) {
+                bits::draw_icon(&mut s, Icon::Note, 18.0 * u, y - 5.0 * u, 15.0 * u, p.warn, p.page);
+                let words = if count == 1 { "1 report to answer".to_string() } else { format!("{count} reports to answer") };
+                bits::runs(&mut s, 38.0 * u, y, size, &[(&words, p.ink, false)]);
+                y += 30.0 * u;
+            }
             for words in &people {
                 bits::draw_icon(&mut s, Icon::Warn, 18.0 * u, y - 5.0 * u, 15.0 * u, p.warn, p.page);
                 bits::runs(&mut s, 38.0 * u, y, size, &[(words, p.ink, false)]);
@@ -529,7 +537,9 @@ mod tests {
         assert!(svg.contains("Customer portal v1") && svg.contains("Launch on Mon 01 Mar is ") && !svg.contains("is planned at"));
         assert!(rows.find("PROJECTS").unwrap() < rows.find("NEW PROJECT FROM").unwrap());
         staff(&mut start);
-        assert!(screen(&start, 160, 47).1.contains("Lena Vogel is planned at 120 %"));
+        assert!(screen(&start, 160, 47).1.contains("Lena Vogel is planned at 120 %") && !screen(&start, 160, 47).1.contains("to answer"));
+        start.open = vec![2];
+        assert!(screen(&start, 160, 47).1.contains("2 reports to answer"));
         start.choose(1);
         assert_eq!((start.plan_at(), start.template_at()), (None, Some(0)));
         assert!(screen(&start, 160, 47).1.contains("projects/new-application.pchart"));
@@ -561,6 +571,7 @@ mod tests {
         std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/customer-portal.pchart"), &path).unwrap();
         let mut start = start(&dir, vec![path]);
         staff(&mut start);
+        start.open = vec![1];
         let output = pchart_draw::Output::default();
         let mut found = Vec::new();
         for (cell, chosen) in [(7, 16), (8, 17), (10, 21)].into_iter().flat_map(|cell| (0..5).map(move |chosen| (cell, chosen))) {

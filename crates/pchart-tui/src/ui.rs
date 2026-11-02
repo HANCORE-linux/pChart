@@ -106,6 +106,7 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
         Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
         Screen::People => crate::people::draw(app, frame, &under, area, &mut placements),
+        Screen::Reports => crate::reports::draw(app, frame, &under, area, &mut placements),
         Screen::Roadmap => {
             let palette = if app.question.is_some() || app.form.is_some() || writing(app) || app.overlay() { app.palette.dimmed() } else { app.palette };
             let under = Inks::of(palette);
@@ -165,8 +166,9 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let problems = app.analysis.checks.iter().any(|check| check.severity() == Severity::Problem);
     let full = area.width >= 100;
     let second = if app.dated() { "Roadmap" } else { "Network" };
-    let tabs = [("1", "Situation", Screen::Situation), ("2", second, Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export), ("5", "People", Screen::People)];
-    for (number, name, screen) in tabs.into_iter().take(if app.crew.is_some() { 5 } else { 4 }) {
+    let tabs = [("1", "Situation", Screen::Situation), ("2", second, Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export), ("5", "People", Screen::People), ("6", "Reports", Screen::Reports)];
+    let open = app.open_reports().len();
+    for (number, name, screen) in tabs.into_iter().take(if app.crew.is_some() { 6 } else { 4 }) {
         let current = app.screen == screen;
         let mut spans = if current {
             let under = |style: Style| style.add_modifier(Modifier::UNDERLINED).underline_color(inks.accent).bg(inks.raised);
@@ -178,6 +180,9 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         };
         if screen == Screen::Checks && warnings > 0 {
             spans.push(Span::styled(format!("▲{warnings} "), if problems { inks.alert } else { inks.warn }));
+        }
+        if screen == Screen::Reports && open > 0 {
+            spans.push(Span::styled(format!("●{open} "), inks.warn));
         }
         let w = width(&spans);
         put(frame, x, 0, w, spans);
@@ -409,6 +414,7 @@ fn network(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &m
                 .ceil() as u16,
                 Some(Form::Add(_)) => 15,
                 Some(Form::Who { item, .. }) => who_height(app, item),
+                Some(Form::Report { .. }) => 16,
                 _ => 32,
             });
             let x = (chart.width - w) / 2;
@@ -492,21 +498,27 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
             Some(Form::Who { .. }) => vec![("↑↓", "person"), ("←→", "share"), ("Enter", "choose"), ("Esc", "keep as it is")],
+            Some(Form::Report { answering: Some(_), .. }) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "take it"), ("Esc", "back to reports")],
+            Some(Form::Report { .. }) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "send"), ("Esc", "keep as it is")],
             _ => vec![("↑↓", "item"), ("Space", "waits on it or not"), ("Enter", "keep"), ("Esc", "keep as it is")],
         },
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
         Screen::Roadmap if app.why => vec![("↑↓", "another item"), ("Esc", "back"), ("?", "help")],
-        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("p", "who does it"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
+        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("p", "who does it"), ("s", "report"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
         Screen::Checks if app.buffer_here() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("b", "add the buffer"), ("?", "help")],
         Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Checks => vec![("↑↓", "check"), ("?", "help")],
         Screen::People => vec![("↑↓", "team or person"), ("←→", "week"), ("?", "help")],
+        Screen::Reports if app.open_reports().is_empty() => vec![("?", "help")],
+        Screen::Reports if !app.answers() => vec![("↑↓", "report"), ("?", "help")],
+        Screen::Reports => vec![("↑↓", "report"), ("Enter", "take it"), ("e", "change, then take"), ("x", "decline"), ("?", "help")],
         Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back"), ("?", "help")],
     };
     let total = |hints: &[(&str, &str)]| hints.iter().map(|(key, label)| key.chars().count() + label.chars().count() + 5).sum::<usize>();
-    while hints.len() > 1 && total(&hints) > usize::from(area.width.saturating_sub(1)) && hints.last().is_some_and(|(key, _)| *key == "?") {
+    let message = app.message.as_ref().map_or(0, |message| message.chars().count());
+    while hints.len() > 1 && total(&hints) + message > usize::from(area.width.saturating_sub(1)) && hints.last().is_some_and(|(key, _)| *key == "?") {
         hints.remove(hints.len() - 2);
     }
     let mut spans = Vec::new();
@@ -713,6 +725,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
                 .ceil() as u16,
                 Some(Form::Add(_)) => 20,
                 Some(Form::Who { item, .. }) => who_height(app, item),
+                Some(Form::Report { .. }) => 16,
                 _ => 32,
             });
             let x = (l.chart.width - w) / 2;
@@ -958,6 +971,21 @@ mod tests {
         app
     }
 
+    /// `crewed` with a workspace folder of its own and two reports in it: Priya Nair says Frontend needs
+    /// 3 more working days, and Tom Becker that Data model is at risk.
+    fn reported(name: &str) -> (App, std::path::PathBuf) {
+        let mut app = crewed();
+        let dir = std::env::temp_dir().join(format!("pchart-tui-reports-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let report = |item: &str, by: &str, at: &str, status, days, comment: &str| pchart_core::report::Report { project: "portal.pchart".into(), item: item.into(), by: by.into(), at: at.parse().unwrap(), status, days, comment: Some(comment.into()), answer: None, taken: None };
+        pchart_store::report(&dir, &report("data-model", "Tom Becker", "2026-10-28T17:05", pchart_core::report::Status::Risk, 0, "The schema review moved to next week")).unwrap();
+        pchart_store::report(&dir, &report("frontend", "Priya Nair", "2026-10-29T08:40", pchart_core::report::Status::Later, 3, "Backend API comes late")).unwrap();
+        app.root = Some(dir.clone());
+        app.refresh_reports();
+        app.message = None;
+        (app, dir)
+    }
+
     fn screen(app: &App, width: u16, height: u16) -> (Vec<String>, Vec<Placement>) {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut placements = Vec::new();
@@ -1074,6 +1102,32 @@ mod tests {
         }
         app.help = true;
         look(&mut app, "people help");
+        let (mut app, dir) = reported("edges");
+        app.screen = Screen::Situation;
+        look(&mut app, "situation with reports");
+        app.screen = Screen::Reports;
+        for report in 0..2 {
+            app.report = report;
+            look(&mut app, &format!("reports {report}"));
+        }
+        app.help = true;
+        look(&mut app, "reports help");
+        app.help = false;
+        app.screen = Screen::Roadmap;
+        app.selected = app.plan.item("frontend").unwrap();
+        app.start_report();
+        app.form_change(2);
+        look(&mut app, "report dialog");
+        app.form = None;
+        app.screen = Screen::Reports;
+        app.report = 0;
+        app.edit_report();
+        look(&mut app, "change, then take");
+        app.close_form();
+        app.take_report();
+        app.decline_report();
+        look(&mut app, "reports all answered");
+        std::fs::remove_dir_all(dir).unwrap();
         assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
     }
 
@@ -1117,6 +1171,81 @@ mod tests {
         assert!(svg.contains("72 % full · 130 % of 180 % planned, 50 % free"));
         app.crew = None;
         assert!(!has(&screen(&app, 170, 50).0, "5 People"));
+    }
+
+    #[test]
+    fn reports_wait_for_the_project_lead_who_takes_changes_or_declines_them() {
+        let (mut app, dir) = reported("answer");
+        let frontend = app.plan.item("frontend").unwrap();
+        let length = app.plan.items[frontend].duration;
+        assert_eq!(app.open_reports().len(), 2);
+        assert_eq!(app.steps()[..2], [crate::app::Step::Next(0), crate::app::Step::Report(0)]);
+        let rows = screen(&app, 170, 50).0;
+        assert!(has(&rows, "6 Reports ●2"));
+        app.screen = Screen::Reports;
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(has(&rows, ":: REPORTS · 2 TO ANSWER") && has(&rows, ":: IF YOU TAKE IT") && has(&rows, "e change, then take"), "{rows:?}");
+        assert!(svg.contains("Priya Nair: Frontend needs 3 more working days") && svg.contains(&format!("{} working days", length + 3)) && svg.contains("Tom Becker: Data model at risk"));
+
+        app.take_report();
+        assert_eq!((app.plan.items[frontend].duration, app.open_reports().len()), (length + 3, 1));
+        assert!(app.reports.iter().any(|(_, report)| report.item == "frontend" && report.answer == Some(pchart_core::report::Answer::Taken)));
+        app.undo();
+        assert_eq!((app.plan.items[frontend].duration, app.open_reports().len()), (length, 2), "undoing it opens the report again");
+        app.take_report();
+
+        app.decline_report();
+        let data_model = app.plan.item("data-model").unwrap();
+        assert_eq!((app.open_reports().len(), app.plan.items[data_model].note.clone()), (0, None));
+
+        std::fs::write(dir.join("reports/2026-10-30-0900-priya-nair-frontend.toml"), "project = \"portal.pchart\"\nitem = \"frontend\"\nby = \"Priya Nair\"\nat = 2026-10-30T09:00:00\nstatus = \"later\"\ndays = 3\n").unwrap();
+        app.refresh_reports();
+        assert_eq!(app.message.as_deref(), Some("Priya Nair reports: Frontend needs 3 more working days"));
+        app.edit_report();
+        assert_eq!(app.screen, Screen::Roadmap);
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.clone()).collect();
+        assert!(svg.contains("What do you take from Priya Nair?") && svg.contains("reported needs 3 more working days"));
+        app.form_back();
+        app.form_type('2');
+        app.keep_form();
+        assert_eq!((app.screen, app.plan.items[frontend].duration), (Screen::Reports, length + 3 + 2));
+        let changed = app.reports.iter().find(|(path, _)| path.ends_with("2026-10-30-0900-priya-nair-frontend.toml")).unwrap().1.clone();
+        assert_eq!(changed.taken.map(|taken| taken.days), Some(2));
+
+        app.screen = Screen::Roadmap;
+        app.start_report();
+        app.form_change(1);
+        app.form_move(1);
+        app.form_move(1);
+        for c in "Tests start Monday".chars() {
+            app.form_type(c);
+        }
+        let before = app.plan.clone();
+        app.keep_form();
+        assert_eq!(app.plan, before);
+        assert!(app.reports.iter().any(|(_, report)| report.status == pchart_core::report::Status::Risk && report.comment.as_deref() == Some("Tests start Monday") && report.answer.is_none()));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_the_lead_answers_reports_when_the_workspace_names_one() {
+        let (mut app, dir) = reported("lead");
+        app.crew.as_mut().unwrap().workspace.lead = Some("Anna Lead".into());
+        app.me = Some("Priya Nair".into());
+        app.screen = Screen::Reports;
+        let frontend = app.plan.item("frontend").unwrap();
+        let length = app.plan.items[frontend].duration;
+        app.take_report();
+        app.edit_report();
+        app.decline_report();
+        assert_eq!((app.plan.items[frontend].duration, app.open_reports().len(), app.message.as_deref()), (length, 2, Some("Anna Lead answers reports")));
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(!has(&rows, "Enter take it") && placements.iter().any(|placement| placement.svg.contains("Anna Lead answers it; if they take it:")));
+        app.me = Some("Anna Lead".into());
+        app.take_report();
+        assert_eq!(app.plan.items[frontend].duration, length + 3);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

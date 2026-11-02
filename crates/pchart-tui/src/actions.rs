@@ -350,7 +350,7 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
             Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::Why, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None), (Action::Details, None)],
             Screen::Checks => vec![(Action::Holidays, None), (Action::Undo, None)],
             Screen::Export => vec![(Action::Export(app.export.view), None)],
-            Screen::Situation | Screen::People => vec![(Action::Undo, None)],
+            Screen::Situation | Screen::People | Screen::Reports => vec![(Action::Undo, None)],
         };
         found.retain(|&(action, _)| action != Action::Undo || !app.history.is_empty());
         found.retain(|(action, _)| Action::all(app).contains(action));

@@ -14,6 +14,9 @@ use crate::Error;
 pub struct Workspace {
     #[serde(default)]
     pub name: Option<String>,
+    /// Who answers reports (pictures 65); without one, everyone may.
+    #[serde(default)]
+    pub lead: Option<String>,
     #[serde(default)]
     pub teams: Vec<Team>,
     #[serde(default)]

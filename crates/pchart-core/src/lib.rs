@@ -4,6 +4,7 @@ pub mod edit;
 pub mod input;
 pub mod model;
 pub mod people;
+pub mod report;
 pub mod schedule;
 pub mod text;
 

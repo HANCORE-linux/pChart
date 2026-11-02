@@ -9,6 +9,8 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "new", usage: "pchart new PLAN --template ID [--name NAME] [--target DATE | --start DATE | --no-dates]", about: "Write a new plan from a template: new-application, website-relaunch, product-launch or empty. --target puts the date on its last milestone and plans backwards from it, --start plans forwards from it; without either it starts today. --no-dates keeps only how it is built: the work without lengths, so the plan has no dates until each has one. Never writes over a file." },
     Command { name: "list", usage: "pchart list", about: "The projects of the workspace pChart runs in (a folder with a workspace.toml), each with how it stands." },
     Command { name: "read", usage: "pchart read DIR [--out PLAN] [--name NAME]", about: "Read how a folder is built into a plan without dates: Rust crates and the files that use each other, and Hyprland, Lua and CSS files that take in others. A file that uses another waits on it. Writes NAME.pchart here and never writes over a file." },
+    Command { name: "report", usage: "pchart report PLAN ITEM (--done | --on-track | --risk | --later DAYS) [--comment TEXT] [--by NAME]", about: "Say how a piece of work stands, for the project lead: done, on track, at risk, or needing DAYS working days more. It goes to the workspace's reports folder as a file of its own; the plan stays as it is until the project lead takes it. --by names who reports, else $PCHART_NAME." },
+    Command { name: "reports", usage: "pchart reports PLAN", about: "The reports about the plan, newest first: who says what, whether it is answered, and what taking it would do." },
     Command { name: "situation", usage: "pchart situation PLAN", about: "Where the plan stands: does the date hold, who waits on whom, what is next." },
     Command { name: "why", usage: "pchart why PLAN ITEM", about: "The chain of items that sets the date of ITEM." },
     Command { name: "waits", usage: "pchart waits PLAN", about: "Every lane that waits on another lane, and for what." },
@@ -64,7 +66,7 @@ pub const EDITS: &[(&str, &str)] = &[
     ("phase", r#"{"op": "phase", "phase": NAME, "until": ID}"#),
 ];
 
-const FLAGS: &[&str] = &["--json", "--dry-run", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important", "--no-dates"];
+const FLAGS: &[&str] = &["--json", "--dry-run", "--on-track", "--risk", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important", "--no-dates"];
 
 pub struct Args {
     pub command: &'static str,

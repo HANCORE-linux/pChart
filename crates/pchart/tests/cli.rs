@@ -179,6 +179,37 @@ fn list_names_each_project_of_the_workspace_with_how_it_stands() {
 }
 
 #[test]
+fn a_report_waits_in_the_workspace_and_leaves_the_plan_as_it_is() {
+    let dir = copy("report").parent().unwrap().to_path_buf();
+    let workspace = dir.join("acme");
+    std::fs::create_dir_all(workspace.join("projects")).unwrap();
+    std::fs::write(workspace.join("workspace.toml"), "name = \"Acme\"\n").unwrap();
+    std::fs::copy(dir.join("portal.pchart"), workspace.join("projects/portal.pchart")).unwrap();
+    let plan = std::fs::read_to_string(workspace.join("projects/portal.pchart")).unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_pchart")).args(args).args(["--today", "2026-10-29"]).current_dir(&workspace).env_remove("PCHART_NAME").output().unwrap();
+    let output = run(&["report", "projects/portal.pchart", "frontend", "--later", "3", "--comment", "Backend API comes late", "--by", "Priya Nair"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout(&output).contains("Reported: Frontend needs 3 more working days.") && stdout(&output).contains("If it is taken: Launch on Mon 01 Mar is on track, 9 working days to spare."), "{}", stdout(&output));
+    assert_eq!(std::fs::read_to_string(workspace.join("projects/portal.pchart")).unwrap(), plan);
+    let files: Vec<String> = std::fs::read_dir(workspace.join("reports")).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(files.len() == 1 && files[0].starts_with("2026-10-29-") && files[0].ends_with("-priya-nair-frontend.toml"), "{files:?}");
+    assert!(run(&["report", "projects/portal.pchart", "api", "--done", "--by", "Tom Becker", "--dry-run"]).status.success());
+    assert_eq!(std::fs::read_dir(workspace.join("reports")).unwrap().count(), 1);
+    for wrong in [&["report", "projects/portal.pchart", "api", "--done", "--risk", "--by", "Tom"][..], &["report", "projects/portal.pchart", "api", "--done"], &["report", "projects/portal.pchart", "api", "--later", "0", "--by", "Tom"]] {
+        assert_eq!(run(wrong).status.code(), Some(3), "{wrong:?}");
+    }
+    let alone = Command::new(env!("CARGO_BIN_EXE_pchart")).args(["report", dir.join("portal.pchart").to_str().unwrap(), "api", "--done", "--by", "Tom"]).output().unwrap();
+    assert_eq!(alone.status.code(), Some(3));
+    let output = run(&["reports", "projects/portal.pchart"]);
+    assert!(stdout(&output).starts_with("Customer portal v1: 1 report to answer\n  to answer") && stdout(&output).contains("Priya Nair: Frontend needs 3 more working days. \"Backend API comes late\""), "{}", stdout(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&run(&["reports", "projects/portal.pchart", "--json"]))).unwrap();
+    assert_eq!((json["reports"][0]["answer"].as_str(), json["reports"][0]["by"].as_str()), (Some("to answer"), Some("Priya Nair")));
+    assert!(stdout(&run(&["list"])).contains("· 1 report to answer"));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&run(&["list", "--json"]))).unwrap();
+    assert_eq!(json["projects"][0]["reports_to_answer"].as_u64(), Some(1));
+}
+
+#[test]
 fn people_of_a_workspace_are_checked_across_its_projects() {
     let dir = copy("people").parent().unwrap().to_path_buf();
     let workspace = dir.join("acme");
