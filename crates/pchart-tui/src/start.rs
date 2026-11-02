@@ -20,9 +20,13 @@ use crate::ui::{Inks, bold, home, panel, put};
 
 pub struct Start {
     pub templates: Vec<Plan>,
-    /// Plans opened before: where they are, the plan, and the calendars of its lanes.
+    /// Plans opened before, or in a workspace its projects: where they are, the plan, and the
+    /// calendars of its lanes.
     pub recent: Vec<(PathBuf, Plan, Vec<Calendar>)>,
-    /// The line `↑↓` is on: the templates, then the plans opened before.
+    /// The workspace pChart was started in, by name: its projects come first, before the templates.
+    pub workspace: Option<String>,
+    /// The line `↑↓` is on: the templates, then the plans opened before; in a workspace its projects,
+    /// then the templates.
     pub chosen: usize,
     pub name: String,
     /// Scheduled forwards from a start date instead of backwards from a target date.
@@ -43,11 +47,23 @@ impl Start {
     pub fn new(dir: PathBuf, recent: Vec<PathBuf>, calendars: &dyn Fn(&Plan) -> Vec<Calendar>, today: Date, palette: Palette, cell: (u16, u16)) -> Start {
         let templates = pchart_store::templates().into_iter().map(|(_, plan)| plan).collect();
         let recent = recent.into_iter().filter_map(|path| pchart_store::load(&path).ok().map(|plan| (path, calendars(&plan), plan)).map(|(path, calendars, plan)| (path, plan, calendars))).collect();
-        Start { templates, recent, chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
+        Start { templates, recent, workspace: None, chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
     }
 
     pub fn template(&self) -> Option<&Plan> {
-        self.templates.get(self.chosen)
+        self.templates.get(self.template_at()?)
+    }
+
+    /// Which template the chosen line is, if it is one.
+    pub fn template_at(&self) -> Option<usize> {
+        let at = if self.workspace.is_some() { self.chosen.checked_sub(self.recent.len())? } else { self.chosen };
+        (at < self.templates.len()).then_some(at)
+    }
+
+    /// Which plan opened before, or which project, the chosen line is, if it is one.
+    pub fn plan_at(&self) -> Option<usize> {
+        let at = if self.workspace.is_some() { self.chosen } else { self.chosen.checked_sub(self.templates.len())? };
+        (at < self.recent.len()).then_some(at)
     }
 
     pub fn choose(&mut self, step: isize) {
@@ -86,7 +102,7 @@ impl Start {
 
     /// Enter: writes the new plan and says where, or names the plan opened before.
     pub fn enter(&mut self) -> Option<PathBuf> {
-        if let Some((path, _, _)) = self.recent.get(self.chosen.saturating_sub(self.templates.len())).filter(|_| self.chosen >= self.templates.len()) {
+        if let Some((path, _, _)) = self.plan_at().and_then(|at| self.recent.get(at)) {
             return Some(path.clone());
         }
         if !self.typed.trim().is_empty() && self.date().is_none() {
@@ -132,7 +148,7 @@ pub fn draw(start: &Start, frame: &mut Frame) -> Vec<Placement> {
     let mut placements = Vec::new();
     let version: String = env!("CARGO_PKG_VERSION").split('.').take(2).collect::<Vec<_>>().join(".");
     put(frame, 0, 0, area.width, vec![Span::styled("pchart", bold(inks.bright)), Span::styled(format!(" {version} · new plan"), inks.dim)]);
-    let right = if start.chosen < start.templates.len() { "choose a template" } else { "open a plan" };
+    let right = if start.template_at().is_some() { "choose a template" } else { "open a plan" };
     put(frame, area.width.saturating_sub(right.len() as u16 + 1), 0, right.len() as u16 + 1, vec![Span::styled(right, inks.dim)]);
     let body = Rect { x: 0, y: 1, width: area.width, height: area.height.saturating_sub(2) };
     let left = Rect { width: (area.width * 30 / 100).clamp(34, 48).min(area.width), ..body };
@@ -145,7 +161,7 @@ pub fn draw(start: &Start, frame: &mut Frame) -> Vec<Placement> {
     } else if rest.width >= 40 {
         how_to_start(start, frame, &inks, rest, &mut placements);
     }
-    let hints: Vec<(&str, &str)> = if start.chosen < start.templates.len() {
+    let hints: Vec<(&str, &str)> = if start.template_at().is_some() {
         let mut hints = vec![("↑↓", "template"), ("←→", "target, start or none"), ("Tab", if start.naming { "date" } else { "name" }), ("Enter", "create"), ("Esc", "quit")];
         if start.undated {
             hints.remove(2);
@@ -167,13 +183,46 @@ pub fn draw(start: &Start, frame: &mut Frame) -> Vec<Placement> {
 
 fn list(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &mut Vec<Placement>) {
     let p = start.palette;
-    panel(frame, inks, rect, "START", true);
+    let title = start.workspace.as_ref().map_or_else(|| "START".to_string(), |name| format!("START · {}", name.to_uppercase()));
+    panel(frame, inks, rect, &title, true);
     let bottom = rect.y + rect.height.saturating_sub(1);
     let mut y = rect.y + 3;
-    put(frame, rect.x + 3, y, rect.width.saturating_sub(6), vec![Span::styled("PROJECT TEMPLATES", inks.dim)]);
+    let plans = |y: &mut u16, frame: &mut Frame, placements: &mut Vec<Placement>| {
+        put(frame, rect.x + 3, *y, rect.width.saturating_sub(6), vec![Span::styled(if start.workspace.is_some() { "PROJECTS" } else { "RECENT" }, inks.dim)]);
+        *y += 2;
+        if start.recent.is_empty() {
+            put(frame, rect.x + 3, *y, rect.width.saturating_sub(6), vec![Span::styled(if start.workspace.is_some() { "no projects yet" } else { "no plans yet" }, inks.muted)]);
+            *y += 2;
+        }
+        for (at, (path, plan, calendars)) in start.recent.iter().enumerate() {
+            let chosen = start.plan_at() == Some(at);
+            let height = if chosen { 3 } else { 2 };
+            if *y + height > bottom {
+                break;
+            }
+            let (icon, tone) = match start.workspace.as_ref().and_then(|_| verdict(plan, calendars, start.today)) {
+                Some(State::Holds) => (Icon::Check, p.dim),
+                Some(State::Tight) => (Icon::Clock, p.warn),
+                Some(State::DoesNotHold) => (Icon::Cross, p.alert),
+                None => (Icon::Folder, p.dim),
+            };
+            let place = home(&path.display().to_string());
+            let rect = Rect { x: rect.x + 1, y: *y, width: rect.width.saturating_sub(2), height };
+            picture(start, placements, rect, |w, h, u| bits::row(icon, tone, &plan.name, chosen.then_some(place.as_str()), chosen, w, h, u, &p));
+            *y += height;
+        }
+        *y += 1;
+    };
+    if start.workspace.is_some() {
+        plans(&mut y, frame, placements);
+    }
+    if y + 2 > bottom {
+        return;
+    }
+    put(frame, rect.x + 3, y, rect.width.saturating_sub(6), vec![Span::styled(if start.workspace.is_some() { "NEW PROJECT FROM" } else { "PROJECT TEMPLATES" }, inks.dim)]);
     y += 2;
     for (index, template) in start.templates.iter().enumerate() {
-        let chosen = index == start.chosen;
+        let chosen = start.template_at() == Some(index);
         let height = if chosen { 3 } else { 2 };
         if y + height > bottom {
             break;
@@ -187,26 +236,15 @@ fn list(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &
         y += height;
     }
     y += 1;
-    if y + 2 > bottom {
-        return;
+    if start.workspace.is_none() && y + 2 <= bottom {
+        plans(&mut y, frame, placements);
     }
-    put(frame, rect.x + 3, y, rect.width.saturating_sub(6), vec![Span::styled("RECENT", inks.dim)]);
-    y += 2;
-    if start.recent.is_empty() {
-        put(frame, rect.x + 3, y, rect.width.saturating_sub(6), vec![Span::styled("no plans yet", inks.muted)]);
-    }
-    for (at, (path, plan, _)) in start.recent.iter().enumerate() {
-        let name = &plan.name;
-        let chosen = start.templates.len() + at == start.chosen;
-        let height = if chosen { 3 } else { 2 };
-        if y + height > bottom {
-            break;
-        }
-        let place = home(&path.display().to_string());
-        let rect = Rect { x: rect.x + 1, y, width: rect.width.saturating_sub(2), height };
-        picture(start, placements, rect, |w, h, u| bits::row(Icon::Folder, p.dim, name, chosen.then_some(place.as_str()), chosen, w, h, u, &p));
-        y += height;
-    }
+}
+
+/// How a plan stands: holds, at risk or late; nothing when it has no fixed date.
+fn verdict(plan: &Plan, calendars: &[Calendar], today: Date) -> Option<State> {
+    let schedule = pchart_core::schedule(plan, calendars, today).ok()?;
+    pchart_core::analyse(plan, calendars, &schedule, today).verdict.map(|verdict| verdict.state)
 }
 
 /// The plan the preview shows, with the calendars of its lanes.
@@ -216,7 +254,7 @@ fn shown(start: &Start) -> Option<(Plan, Vec<Calendar>)> {
             let calendars = calendars(&plan);
             Some((plan, calendars))
         }
-        None => start.recent.get(start.chosen - start.templates.len()).map(|(_, plan, calendars)| (plan.clone(), calendars.clone())),
+        None => start.plan_at().and_then(|at| start.recent.get(at)).map(|(_, plan, calendars)| (plan.clone(), calendars.clone())),
     }
 }
 
@@ -259,7 +297,7 @@ fn preview(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, placements
 
 fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, placements: &mut Vec<Placement>) {
     let p = start.palette;
-    if let Some((path, plan, calendars)) = start.recent.get(start.chosen.saturating_sub(start.templates.len())).filter(|_| start.chosen >= start.templates.len()) {
+    if let Some((path, plan, calendars)) = start.plan_at().and_then(|at| start.recent.get(at)) {
         panel(frame, inks, rect, "OPEN", true);
         let inner = Rect { x: rect.x + 2, y: rect.y + 2, width: rect.width.saturating_sub(4), height: rect.height.saturating_sub(3) };
         let verdict = pchart_core::schedule(plan, calendars, start.today).ok().and_then(|schedule| {
@@ -366,7 +404,7 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
             y += 34.0 * u;
         }
         bits::draw_icon(&mut s, Icon::Folder, left + 10.0 * u, y - 5.0 * u, 15.0 * u, p.dim, p.page);
-        let shown = format!("./{}", file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
+        let shown = format!("{}{}", if start.workspace.is_some() { "projects/" } else { "./" }, file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
         let end = bits::runs(&mut s, left + 30.0 * u, y, size, &[(&shown, p.ink, false)]);
         bits::runs(&mut s, end, y, size, &[("  is written here, then pChart opens it", p.dim, false)]);
         s
@@ -450,6 +488,26 @@ mod tests {
     }
 
     #[test]
+    fn in_a_workspace_its_projects_come_first_and_a_new_one_goes_into_projects() {
+        let dir = folder("workspace");
+        let path = dir.join("portal.pchart");
+        std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/customer-portal.pchart"), &path).unwrap();
+        let mut start = start(&dir, vec![path.clone()]);
+        start.workspace = Some("Acme".into());
+        assert_eq!((start.plan_at(), start.template_at()), (Some(0), None));
+        let (rows, svg) = screen(&start, 160, 47);
+        assert!(rows.contains(":: START · ACME") && rows.contains("PROJECTS") && rows.contains("NEW PROJECT FROM") && !rows.contains("RECENT") && rows.contains(":: OPEN"), "{rows}");
+        assert!(svg.contains("Customer portal v1") && svg.contains("Launch on Mon 01 Mar is "));
+        assert!(rows.find("PROJECTS").unwrap() < rows.find("NEW PROJECT FROM").unwrap());
+        start.choose(1);
+        assert_eq!((start.plan_at(), start.template_at()), (None, Some(0)));
+        assert!(screen(&start, 160, 47).1.contains("projects/new-application.pchart"));
+        start.choose(-1);
+        assert_eq!(start.enter(), Some(path));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_plan_opened_before_says_how_it_stands_and_opens_as_it_is() {
         let dir = folder("recent");
         let path = dir.join("portal.pchart");
@@ -476,8 +534,9 @@ mod tests {
         for (cell, chosen) in [(7, 16), (8, 17), (10, 21)].into_iter().flat_map(|cell| (0..5).map(move |chosen| (cell, chosen))) {
             start.cell = cell;
             start.chosen = chosen;
-            for (typed, forwards, undated) in [("", false, false), ("1 mar", false, false), ("1 jan", false, false), ("2 nov", true, false), ("", false, true)] {
+            for (typed, forwards, undated, workspace) in [("", false, false, false), ("1 mar", false, false, false), ("1 jan", false, false, false), ("2 nov", true, false, false), ("", false, true, false), ("", false, false, true)] {
                 (start.typed, start.forwards, start.undated) = (typed.into(), forwards, undated);
+                start.workspace = workspace.then(|| "Acme".to_string());
                 for (width, height) in [(160, 47), (200, 60), (120, 40), (91, 43), (80, 24)] {
                     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                     let mut placements = Vec::new();

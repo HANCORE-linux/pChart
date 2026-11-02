@@ -300,7 +300,13 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
 pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<Option<std::path::PathBuf>> {
     let picker = picker()?;
     let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
-    let mut start = start::Start::new(dir.to_path_buf(), pchart_store::recent(), calendars, today, theme.palette, pictures.cell());
+    let workspace = pchart_store::workspace(dir);
+    let (folder, plans) = match &workspace {
+        Some((root, _)) => (root.join("projects"), pchart_store::projects(root)),
+        None => (dir.to_path_buf(), pchart_store::recent()),
+    };
+    let mut start = start::Start::new(folder, plans, calendars, today, theme.palette, pictures.cell());
+    start.workspace = workspace.map(|(_, name)| name);
     let mut terminal = ratatui::init();
     let result = loop {
         pictures.receive();

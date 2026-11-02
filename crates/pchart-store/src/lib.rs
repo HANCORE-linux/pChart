@@ -12,6 +12,32 @@ fn failed(path: &Path, err: impl std::fmt::Display) -> Error {
     Error::File(format!("{}: {err}", path.display()))
 }
 
+/// A workspace (see docs/PLAN.md): the nearest folder at or above `dir` with a `workspace.toml`, and
+/// its name, from `name = "…"` in that file, else the folder's.
+pub fn workspace(dir: &Path) -> Option<(PathBuf, String)> {
+    let mut at = fs::canonicalize(dir).ok()?;
+    loop {
+        let manifest = at.join("workspace.toml");
+        if manifest.is_file() {
+            let text = fs::read_to_string(&manifest).unwrap_or_default();
+            let named = text.lines().filter_map(|line| line.trim().strip_prefix("name")).find_map(|rest| Some(rest.trim_start().strip_prefix('=')?.trim().trim_matches('"').to_string()));
+            let name = named.filter(|name| !name.is_empty()).unwrap_or_else(|| at.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()));
+            return Some((at, name));
+        }
+        if !at.pop() {
+            return None;
+        }
+    }
+}
+
+/// The projects of a workspace: the plans in its `projects` folder, by file name.
+pub fn projects(workspace: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(workspace.join("projects")) else { return Vec::new() };
+    let mut out: Vec<PathBuf> = entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.extension().is_some_and(|extension| extension == "pchart")).collect();
+    out.sort();
+    out
+}
+
 pub fn load(path: &Path) -> Result<Plan, Error> {
     let text = fs::read_to_string(path).map_err(|err| failed(path, err))?;
     Plan::parse(&text).map_err(|err| match err {
@@ -142,6 +168,23 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_workspace_is_found_from_inside_it_and_lists_its_projects() {
+        let dir = folder("workspace");
+        fs::create_dir_all(dir.join("projects/old")).unwrap();
+        fs::write(dir.join("workspace.toml"), "# people and places\nname = \"Acme\"\n").unwrap();
+        for file in ["b.pchart", "a.pchart", "notes.md"] {
+            fs::write(dir.join("projects").join(file), "").unwrap();
+        }
+        let root = fs::canonicalize(&dir).unwrap();
+        assert_eq!(workspace(&dir.join("projects/old")), Some((root.clone(), "Acme".to_string())));
+        assert_eq!(projects(&root), [root.join("projects/a.pchart"), root.join("projects/b.pchart")]);
+        fs::write(dir.join("workspace.toml"), "").unwrap();
+        assert_eq!(workspace(&dir).map(|(_, name)| name), root.file_name().map(|name| name.to_string_lossy().into_owned()));
+        assert_eq!(workspace(&std::env::temp_dir().join("pchart-nowhere-at-all")), None);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

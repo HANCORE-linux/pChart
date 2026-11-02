@@ -163,6 +163,22 @@ fn read_writes_how_a_folder_is_built_once_and_never_reads_the_system() {
 }
 
 #[test]
+fn list_names_each_project_of_the_workspace_with_how_it_stands() {
+    let dir = copy("list").parent().unwrap().to_path_buf();
+    let workspace = dir.join("acme");
+    std::fs::create_dir_all(workspace.join("projects")).unwrap();
+    std::fs::write(workspace.join("workspace.toml"), "name = \"Acme\"\n").unwrap();
+    std::fs::copy(dir.join("portal.pchart"), workspace.join("projects/portal.pchart")).unwrap();
+    let run = |args: &[&str], at: &std::path::Path| Command::new(env!("CARGO_BIN_EXE_pchart")).args(args).args(["--today", "2026-10-29"]).current_dir(at).output().unwrap();
+    let output = run(&["list"], &workspace.join("projects"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(stdout(&output).starts_with("Acme: 1 project\n  Customer portal v1") && stdout(&output).contains("Launch on Mon 01 Mar is on track, 12 working days to spare  (portal.pchart)"), "{}", stdout(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&run(&["list", "--json"], &workspace))).unwrap();
+    assert_eq!((json["workspace"].as_str(), json["projects"][0]["file"].as_str(), json["projects"][0]["spare_wd"].as_i64()), (Some("Acme"), Some("projects/portal.pchart"), Some(12)));
+    assert_eq!(run(&["list"], &dir).status.code(), Some(3));
+}
+
+#[test]
 fn the_milestone_chart_is_a_page_without_detail_levels() {
     let path = copy("milestones");
     let svg = path.with_file_name("milestones.svg");

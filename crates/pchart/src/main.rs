@@ -189,6 +189,9 @@ fn run(args: &Args) -> Result<u8, Failure> {
     if args.command == "read" {
         return read(args);
     }
+    if args.command == "list" {
+        return list(args);
+    }
     if args.command == "open" && args.words.is_empty() && std::io::stdout().is_terminal() {
         return start(args);
     }
@@ -334,6 +337,45 @@ fn start(args: &Args) -> Result<u8, Failure> {
         Some(path) => open(context_of(path, args)?, args),
         None => Ok(0),
     }
+}
+
+/// `pchart list`: the projects of the workspace pChart runs in, each with how it stands.
+fn list(args: &Args) -> Result<u8, Failure> {
+    let dir = std::env::current_dir().map_err(|err| Failure::file(err.to_string()))?;
+    let (root, name) = pchart_store::workspace(&dir).ok_or_else(|| Failure::usage("not in a workspace: a folder with a workspace.toml, or one inside it", args))?;
+    let text = holiday_text(args)?;
+    let today = today(args)?;
+    let mut rows = Vec::new();
+    for path in pchart_store::projects(&root) {
+        let plan = pchart_store::load(&path).map_err(|err| Failure::file(err.to_string()))?;
+        let calendars = calendars(&holidays_for(&text, &plan), &plan);
+        let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(|err| Failure::edit(err.to_string()))?;
+        let verdict = analyse(&plan, &calendars, &schedule, today).verdict;
+        rows.push((path, plan, verdict));
+    }
+    if args.flag("--json") {
+        let projects: Vec<_> = rows
+            .iter()
+            .map(|(path, plan, verdict)| {
+                let state = verdict.as_ref().map(|verdict| pchart_draw::situation::state_words(verdict.state));
+                json!({ "file": path.strip_prefix(&root).unwrap_or(path).display().to_string(), "name": plan.name, "state": state, "target": verdict.as_ref().map(|verdict| plan.items[verdict.target].id.clone()), "date": verdict.as_ref().map(|verdict| report::iso(verdict.date)), "spare_wd": verdict.as_ref().map(|verdict| verdict.spare), "dates": plan.without_length().is_empty() })
+            })
+            .collect();
+        print_json(&json!({ "schema": 1, "workspace": name, "projects": projects }));
+        return Ok(0);
+    }
+    say!("{name}: {}", if rows.len() == 1 { "1 project".to_string() } else { format!("{} projects", rows.len()) });
+    for (path, plan, verdict) in &rows {
+        let file = path.file_name().map_or_else(String::new, |file| file.to_string_lossy().into_owned());
+        let stands = match verdict {
+            Some(verdict) if verdict.spare < 0 => format!("{} on {} is {} late", plan.items[verdict.target].name, text::day(verdict.date), text::working_days(-verdict.spare)),
+            Some(verdict) => format!("{} on {} is {}, {} to spare", plan.items[verdict.target].name, text::day(verdict.date), pchart_draw::situation::state_words(verdict.state), text::working_days(verdict.spare)),
+            None if !plan.without_length().is_empty() => "no dates yet".into(),
+            None => "no fixed target date".into(),
+        };
+        say!("  {:<28} {stands}  ({file})", plan.name);
+    }
+    Ok(0)
 }
 
 /// `pchart new`: a plan from a template, written where no file is.
