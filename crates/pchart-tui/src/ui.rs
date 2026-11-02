@@ -490,11 +490,13 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if !app.dated() && app.form.is_none() => vec![("↑↓←→", "item"), ("Enter", "length"), ("a", "add"), ("w", "waits on"), ("r", "rename"), ("x", "remove"), ("?", "help")],
         Screen::Roadmap if app.form.is_some() && matches!(app.form, Some(Form::Length { .. })) => vec![("Enter", "keep the length"), ("Esc", "keep as it is")],
         Screen::Situation | Screen::Checks if !app.dated() => vec![("2", "how it is built"), ("?", "help")],
+        Screen::Situation if app.since().is_some() => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("c", "what changed"), ("?", "help")],
         Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.form.is_some() => match &app.form {
             Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
             Some(Form::Rename { .. }) => vec![("Enter", "rename"), ("Esc", "keep as it is")],
+            Some(Form::Snapshot { .. }) => vec![("Enter", "keep it"), ("Esc", "not now")],
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
             Some(Form::Who { .. }) => vec![("↑↓", "person"), ("←→", "share"), ("Enter", "choose"), ("Esc", "keep as it is")],
@@ -506,6 +508,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
         Screen::Roadmap if app.why => vec![("↑↓", "another item"), ("Esc", "back"), ("?", "help")],
+        Screen::Roadmap if app.compare && app.form.is_none() => vec![("↑↓", item), ("c", "back"), ("t", "snapshot"), ("?", "help")],
         Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("p", "who does it"), ("s", "report"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
         Screen::Checks if app.buffer_here() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("b", "add the buffer"), ("?", "help")],
         Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
@@ -668,10 +671,14 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
     let span = format!("{} – {}", first.strftime("%b %Y"), last.strftime("%b %Y")).to_uppercase();
     let switch_w = 34;
     let room = l.panel.width.saturating_sub(4 + switch_w) as usize;
+    let compared;
     let mode = if app.before.is_some() {
         "WHAT-IF · "
     } else if app.why {
         "WHY THIS DATE · "
+    } else if app.compare {
+        compared = app.since().map(|(snapshot, _)| format!("SINCE {} · ", snapshot.title().to_uppercase())).unwrap_or_default();
+        compared.as_str()
     } else {
         ""
     };
@@ -705,6 +712,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
         let mut scene = match &app.before {
             Some(before) => pchart_draw::what_if(&app.plan, &app.schedule, &app.calendars, &settings, &before.schedule),
             None if app.why => pchart_draw::why(&app.plan, &app.schedule, &app.calendars, &settings, app.selected),
+            None if app.compare && app.then().is_some() => pchart_draw::what_if(&app.plan, &app.schedule, &app.calendars, &settings, &app.then().expect("a snapshot")),
             None => pchart_draw::roadmap(&app.plan, &app.schedule, &app.calendars, &settings),
         };
         scene.background = None;
@@ -718,6 +726,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let w = l.chart.width.saturating_sub(4).min(94);
             let h = l.chart.height.min(match app.form {
                 Some(Form::Rename { .. }) => 9,
+                Some(Form::Snapshot { .. }) => 11,
                 Some(Form::Remove { item }) => match app.removal(item) {
                     Ok((_, words)) => (255.0 + 28.0 * words.len().max(1) as f32) / 21.0,
                     Err(_) => 8.0,
@@ -855,6 +864,18 @@ fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
         }
     }
     parts.push((Some((Icon::Calendar, p.dim)), dates, p.ink, false));
+    if app.compare
+        && let Some((snapshot, _)) = app.since()
+    {
+        let was = match snapshot.items.get(&item.id) {
+            None => Some("new since then".to_string()),
+            Some(&(start, finish)) if (start, finish) != (slot.planned.start, slot.planned.finish) => Some(format!("was {}", if item.milestone { day(finish) } else { format!("{} – {}", day(start), day(finish)) })),
+            Some(_) => None,
+        };
+        if let Some(was) = was {
+            parts.push((None, was, p.muted, false));
+        }
+    }
     let note = item.note.clone().map(|note| (Some((Icon::Note, p.dim)), note, p.ink, false));
     if app.notes.is_some() {
         return parts.into_iter().chain(note).collect();
@@ -930,6 +951,23 @@ mod tests {
     fn undated() -> App {
         let plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap().structure_only();
         let calendars = vec![pchart_core::Calendar::default(); plan.lanes.len()];
+        let today = jiff::civil::date(2026, 10, 29);
+        let schedule = pchart_core::schedule(&plan, &calendars, today).unwrap();
+        App::new(plan, calendars, today, "portal.pchart".into(), schedule, (7, 16))
+    }
+
+    /// The sample kept as "Kick-off" on Thu 22 Oct with Frontend at 22 working days (pictures 67), and
+    /// opened on Thu 29 Oct with Frontend at 25.
+    fn snapshotted() -> App {
+        let mut plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+        let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
+        let calendars: Vec<_> = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
+        let frontend = plan.item("frontend").unwrap();
+        plan.items[frontend].duration = 22;
+        let then = pchart_core::schedule(&plan, &calendars, jiff::civil::date(2026, 10, 22)).unwrap();
+        let snapshot = pchart_core::snapshot::Snapshot::take(&plan, &then, jiff::civil::date(2026, 10, 22), Some("Kick-off".into()));
+        plan.keep(snapshot);
+        plan.items[frontend].duration = 25;
         let today = jiff::civil::date(2026, 10, 29);
         let schedule = pchart_core::schedule(&plan, &calendars, today).unwrap();
         App::new(plan, calendars, today, "portal.pchart".into(), schedule, (7, 16))
@@ -1024,6 +1062,18 @@ mod tests {
                 look(&mut app, &format!("{shown:?} finder \"{typed}\""));
             }
         }
+        for shown in [Screen::Situation, Screen::Roadmap] {
+            let mut app = snapshotted();
+            app.screen = shown;
+            look(&mut app, &format!("since {shown:?}"));
+        }
+        let mut kept = snapshotted();
+        kept.toggle_compare();
+        kept.selected = kept.plan.item("frontend").unwrap();
+        look(&mut kept, "compared");
+        kept.start_snapshot();
+        "Steering committee".chars().for_each(|c| kept.form_type(c));
+        look(&mut kept, "snapshot dialog");
         for view in pchart_draw::View::ALL {
             let mut app = app();
             app.screen = Screen::Export;
@@ -1764,5 +1814,48 @@ mod tests {
         app.finder = None;
         assert!(!action.run(&mut app, item, "move launch"));
         assert!(app.question.as_ref().is_some_and(|question| Some(question.item) == app.plan.item("launch")));
+    }
+
+    #[test]
+    fn the_situation_says_what_changed_since_the_last_snapshot_and_c_compares_the_roadmap() {
+        let mut kept = snapshotted();
+        let rows = screen(&kept, 170, 50).0;
+        for text in ["Since Kick-off · Thu 22 Oct", "3 working days less to spare: Requirements must now start by Mon 16 Nov instead of Thu 19 Nov", "Frontend +3 wd (22 → 25)", "Design sign-off moved from Wed 23 Dec to Fri 18 Dec", "c what changed"] {
+            assert!(has(&rows, text), "{text}");
+        }
+        assert!(!has(&screen(&app(), 170, 50).0, "Since") && !has(&screen(&app(), 170, 50).0, "c what changed"));
+        kept.toggle_compare();
+        kept.selected = kept.plan.item("frontend").unwrap();
+        let (rows, placements) = screen(&kept, 170, 50);
+        assert!(kept.screen == Screen::Roadmap && has(&rows, ":: SINCE KICK-OFF · THU 22 OCT · SWIMLANE ROADMAP") && has(&rows, "c back"));
+        assert!(placements.iter().any(|placement| placement.svg.contains("was Thu 24 Dec – Wed 27 Jan")));
+        assert!(placements.iter().any(|placement| placement.svg.contains("stroke-dasharray")));
+        kept.toggle_compare();
+        assert!(!kept.compare && !has(&screen(&kept, 170, 50).0, "SINCE KICK-OFF"));
+        let mut plain = app();
+        plain.toggle_compare();
+        assert_eq!((plain.compare, plain.message.as_deref()), (false, Some("No snapshot yet; t keeps one")));
+    }
+
+    #[test]
+    fn t_keeps_a_snapshot_with_a_name_and_u_takes_it_back() {
+        let mut kept = snapshotted();
+        kept.screen = Screen::Situation;
+        kept.start_snapshot();
+        assert_eq!(kept.screen, Screen::Roadmap);
+        let rows = screen(&kept, 170, 50);
+        assert!(has(&rows.0, "Enter keep it") && rows.1.iter().any(|placement| placement.svg.contains("Keep how the plan stands today?") && placement.svg.contains("The last snapshot is Kick-off · Thu 22 Oct.")));
+        "Steering committee".chars().for_each(|c| kept.form_type(c));
+        kept.keep_form();
+        assert_eq!(kept.plan.snapshots.iter().map(|snapshot| snapshot.title()).collect::<Vec<_>>(), ["Kick-off · Thu 22 Oct", "Steering committee · Thu 29 Oct"]);
+        assert_eq!(kept.message.as_deref(), Some("Kept: Steering committee · Thu 29 Oct · u takes it back"));
+        assert!(kept.unsaved && kept.since().is_some_and(|(snapshot, changes)| snapshot.name.as_deref() == Some("Steering committee") && changes.is_empty()));
+        kept.screen = Screen::Situation;
+        assert!(has(&screen(&kept, 170, 50).0, "Since Steering committee · Thu 29 Oct   nothing has moved"));
+        kept.undo();
+        assert_eq!(kept.plan.snapshots.len(), 1);
+        kept.start_snapshot();
+        kept.keep_form();
+        assert_eq!(kept.plan.snapshots.last().map(|snapshot| snapshot.title()), Some("Thu 29 Oct".to_string()));
     }
 }

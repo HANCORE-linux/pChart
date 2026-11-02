@@ -67,7 +67,14 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     let bottom = area.height - 1;
     let tall = area.height >= 30;
     let hero = if tall { 8 } else { 6 };
-    let stand = Rect { x: 0, y: 1, width: area.width, height: hero + 3 };
+    let since = app.since().filter(|_| tall);
+    let said: Vec<String> = since.as_ref().map(|(_, changes)| changes.iter().map(|change| pchart_core::snapshot::words(&app.plan, change)).collect()).unwrap_or_default();
+    let lines = match &since {
+        Some(_) if said.len() > 3 => 4,
+        Some(_) => said.len().max(1) as u16,
+        None => 0,
+    };
+    let stand = Rect { x: 0, y: 1, width: area.width, height: hero + 3 + if since.is_some() { lines + 1 } else { 0 } };
     panel(frame, inks, stand, "WHERE DO WE STAND", false);
     match &app.analysis.verdict {
         Some(verdict) => {
@@ -78,6 +85,24 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         None => {
             let end = app.schedule.slots.iter().map(|slot| slot.planned.finish).max().unwrap_or(app.today);
             put(frame, text_x, stand.y + 3, w, vec![Span::styled(format!("{} has no fixed target date; it ends {}.", app.plan.name, day(end)), bold(inks.bright))]);
+        }
+    }
+
+    if let Some((snapshot, _)) = &since {
+        let y = stand.y + 2 + hero + 1;
+        let label = format!("Since {}", snapshot.title());
+        let indent = text_x + label.chars().count() as u16 + 3;
+        let room = area.width.saturating_sub(indent + 2);
+        put(frame, text_x, y, w, vec![Span::styled(label, inks.dim)]);
+        if said.is_empty() {
+            put(frame, indent, y, room, vec![Span::styled("nothing has moved", inks.ink)]);
+        }
+        for (at, line) in said.iter().take(3).enumerate() {
+            let style = if at == 0 { bold(inks.bright) } else { inks.ink };
+            put(frame, indent, y + at as u16, room, vec![Span::styled(line.clone(), style)]);
+        }
+        if said.len() > 3 {
+            put(frame, indent, y + 3, room, vec![Span::styled(format!("and {} more · c shows them on the roadmap", said.len() - 3), inks.dim)]);
         }
     }
 

@@ -6,6 +6,7 @@ pub mod model;
 pub mod people;
 pub mod report;
 pub mod schedule;
+pub mod snapshot;
 pub mod text;
 
 pub use analysis::{Analysis, Check, Handoff, Next, Severity, State, Verdict, analyse, why};

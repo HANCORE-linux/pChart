@@ -19,6 +19,8 @@ pub enum Action {
     Important,
     Show,
     Undo,
+    Snapshot,
+    Compare,
     Detail,
     Details,
     Situation,
@@ -36,7 +38,7 @@ pub type Found = (Action, Option<usize>);
 impl Action {
     fn all(app: &App) -> Vec<Action> {
         let mut all = if app.dated() {
-            vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
+            vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Snapshot, Action::Compare, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
         } else {
             vec![Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::Undo, Action::Situation, Action::Roadmap, Action::Checks]
         };
@@ -64,6 +66,8 @@ impl Action {
             Action::Why => &["why", "reason", "because", "sets", "decides", "late", "blocks", "holds"],
             Action::AddItem => &["add", "new", "item", "task", "create", "insert", "work", "milestone"],
             Action::Rename => &["rename", "name", "call", "title"],
+            Action::Snapshot => &["snapshot", "keep", "baseline", "save", "freeze", "record", "status", "today"],
+            Action::Compare => &["changed", "change", "since", "compare", "diff", "difference", "snapshot", "baseline", "before", "last"],
             Action::WaitsOn => &["waits", "wait", "depends", "dependency", "dependencies", "link", "after", "before", "predecessor"],
             Action::Remove => &["remove", "delete", "drop", "cancel"],
             Action::TryLength => &["what", "if", "try", "longer", "shorter", "length", "duration", "extend", "days"],
@@ -107,6 +111,9 @@ impl Action {
             Action::Important => "Mark as important".into(),
             Action::Show => item.map_or_else(String::new, |index| app.plan.items[index].name.clone()),
             Action::Undo => "Undo".into(),
+            Action::Snapshot => "Keep a snapshot".into(),
+            Action::Compare if app.compare => "Stop comparing".into(),
+            Action::Compare => "What changed".into(),
             Action::Details if app.side => "Hide the details".into(),
             Action::Details => "Show the details".into(),
             Action::Detail => "Change the detail".into(),
@@ -161,6 +168,12 @@ impl Action {
                     format!("{lane} · {} – {} · {} wd", day(slot.start), day(slot.finish), it.duration)
                 }
             }
+            (Action::Snapshot, _) => format!("how the plan stands today, {}", day(app.today)),
+            (Action::Compare, _) => app.since().map_or_else(|| "no snapshot yet; t keeps one".to_string(), |(snapshot, changes)| format!("since {} · {}", snapshot.title(), match changes.len() {
+                0 => "nothing has moved".to_string(),
+                1 => "1 change".to_string(),
+                count => format!("{count} changes"),
+            })),
             (Action::Undo, _) => app.history.last().map_or_else(|| "nothing to undo".to_string(), |(_, label)| format!("takes back: {label}")),
             (Action::Detail, _) => format!("Overview, Standard or Full · now {}", match app.level {
                 Level::Overview => "Overview",
@@ -228,6 +241,8 @@ impl Action {
             Action::Important => "n i",
             Action::Show => "",
             Action::Undo => "u",
+            Action::Snapshot => "t",
+            Action::Compare => "c",
             Action::Details => "Space",
             Action::Detail => "d",
             Action::Situation => "1",
@@ -290,6 +305,8 @@ impl Action {
             }
             Action::Show => roadmap(app),
             Action::Undo => app.undo(),
+            Action::Snapshot => app.start_snapshot(),
+            Action::Compare => app.toggle_compare(),
             Action::Details => {
                 app.screen = Screen::Roadmap;
                 app.side ^= true;
@@ -347,12 +364,14 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
     if typed_words.is_empty() {
         let selected = Some(app.selected);
         let mut found: Vec<Found> = match app.screen {
-            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::Why, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Undo, None), (Action::Detail, None), (Action::Details, None)],
+            Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::Why, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Compare, None), (Action::Snapshot, None), (Action::Undo, None), (Action::Detail, None), (Action::Details, None)],
             Screen::Checks => vec![(Action::Holidays, None), (Action::Undo, None)],
             Screen::Export => vec![(Action::Export(app.export.view), None)],
-            Screen::Situation | Screen::People | Screen::Reports => vec![(Action::Undo, None)],
+            Screen::Situation => vec![(Action::Compare, None), (Action::Snapshot, None), (Action::Undo, None)],
+            Screen::People | Screen::Reports => vec![(Action::Undo, None)],
         };
         found.retain(|&(action, _)| action != Action::Undo || !app.history.is_empty());
+        found.retain(|&(action, _)| action != Action::Compare || app.since().is_some());
         found.retain(|(action, _)| Action::all(app).contains(action));
         found.retain(|&(action, item)| item.is_none_or(|index| action.fits(app, index)));
         found.extend([(Action::Situation, None), (Action::Roadmap, None), (Action::Checks, None), (Action::Export(app.export.view), None), (Action::Help, None), (Action::Quit, None)].into_iter().filter(|found_one| !(found_one.0 == Action::Situation && app.screen == Screen::Situation) && !(found_one.0 == Action::Roadmap && app.screen == Screen::Roadmap) && !(found_one.0 == Action::Checks && app.screen == Screen::Checks) && !(matches!(found_one.0, Action::Export(_)) && app.screen == Screen::Export)));

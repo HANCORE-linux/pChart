@@ -10,6 +10,8 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "list", usage: "pchart list", about: "The projects of the workspace pChart runs in (a folder with a workspace.toml), each with how it stands." },
     Command { name: "report", usage: "pchart report PLAN ITEM (--done | --on-track | --risk | --later DAYS) [--comment TEXT] [--by NAME]", about: "Say how a piece of work stands, for the project lead: done, on track, at risk, or needing DAYS working days more. It goes to the workspace's reports folder as a file of its own; the plan stays as it is until the project lead takes it. --by names who reports, else $PCHART_NAME." },
     Command { name: "reports", usage: "pchart reports PLAN", about: "The reports about the plan, newest first: who says what, whether it is answered, and what taking it would do." },
+    Command { name: "snapshot", usage: "pchart snapshot PLAN [--name NAME]", about: "Keep how the plan stands today at the end of the plan file: what the chain has to spare and the dates of every item. pchart diff and the situation screen then say what changed since." },
+    Command { name: "diff", usage: "pchart diff PLAN [--since DATE]", about: "What changed since the last snapshot, or the last one up to DATE: what the chain has to spare, work that got longer or shorter, new and removed items, moved milestones." },
     Command { name: "situation", usage: "pchart situation PLAN", about: "Where the plan stands: does the date hold, who waits on whom, what is next." },
     Command { name: "why", usage: "pchart why PLAN ITEM", about: "The chain of items that sets the date of ITEM." },
     Command { name: "waits", usage: "pchart waits PLAN", about: "Every lane that waits on another lane, and for what." },

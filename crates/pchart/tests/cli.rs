@@ -317,3 +317,28 @@ fn why_names_the_chain_and_what_the_item_itself_has_to_spare() {
     let value: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["why", path.to_str().unwrap(), "sdk-integration", "--json"], None))).unwrap();
     assert_eq!((value["spare_wd"].as_i64(), value["chain"].as_array().map(Vec::len)), (Some(19), Some(3)));
 }
+
+#[test]
+fn a_snapshot_keeps_how_the_plan_stood_and_diff_says_what_changed_since() {
+    let path = copy("snapshot");
+    let file = path.to_str().unwrap();
+    let output = pchart(&["diff", file], None);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("has no snapshot; pchart snapshot"));
+    let on = |day: &str, args: &[&str]| Command::new(env!("CARGO_BIN_EXE_pchart")).args(args).args(["--today", day]).output().unwrap();
+    assert!(on("2026-10-22", &["set", file, "frontend", "--duration", "22"]).status.success());
+    let output = on("2026-10-22", &["snapshot", file, "--name", "Kick-off"]);
+    assert_eq!(stdout(&output), "Snapshot Kick-off · Thu 22 Oct: Launch on Mon 01 Mar is on track, 20 working days to spare.\nThe plan keeps 1 snapshot; pchart diff says what changed since the last.\n");
+    assert!(std::fs::read_to_string(&path).unwrap().starts_with("format = 2\n"));
+    assert_eq!(stdout(&pchart(&["diff", file], None)), "Since Kick-off · Thu 22 Oct: nothing has moved.\n");
+    assert!(pchart(&["set", file, "frontend", "--duration", "25"], None).status.success());
+    assert_eq!(stdout(&pchart(&["diff", file], None)), "Since Kick-off · Thu 22 Oct:\n  3 working days less to spare: Requirements must now start by Mon 16 Nov instead of Thu 19 Nov\n  Frontend +3 wd (22 → 25)\n  Design sign-off moved from Wed 23 Dec to Fri 18 Dec\n");
+    let json: serde_json::Value = serde_json::from_str(&stdout(&pchart(&["diff", file, "--json"], None))).unwrap();
+    assert_eq!((json["since"].as_str(), json["changes"].as_array().map(Vec::len)), (Some("2026-10-22"), Some(3)));
+    let output = pchart(&["diff", file, "--since", "2026-10-21"], None);
+    assert_eq!(output.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("has no snapshot up to 2026-10-21"));
+    let dry = pchart(&["snapshot", file, "--dry-run", "--json"], None);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&stdout(&dry)).unwrap()["written"], false);
+    assert_eq!(std::fs::read_to_string(&path).unwrap().matches("[[snapshots]]").count(), 1);
+}

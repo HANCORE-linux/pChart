@@ -266,7 +266,7 @@ fn draw(plan: &Plan, schedule: &Schedule, calendars: &[Calendar], settings: &Set
             free_slack(&mut s, &c, &mut taken);
         }
         if let Some(before) = before {
-            ghosts(&mut s, &c, before);
+            ghosts(&mut s, &c, before, &mut taken);
         }
         bars(&mut s, &c);
         buffers(&mut s, &c, &analyse(plan, calendars, schedule, today).checks, &mut taken);
@@ -603,7 +603,7 @@ fn bars(s: &mut Scene, c: &Chart) {
 }
 
 /// The places items had before a what-if, dashed, for the items that moved.
-fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule) {
+fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule, taken: &mut Vec<Area>) {
     let u = c.u;
     let stroke = Stroke { color: c.p.muted, width: 1.2 * u, dash: Some((3.0 * u, 3.0 * u)) };
     for (index, item) in c.plan.items.iter().enumerate().filter(|&(index, _)| c.shown(index)) {
@@ -616,6 +616,7 @@ fn ghosts(s: &mut Scene, c: &Chart, before: &Schedule) {
             let x = c.g.x(old.finish) + if item.on.is_some() { c.g.px / 2.0 } else { c.g.px };
             let r = 7.0 * u;
             s.add(Shape::Path { points: vec![(x, y - r), (x + r, y), (x, y + r), (x - r, y)], closed: true, fill: Fill::None, stroke: Some(stroke) });
+            taken.push([x - r - 2.0 * u, y - r, x + r + 2.0 * u, y + r]);
         } else {
             let (x0, x1) = (c.g.x(old.start).max(c.g.x0), (c.g.x(old.finish) + c.g.px).min(c.g.x1));
             if x1 > x0 {

@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::Error;
 
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Plan {
@@ -19,6 +19,9 @@ pub struct Plan {
     pub items: Vec<Item>,
     #[serde(default)]
     pub notes: Vec<Note>,
+    /// How the plan stood on earlier days (pictures 67); a plan with snapshots is format 2.
+    #[serde(default)]
+    pub snapshots: Vec<crate::snapshot::Snapshot>,
 }
 
 /// A note at a date in a lane; it stays there when the plan moves (picture 43).
@@ -143,7 +146,7 @@ impl Plan {
     /// The plan file text: readable TOML in a fixed order, with only the fields that are set.
     pub fn to_toml(&self) -> String {
         let mut out = String::new();
-        let _ = writeln!(out, "format = {}", self.format);
+        let _ = writeln!(out, "format = {}", if self.snapshots.is_empty() { self.format } else { self.format.max(2) });
         let _ = writeln!(out, "name = {}", quote(&self.name));
         if let Some(start) = self.start {
             let _ = writeln!(out, "start = {start}");
@@ -200,7 +203,19 @@ impl Plan {
         for note in &self.notes {
             let _ = write!(out, "\n[[notes]]\nlane = {}\ndate = {}\ntext = {}\n", quote(&note.lane), note.date, quote(&note.text));
         }
+        for snapshot in &self.snapshots {
+            out.push_str(&snapshot.to_toml());
+        }
         out
+    }
+
+    /// Keeps `snapshot` in order of its day, in place of one of the same day and name; a plan with
+    /// snapshots is format 2, so that an older pChart refuses it instead of dropping them.
+    pub fn keep(&mut self, snapshot: crate::snapshot::Snapshot) {
+        self.snapshots.retain(|other| other.day != snapshot.day || other.name != snapshot.name);
+        self.snapshots.push(snapshot);
+        self.snapshots.sort_by_key(|other| other.day);
+        self.format = self.format.max(2);
     }
 
     pub fn item(&self, id: &str) -> Option<usize> {

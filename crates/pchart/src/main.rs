@@ -192,6 +192,8 @@ fn run(args: &Args) -> Result<u8, Failure> {
         "open" => &["--theme"],
         "new" => &["--template", "--name", "--target", "--start"],
         "report" => &["--later", "--comment", "--by"],
+        "snapshot" => &["--name"],
+        "diff" => &["--since"],
         _ => &[],
     };
     if let Some(option) = args.unknown_options(known) {
@@ -301,6 +303,47 @@ fn run(args: &Args) -> Result<u8, Failure> {
                     && let Some(then) = report.then(&ctx.plan, &ctx.calendars, ctx.today).and_then(|(plan, _, analysis)| analysis.verdict.map(|verdict| text::stand(&plan, &verdict)))
                 {
                     say!("              if taken: {then}");
+                }
+            }
+            Ok(0)
+        }
+        "snapshot" => {
+            let mut plan = ctx.plan.clone();
+            let snapshot = pchart_core::snapshot::Snapshot::take(&plan, &ctx.schedule, ctx.today, args.option("--name").map(str::to_string));
+            plan.keep(snapshot.clone());
+            if !args.flag("--dry-run") {
+                pchart_store::save(&ctx.path, &plan).map_err(|err| Failure::file(err.to_string()))?;
+            }
+            if json {
+                print_json(&json!({ "schema": 1, "written": !args.flag("--dry-run"), "day": report::iso(snapshot.day), "name": snapshot.name, "spare_wd": snapshot.spare, "items": snapshot.items.len(), "snapshots": plan.snapshots.len() }));
+            } else {
+                let stand = analysis()?.verdict.map(|verdict| text::stand(&ctx.plan, &verdict)).unwrap_or_default();
+                say!("Snapshot {}: {stand}", snapshot.title());
+                say!("The plan keeps {} snapshot{}; pchart diff says what changed since the last.", plan.snapshots.len(), if plan.snapshots.len() == 1 { "" } else { "s" });
+            }
+            Ok(0)
+        }
+        "diff" => {
+            let since = match args.option("--since") {
+                Some(text) => Some(text.parse::<jiff::civil::Date>().map_err(|_| Failure::usage(format!("\"{text}\" is not a date like 2026-10-22"), args))?),
+                None => None,
+            };
+            let snapshot = match since {
+                Some(day) => pchart_core::snapshot::last(&ctx.plan, day),
+                None => pchart_core::snapshot::last(&ctx.plan, ctx.today),
+            };
+            let Some(snapshot) = snapshot else {
+                return Err(Failure { code: 3, kind: "usage", message: format!("{} has no snapshot{}; pchart snapshot {} keeps one", ctx.path.display(), since.map(|day| format!(" up to {day}")).unwrap_or_default(), ctx.path.display()), hint: None });
+            };
+            let changes = pchart_core::snapshot::changes(&ctx.plan, &ctx.schedule, &ctx.calendars, snapshot);
+            if json {
+                print_json(&json!({ "schema": 1, "since": report::iso(snapshot.day), "name": snapshot.name, "changes": changes.iter().map(|change| pchart_core::snapshot::words(&ctx.plan, change)).collect::<Vec<_>>() }));
+            } else if changes.is_empty() {
+                say!("Since {}: nothing has moved.", snapshot.title());
+            } else {
+                say!("Since {}:", snapshot.title());
+                for change in &changes {
+                    say!("  {}", pchart_core::snapshot::words(&ctx.plan, change));
                 }
             }
             Ok(0)

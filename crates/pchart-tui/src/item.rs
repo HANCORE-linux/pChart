@@ -125,6 +125,21 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
             bits::runs(s, left, top + 64.0 * u, 15.0 * u, &[(&fit(&words, 15.0 * u, room), p.dim, false)]);
             return;
         }
+        Form::Snapshot { typed } => {
+            head(app, s, x, y, width, height, u, &format!("SNAPSHOT · {}", pchart_core::text::day(app.today).to_uppercase()), "Keep how the plan stands today?");
+            field(s, left, top, room, typed, true, u, p.ink, p.bright);
+            if typed.is_empty() {
+                bits::runs(s, left + 14.0 * u, top + 19.0 * u, 16.6 * u, &[("a name if you like, such as Steering committee", p.muted, false)]);
+            }
+            let stand = app.analysis.verdict.as_ref().map(|verdict| pchart_core::text::stand(&app.plan, verdict)).unwrap_or_default();
+            bits::runs(s, left, top + 64.0 * u, 16.6 * u, &[(&fit(&stand, 16.6 * u, room), p.ink, false)]);
+            let kept = match pchart_core::snapshot::last(&app.plan, app.today) {
+                Some(last) => format!("Then c shows what changed since. The last snapshot is {}.", last.title()),
+                None => "Then c shows what changed since, here and on the situation.".to_string(),
+            };
+            bits::runs(s, left, top + 94.0 * u, 15.0 * u, &[(&fit(&kept, 15.0 * u, room), p.dim, false)]);
+            return;
+        }
         Form::Rename { item, typed } => {
             let name = &app.plan.items[*item].name;
             head(app, s, x, y, width, height, u, &format!("RENAME · {}", name.to_uppercase()), &format!("What is {name} called?"));

@@ -118,6 +118,8 @@ pub enum Form {
     /// A report on `item` (pictures 65): how it stands by its place in `STATUSES`, the days more it needs
     /// as typed, the comment, who reports by their place in `App::reporters`, and the question `↑↓` is on.
     Report { item: usize, status: usize, days: String, comment: String, by: usize, at: usize, answering: Option<PathBuf> },
+    /// Keeping how the plan stands today (pictures 67), with a name as typed, which may stay empty.
+    Snapshot { typed: String },
 }
 
 pub use pchart_core::people::Crew;
@@ -183,6 +185,8 @@ pub struct App {
     pub side: bool,
     /// Why this date? (picture 56): the roadmap shows the chain that sets the selection's date.
     pub why: bool,
+    /// The roadmap compared with the last snapshot (pictures 67).
+    pub compare: bool,
     pub crew: Option<Crew>,
     /// The line and the week chosen on the People screen.
     pub person: usize,
@@ -203,7 +207,7 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, crew: None, person: 0, week: 0, root: None, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, compare: false, crew: None, person: 0, week: 0, root: None, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
         if !app.dated() {
             app.screen = Screen::Roadmap;
             app.export.view = View::Network;
@@ -698,6 +702,40 @@ impl App {
         self.form = Some(Form::Length { item: self.selected, typed: String::new() });
     }
 
+    /// `t`: keep how the plan stands today.
+    pub fn start_snapshot(&mut self) {
+        self.screen = Screen::Roadmap;
+        self.form = Some(Form::Snapshot { typed: String::new() });
+    }
+
+    /// The last snapshot up to today and what changed since.
+    pub fn since(&self) -> Option<(&pchart_core::snapshot::Snapshot, Vec<pchart_core::snapshot::Change>)> {
+        let snapshot = pchart_core::snapshot::last(&self.plan, self.today)?;
+        Some((snapshot, pchart_core::snapshot::changes(&self.plan, &self.schedule, &self.calendars, snapshot)))
+    }
+
+    /// The schedule as the last snapshot holds it, for the roadmap to draw its dates dashed.
+    pub fn then(&self) -> Option<Schedule> {
+        let snapshot = pchart_core::snapshot::last(&self.plan, self.today)?;
+        let mut schedule = self.schedule.clone();
+        for (item, slot) in self.plan.items.iter().zip(schedule.slots.iter_mut()) {
+            if let Some(&(start, finish)) = snapshot.items.get(&item.id) {
+                slot.planned = pchart_core::Span { start, finish };
+            }
+        }
+        Some(schedule)
+    }
+
+    /// `c`: the roadmap compared with the last snapshot, or back.
+    pub fn toggle_compare(&mut self) {
+        if pchart_core::snapshot::last(&self.plan, self.today).is_none() {
+            self.message = Some("No snapshot yet; t keeps one".into());
+            return;
+        }
+        self.compare = !self.compare;
+        self.screen = Screen::Roadmap;
+    }
+
     /// The arrow keys in the network diagram: the nearest item that way.
     pub fn move_in_network(&mut self, dx: f32, dy: f32) {
         let (_, boxes, _) = pchart_draw::structure::layout(&self.plan, &self.schedule);
@@ -845,7 +883,7 @@ impl App {
                 let days = pchart_core::input::length(typed).filter(|&days| days > 0).ok_or("Type a length, such as 5 or 2w")?;
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
-            Form::Report { .. } => Ok((Vec::new(), String::new())),
+            Form::Report { .. } | Form::Snapshot { .. } => Ok((Vec::new(), String::new())),
             Form::Who { item, at, share } => {
                 let it = &self.plan.items[*item];
                 let who = self.who_rows(*item).get(*at).cloned().flatten();
@@ -916,7 +954,7 @@ impl App {
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => adding.name.push(c),
             Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
-            Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => typed.push(c),
+            Some(Form::Rename { typed, .. } | Form::Length { typed, .. } | Form::Snapshot { typed }) => typed.push(c),
             Some(Form::Report { days, at: 1, .. }) => days.push(c),
             Some(Form::Report { comment, at: 2, .. }) => comment.push(c),
             Some(Form::WaitsOn { on, at, .. }) if c == ' ' => {
@@ -933,7 +971,7 @@ impl App {
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => drop(adding.name.pop()),
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
-            Some(Form::Rename { typed, .. } | Form::Length { typed, .. }) => drop(typed.pop()),
+            Some(Form::Rename { typed, .. } | Form::Length { typed, .. } | Form::Snapshot { typed }) => drop(typed.pop()),
             Some(Form::Report { days, at: 1, .. }) => drop(days.pop()),
             Some(Form::Report { comment, at: 2, .. }) => drop(comment.pop()),
             _ => {}
@@ -951,6 +989,20 @@ impl App {
 
     /// Enter in a dialog: makes its changes as one and closes it, or says what is missing.
     pub fn keep_form(&mut self) {
+        if let Some(Form::Snapshot { typed }) = &self.form {
+            let name = Some(typed.trim().to_string()).filter(|name| !name.is_empty());
+            let snapshot = pchart_core::snapshot::Snapshot::take(&self.plan, &self.schedule, self.today, name);
+            let title = snapshot.title();
+            let before = self.plan.clone();
+            let mut plan = self.plan.clone();
+            plan.keep(snapshot);
+            let schedule = self.schedule.clone();
+            self.take(plan, schedule);
+            self.history.push((before, format!("snapshot {title}")));
+            self.form = None;
+            self.message = Some(format!("Kept: {title} · u takes it back"));
+            return;
+        }
         if let Some(Form::Report { answering: Some(path), .. }) = &self.form {
             let path = path.clone();
             match self.form_report() {

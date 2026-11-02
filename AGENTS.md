@@ -66,6 +66,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 | `pchart report PLAN ID (--done \| --on-track \| --risk \| --later DAYS) [--comment TEXT] [--by NAME]` | in a workspace, say how a piece of work stands; it waits in `reports/` as a file of its own and the plan stays as it is until the lead takes it; `--by` else `$PCHART_NAME` |
 | `pchart reports PLAN` | the reports about a plan, newest first, answered or not, with what taking each would do; `--json` |
 | `pchart set PLAN ID --who NAME --share 30` | who does a piece of work and the share of their time it takes (1–100, else all of it); the share counts only for how busy they are, never for dates |
+| `pchart snapshot PLAN [--name NAME]` | keep how the plan stands today at the end of the plan file (only dates; the plan becomes format 2); `pchart diff PLAN [--since DATE]` says what changed since, counting the plan and not the days that passed; `--json` |
 | `pchart situation PLAN --json` | verdict, who waits on whom, what is next, the deciding chain |
 | `pchart check PLAN` | problems, warnings and hints; exit code 1 or 2 |
 | `pchart set … --dry-run`, `pchart apply PLAN - --dry-run` | try a change and read what it does, without writing |
