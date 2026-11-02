@@ -159,6 +159,33 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
     }
 
     let right = Rect { x: left.width, width: body.width - left.width, ..body };
+    if let (Some(crew), Check::Overload { who, .. } | Check::Away { who, .. }) = (&app.crew, check)
+        && let rows = crate::people::rows(crew, Some(who))
+        && !rows.is_empty()
+    {
+        let dates = app.schedule.slots[check.items()[0]].planned;
+        let (from, to) = match *check {
+            Check::Overload { from, to, .. } | Check::Away { from, to, .. } => (from.min(dates.start), to.max(dates.finish)),
+            _ => (dates.start, dates.finish),
+        };
+        let week = jiff::Span::new().days(7);
+        let start = crate::people::monday(from.checked_sub(week).unwrap_or(from));
+        let end = crate::people::monday(to).checked_add(jiff::Span::new().days(13)).unwrap_or(to);
+        let span = if start.year() == end.year() { format!("{} – {}", start.strftime("%d %b"), end.strftime("%d %b %Y")) } else { format!("{} – {}", start.strftime("%d %b %Y"), end.strftime("%d %b %Y")) };
+        panel(frame, inks, right, &format!("{} · {}", who.to_uppercase(), span.to_uppercase()), false);
+        let (cw, ch) = app.cell;
+        let u = f32::from(ch) / 21.0;
+        let width = right.width.saturating_sub(2);
+        let tall = pchart_draw::people::height(&rows, u, f32::from(width) * f32::from(cw), start, end);
+        let rect = Rect { x: right.x + 1, y: right.y + 2, width, height: ((tall / f32::from(ch)).ceil() as u16).min(right.height.saturating_sub(10)) };
+        let scene = pchart_draw::people::people(&rows, start, end, app.today, None, f32::from(rect.width) * f32::from(cw), f32::from(rect.height) * f32::from(ch), u, &p);
+        placements.push(Placement { rect, svg: scene.svg(), paper: false });
+        let text = Rect { x: right.x + 3, y: rect.y + rect.height + 3, width: right.width.saturating_sub(6), height: 5 };
+        if text.y + text.height < right.y + right.height {
+            picture(app, placements, text, |w, h, u| bits::advice(&advice.happens, &advice.step, &advice.then, w, h, u, &p));
+        }
+        return;
+    }
     let Some(cut) = Cut::around(&app.plan, &app.schedule, &check.items()) else { return };
     let span = if cut.start.year() == cut.end.year() {
         format!("{} – {}", cut.start.strftime("%d %b"), cut.end.strftime("%d %b %Y"))

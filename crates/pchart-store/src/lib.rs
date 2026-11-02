@@ -30,6 +30,41 @@ pub fn workspace(dir: &Path) -> Option<(PathBuf, String)> {
     }
 }
 
+/// The people and teams of the workspace at `root` (pictures 64), from its `workspace.toml`; none when
+/// it names none or cannot be read.
+pub fn people(root: &Path) -> pchart_core::people::Workspace {
+    fs::read_to_string(root.join("workspace.toml")).ok().and_then(|text| pchart_core::people::Workspace::parse(&text).ok()).unwrap_or_default()
+}
+
+/// The workspace the plan at `path` is in (pictures 64), with its people and its projects, `plan` among
+/// them as it is now; `lanes` gives the calendars of a plan's lanes. A project that cannot be read or
+/// scheduled is left out.
+pub fn crew(path: &Path, plan: &Plan, schedule: &pchart_core::Schedule, today: jiff::civil::Date, lanes: &dyn Fn(&Plan) -> Vec<pchart_core::Calendar>) -> Option<pchart_core::people::Crew> {
+    use pchart_core::people::{Crew, Project};
+    let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let (root, name) = workspace(dir)?;
+    let this = fs::canonicalize(path).ok();
+    let here_project = || Project { name: plan.name.clone(), plan: plan.clone(), schedule: schedule.clone(), calendars: lanes(plan) };
+    let mut found = Vec::new();
+    let mut here = None;
+    for file in projects(&root) {
+        if fs::canonicalize(&file).ok() == this {
+            here = Some(found.len());
+            found.push(here_project());
+            continue;
+        }
+        let Ok(other) = load(&file) else { continue };
+        let calendars = lanes(&other);
+        let Ok(dates) = pchart_core::schedule(&other, &calendars, today) else { continue };
+        found.push(Project { name: other.name.clone(), plan: other, schedule: dates, calendars });
+    }
+    let here = here.unwrap_or_else(|| {
+        found.push(here_project());
+        found.len() - 1
+    });
+    Some(Crew { name, workspace: people(&root), projects: found, here })
+}
+
 /// The projects of a workspace: the plans in its `projects` folder, by file name.
 pub fn projects(workspace: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(workspace.join("projects")) else { return Vec::new() };
@@ -184,6 +219,31 @@ mod tests {
         fs::write(dir.join("workspace.toml"), "").unwrap();
         assert_eq!(workspace(&dir).map(|(_, name)| name), root.file_name().map(|name| name.to_string_lossy().into_owned()));
         assert_eq!(workspace(&std::env::temp_dir().join("pchart-nowhere-at-all")), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_plan_in_a_workspace_comes_with_its_people_and_the_other_projects() {
+        let dir = folder("crew");
+        fs::create_dir_all(dir.join("projects")).unwrap();
+        fs::write(dir.join("workspace.toml"), "name = \"Acme\"\npeople = [{ name = \"Lena Vogel\", team = \"Design/UX\", capacity = 80, away = [{ from = 2027-01-04, to = 2027-01-08 }] }]\n").unwrap();
+        let text = include_str!("../../../samples/customer-portal.pchart");
+        for file in ["a.pchart", "b.pchart", "broken.pchart"] {
+            fs::write(dir.join("projects").join(file), if file == "broken.pchart" { "not a plan" } else { text }).unwrap();
+        }
+        let plan = Plan::parse(text).unwrap();
+        let lanes = |plan: &Plan| vec![pchart_core::Calendar::default(); plan.lanes.len()];
+        let today = jiff::civil::date(2026, 10, 29);
+        let schedule = pchart_core::schedule(&plan, &lanes(&plan), today).unwrap();
+        let found = crew(&dir.join("projects/b.pchart"), &plan, &schedule, today, &lanes).unwrap();
+        assert_eq!((found.name.as_str(), found.projects.len(), found.here), ("Acme", 2, 1));
+        let lena = found.workspace.person("Lena Vogel").unwrap();
+        assert_eq!((lena.team.as_deref(), found.workspace.capacity("Lena Vogel"), lena.away.len()), (Some("Design/UX"), 80, 1));
+        let elsewhere = crew(&dir.join("plan.pchart"), &plan, &schedule, today, &lanes).unwrap();
+        assert_eq!((elsewhere.projects.len(), elsewhere.here), (3, 2));
+        fs::write(dir.join("workspace.toml"), "people = 3").unwrap();
+        assert!(crew(&dir.join("projects/a.pchart"), &plan, &schedule, today, &lanes).unwrap().workspace.people.is_empty());
+        assert!(crew(&std::env::temp_dir().join("pchart-nowhere-at-all/plan.pchart"), &plan, &schedule, today, &lanes).is_none());
         fs::remove_dir_all(dir).unwrap();
     }
 

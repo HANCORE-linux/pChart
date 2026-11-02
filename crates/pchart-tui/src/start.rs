@@ -25,6 +25,10 @@ pub struct Start {
     pub recent: Vec<(PathBuf, Plan, Vec<Calendar>)>,
     /// The workspace pChart was started in, by name: its projects come first, before the templates.
     pub workspace: Option<String>,
+    /// In a workspace, its people and its projects with their dates, in the order of `recent`, so the
+    /// checks of people look across them (pictures 64).
+    pub people: pchart_core::people::Workspace,
+    pub crew: Vec<pchart_core::people::Project>,
     /// The line `↑↓` is on: the templates, then the plans opened before; in a workspace its projects,
     /// then the templates.
     pub chosen: usize,
@@ -47,7 +51,7 @@ impl Start {
     pub fn new(dir: PathBuf, recent: Vec<PathBuf>, calendars: &dyn Fn(&Plan) -> Vec<Calendar>, today: Date, palette: Palette, cell: (u16, u16)) -> Start {
         let templates = pchart_store::templates().into_iter().map(|(_, plan)| plan).collect();
         let recent = recent.into_iter().filter_map(|path| pchart_store::load(&path).ok().map(|plan| (path, calendars(&plan), plan)).map(|(path, calendars, plan)| (path, plan, calendars))).collect();
-        Start { templates, recent, workspace: None, chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
+        Start { templates, recent, workspace: None, people: Default::default(), crew: Vec::new(), chosen: 0, name: String::new(), forwards: false, undated: false, typed: String::new(), naming: false, dir, today, palette, cell, message: None }
     }
 
     pub fn template(&self) -> Option<&Plan> {
@@ -306,6 +310,14 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
         });
         let changed = std::fs::metadata(path).and_then(|meta| meta.modified()).ok().and_then(|time| jiff::Timestamp::try_from(time).ok()).map(|time| time.to_zoned(jiff::tz::TimeZone::system()).strftime("%a %d %b, %H:%M").to_string());
         let place = home(&path.display().to_string());
+        let people: Vec<String> = start
+            .plan_at()
+            .filter(|&at| start.crew.len() == start.recent.len() && at < start.crew.len())
+            .map(|at| pchart_core::people::checks(&start.people, &start.crew, at, calendars))
+            .unwrap_or_default()
+            .iter()
+            .map(|check| pchart_core::text::check(plan, check).0.trim_end_matches('.').to_string())
+            .collect();
         picture(start, placements, inner, |w, h, u| {
             let mut s = bits::canvas(w, h, &p);
             let size = 16.6 * u;
@@ -327,6 +339,12 @@ fn how_to_start(start: &Start, frame: &mut Frame, inks: &Inks, rect: Rect, place
             if let Some(changed) = &changed {
                 bits::draw_icon(&mut s, Icon::Clock, 18.0 * u, y - 5.0 * u, 15.0 * u, p.dim, p.page);
                 bits::runs(&mut s, 38.0 * u, y, size, &[(&format!("changed {changed}"), p.ink, false)]);
+                y += 30.0 * u;
+            }
+            for words in &people {
+                bits::draw_icon(&mut s, Icon::Warn, 18.0 * u, y - 5.0 * u, 15.0 * u, p.warn, p.page);
+                bits::runs(&mut s, 38.0 * u, y, size, &[(words, p.ink, false)]);
+                y += 30.0 * u;
             }
             s
         });
@@ -487,6 +505,17 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Gives the first plan Lena Vogel on two pieces of work at once, and the start the people of Acme.
+    fn staff(start: &mut Start) {
+        let plan = &mut start.recent[0].1;
+        for (item, share) in [("ux-concept", 60), ("data-model", 60)] {
+            let index = plan.item(item).unwrap();
+            (plan.items[index].who, plan.items[index].share) = (Some("Lena Vogel".into()), Some(share));
+        }
+        start.people = pchart_core::people::Workspace::parse("people = [{ name = \"Lena Vogel\", team = \"Design/UX\" }]").unwrap();
+        start.crew = start.recent.iter().map(|(_, plan, calendars)| pchart_core::people::Project { name: plan.name.clone(), plan: plan.clone(), schedule: pchart_core::schedule(plan, calendars, start.today).unwrap(), calendars: calendars.clone() }).collect();
+    }
+
     #[test]
     fn in_a_workspace_its_projects_come_first_and_a_new_one_goes_into_projects() {
         let dir = folder("workspace");
@@ -497,8 +526,10 @@ mod tests {
         assert_eq!((start.plan_at(), start.template_at()), (Some(0), None));
         let (rows, svg) = screen(&start, 160, 47);
         assert!(rows.contains(":: START · ACME") && rows.contains("PROJECTS") && rows.contains("NEW PROJECT FROM") && !rows.contains("RECENT") && rows.contains(":: OPEN"), "{rows}");
-        assert!(svg.contains("Customer portal v1") && svg.contains("Launch on Mon 01 Mar is "));
+        assert!(svg.contains("Customer portal v1") && svg.contains("Launch on Mon 01 Mar is ") && !svg.contains("is planned at"));
         assert!(rows.find("PROJECTS").unwrap() < rows.find("NEW PROJECT FROM").unwrap());
+        staff(&mut start);
+        assert!(screen(&start, 160, 47).1.contains("Lena Vogel is planned at 120 %"));
         start.choose(1);
         assert_eq!((start.plan_at(), start.template_at()), (None, Some(0)));
         assert!(screen(&start, 160, 47).1.contains("projects/new-application.pchart"));
@@ -529,6 +560,7 @@ mod tests {
         let path = dir.join("portal.pchart");
         std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/customer-portal.pchart"), &path).unwrap();
         let mut start = start(&dir, vec![path]);
+        staff(&mut start);
         let output = pchart_draw::Output::default();
         let mut found = Vec::new();
         for (cell, chosen) in [(7, 16), (8, 17), (10, 21)].into_iter().flat_map(|cell| (0..5).map(move |chosen| (cell, chosen))) {

@@ -6,6 +6,7 @@ pub mod markdown;
 pub mod milestones;
 pub mod output;
 pub mod page;
+pub mod people;
 pub mod phases;
 pub mod roadmap;
 pub mod scene;

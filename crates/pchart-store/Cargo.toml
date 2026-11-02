@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+jiff.workspace = true
 pchart-core.workspace = true
 
 [lints]

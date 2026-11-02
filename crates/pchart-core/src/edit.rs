@@ -30,6 +30,8 @@ pub enum Edit {
     Done { item: String, done: bool },
     Buffer { item: String, buffer: bool },
     Who { item: String, who: Option<String> },
+    /// How much of the time of who does it the item takes, in percent; none is all of it.
+    Share { item: String, share: Option<u32> },
     /// The note of an item; none or an empty one removes it.
     Note { item: String, note: Option<String> },
     Important { item: String, important: bool },
@@ -111,6 +113,12 @@ impl Edit {
             Edit::Done { item, done } => next.items[find(item)?].done = *done,
             Edit::Buffer { item, buffer } => next.items[find(item)?].buffer = *buffer,
             Edit::Who { item, who } => next.items[find(item)?].who = who.clone(),
+            Edit::Share { item, share } => {
+                if share.is_some_and(|share| !(1..=100).contains(&share)) {
+                    return Err(Error::Plan("a share is between 1 and 100 percent".into()));
+                }
+                next.items[find(item)?].share = share.filter(|&share| share != 100);
+            }
             Edit::Note { item, note } => next.items[find(item)?].note = written(note),
             Edit::Important { item, important } => {
                 let target = &mut next.items[find(item)?];
@@ -224,6 +232,13 @@ mod tests {
         assert_eq!(plan.notes, [Note { lane: "backend".into(), date: jiff::civil::date(2027, 1, 21), text: "Server move, no deploys".into() }]);
         let plan = apply_all(&plan, &edits(r#"[{"op": "note", "item": "design-sign-off", "note": null}, {"op": "note_at", "lane": "backend", "date": "2027-01-21", "note": null}]"#)).unwrap();
         assert!(plan.items[plan.item("design-sign-off").unwrap()].note.is_none() && plan.notes.is_empty());
+        let shared = Edit::Share { item: "frontend".into(), share: Some(40) }.apply(&sample()).unwrap();
+        assert_eq!(shared.items[shared.item("frontend").unwrap()].share, Some(40));
+        let whole = Edit::Share { item: "frontend".into(), share: Some(100) }.apply(&shared).unwrap();
+        assert_eq!(whole.items[whole.item("frontend").unwrap()].share, None);
+        for wrong in [0, 101] {
+            assert!(Edit::Share { item: "frontend".into(), share: Some(wrong) }.apply(&sample()).is_err());
+        }
         let err = Edit::Important { item: "frontend".into(), important: true }.apply(&sample()).unwrap_err();
         assert_eq!(err.to_string(), "\"frontend\" is not a milestone; only milestones are marked important");
         assert!(Edit::NoteAt { lane: "nowhere".into(), date: jiff::civil::date(2027, 1, 4), note: Some("x".into()) }.apply(&sample()).is_err());

@@ -105,6 +105,7 @@ pub fn draw(app: &App, frame: &mut Frame) -> Vec<Placement> {
         Screen::Situation => crate::situation::draw(app, frame, &under, area, &mut placements),
         Screen::Checks => crate::checks::draw(app, frame, &under, area, &mut placements),
         Screen::Export => crate::export::draw(app, frame, &under, area, &mut placements),
+        Screen::People => crate::people::draw(app, frame, &under, area, &mut placements),
         Screen::Roadmap => {
             let palette = if app.question.is_some() || app.form.is_some() || writing(app) || app.overlay() { app.palette.dimmed() } else { app.palette };
             let under = Inks::of(palette);
@@ -164,7 +165,8 @@ fn title_bar(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
     let problems = app.analysis.checks.iter().any(|check| check.severity() == Severity::Problem);
     let full = area.width >= 100;
     let second = if app.dated() { "Roadmap" } else { "Network" };
-    for (number, name, screen) in [("1", "Situation", Screen::Situation), ("2", second, Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export)] {
+    let tabs = [("1", "Situation", Screen::Situation), ("2", second, Screen::Roadmap), ("3", "Checks", Screen::Checks), ("4", "Export", Screen::Export), ("5", "People", Screen::People)];
+    for (number, name, screen) in tabs.into_iter().take(if app.crew.is_some() { 5 } else { 4 }) {
         let current = app.screen == screen;
         let mut spans = if current {
             let under = |style: Style| style.add_modifier(Modifier::UNDERLINED).underline_color(inks.accent).bg(inks.raised);
@@ -406,6 +408,7 @@ fn network(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &m
                 }
                 .ceil() as u16,
                 Some(Form::Add(_)) => 15,
+                Some(Form::Who { item, .. }) => who_height(app, item),
                 _ => 32,
             });
             let x = (chart.width - w) / 2;
@@ -488,16 +491,18 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
             Some(Form::Rename { .. }) => vec![("Enter", "rename"), ("Esc", "keep as it is")],
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
+            Some(Form::Who { .. }) => vec![("↑↓", "person"), ("←→", "share"), ("Enter", "choose"), ("Esc", "keep as it is")],
             _ => vec![("↑↓", "item"), ("Space", "waits on it or not"), ("Enter", "keep"), ("Esc", "keep as it is")],
         },
         Screen::Roadmap if writing(app) => vec![("Enter", "keep the note"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.notes.is_some() => notes(app.spot()),
         Screen::Roadmap if app.before.is_some() => vec![("Enter", "keep"), ("Esc", "discard"), ("←→", "keep changing"), ("↑↓", item)],
         Screen::Roadmap if app.why => vec![("↑↓", "another item"), ("Esc", "back"), ("?", "help")],
-        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
+        Screen::Roadmap => vec![("↑↓", item), ("←→", "length"), ("Enter", "change a date"), ("p", "who does it"), ("n", "add notes"), ("u", "undo"), ("d", "detail"), ("?", "help")],
         Screen::Checks if app.buffer_here() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("b", "add the buffer"), ("?", "help")],
         Screen::Checks if app.check < app.checks().len() => vec![("↑↓", "check"), ("Enter", "show in roadmap"), ("?", "help")],
         Screen::Checks => vec![("↑↓", "check"), ("?", "help")],
+        Screen::People => vec![("↑↓", "team or person"), ("←→", "week"), ("?", "help")],
         Screen::Export => vec![("↑↓", "option"), ("←→", "change"), ("Space", "on/off"), ("Enter", "export"), ("Esc", "back"), ("?", "help")],
     };
     let total = |hints: &[(&str, &str)]| hints.iter().map(|(key, label)| key.chars().count() + label.chars().count() + 5).sum::<usize>();
@@ -707,6 +712,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
                 }
                 .ceil() as u16,
                 Some(Form::Add(_)) => 20,
+                Some(Form::Who { item, .. }) => who_height(app, item),
                 _ => 32,
             });
             let x = (l.chart.width - w) / 2;
@@ -804,6 +810,12 @@ fn reason(app: &App, palette: &Palette) -> Vec<Part> {
     vec![(None, item.name.clone(), p.bright, true), (Some((Icon::Calendar, p.dim)), when, p.ink, false), (None, after, p.ink, false), spare]
 }
 
+/// The rows of the who dialog: its title, the people with a heading for each group, and air.
+fn who_height(app: &App, item: usize) -> u16 {
+    let groups = if app.crew.is_some() { 2.0 } else { 0.0 };
+    ((170.0 + 30.0 * (app.who_rows(item).len() as f32 + groups)) / 21.0).ceil() as u16
+}
+
 /// The line about the selection: its name, its team, its dates and length, and whether it decides the
 /// date or what it has to spare; at the Overview level the same for its lane.
 fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
@@ -821,7 +833,13 @@ fn selection(app: &App, level: Level, palette: &Palette) -> Vec<Part> {
     let star = item.important.then_some((Icon::Star, p.ink));
     let mut parts = vec![(star, item.name.clone(), p.bright, true)];
     if !item.milestone {
-        parts.push((Some((Icon::Person, p.dim)), team, p.dim, false));
+        match &item.who {
+            Some(who) => {
+                let share = item.share.filter(|&share| share != 100).map(|share| format!("{share} %"));
+                parts.push((Some((Icon::Person, p.dim)), [Some(who.clone()), share, lane.city.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · "), p.ink, false));
+            }
+            None => parts.push((Some((Icon::Person, p.dim)), team, p.dim, false)),
+        }
     }
     parts.push((Some((Icon::Calendar, p.dim)), dates, p.ink, false));
     let note = item.note.clone().map(|note| (Some((Icon::Note, p.dim)), note, p.ink, false));
@@ -902,6 +920,42 @@ mod tests {
         let today = jiff::civil::date(2026, 10, 29);
         let schedule = pchart_core::schedule(&plan, &calendars, today).unwrap();
         App::new(plan, calendars, today, "portal.pchart".into(), schedule, (7, 16))
+    }
+
+    /// The sample plan in the workspace Acme of pictures 64: its people and teams, Lena Vogel on UX
+    /// concept here and on Visual design in a website relaunch at once, and Priya Nair away during
+    /// Frontend once she does it.
+    fn crewed() -> App {
+        let mut app = app();
+        for (item, who, share) in [("requirements", "Jonas Weber", Some(30)), ("ux-concept", "Lena Vogel", Some(80)), ("ui-design", "Lena Vogel", None), ("api", "Tom Becker", Some(60)), ("integration", "Arjun Rao", None)] {
+            let index = app.plan.item(item).unwrap();
+            (app.plan.items[index].who, app.plan.items[index].share) = (Some(who.into()), share);
+        }
+        let template = pchart_store::templates().into_iter().find(|(id, _)| *id == "website-relaunch").unwrap().1;
+        let mut website = template.new_plan("Website relaunch", Some(jiff::civil::date(2027, 1, 15)), false);
+        for (item, who, share) in [("wireframes", "Mia Klein", Some(80)), ("visual-design", "Lena Vogel", Some(50)), ("templates", "Arjun Rao", Some(60))] {
+            let index = website.item(item).unwrap();
+            (website.items[index].who, website.items[index].share) = (Some(who.into()), share);
+        }
+        let calendars = vec![pchart_core::Calendar::default(); website.lanes.len()];
+        let schedule = pchart_core::schedule(&website, &calendars, app.today).unwrap();
+        let workspace = pchart_core::people::Workspace::parse(
+            r#"name = "Acme"
+            teams = [{ name = "Product", city = "Berlin" }, { name = "Design/UX", city = "Berlin" }, { name = "Backend/API", city = "Berlin" }, { name = "Frontend", city = "Bangalore" }]
+            people = [
+              { name = "Jonas Weber", team = "Product" },
+              { name = "Lena Vogel", team = "Design/UX" },
+              { name = "Mia Klein", team = "Design/UX", capacity = 80 },
+              { name = "Tom Becker", team = "Backend/API" },
+              { name = "Priya Nair", team = "Frontend", away = [{ from = 2027-01-04, to = 2027-01-08 }] },
+              { name = "Arjun Rao", team = "Frontend" },
+            ]"#,
+        )
+        .unwrap();
+        let here = pchart_core::people::Project { name: app.plan.name.clone(), plan: app.plan.clone(), schedule: app.schedule.clone(), calendars: app.calendars.clone() };
+        let other = pchart_core::people::Project { name: website.name.clone(), plan: website, schedule, calendars };
+        app.join(crate::app::Crew { name: "Acme".into(), workspace, projects: vec![here, other], here: 0 });
+        app
     }
 
     fn screen(app: &App, width: u16, height: u16) -> (Vec<String>, Vec<Placement>) {
@@ -991,7 +1045,78 @@ mod tests {
             look(&mut app, &format!("why {item}"));
             app.why = false;
         }
+        let mut app = crewed();
+        app.selected = app.plan.item("frontend").unwrap();
+        app.start_who();
+        app.form_move(1);
+        app.keep_form();
+        app.screen = Screen::Roadmap;
+        look(&mut app, "workspace roadmap");
+        for item in ["frontend", "ux-concept", "requirements"] {
+            app.selected = app.plan.item(item).unwrap();
+            app.start_who();
+            look(&mut app, &format!("who {item}"));
+            app.form_change(-3);
+            look(&mut app, &format!("who {item} 70 %"));
+            app.form = None;
+        }
+        app.screen = Screen::Checks;
+        for check in 0..app.checks().len() {
+            app.check = check;
+            look(&mut app, &format!("workspace check {check}"));
+        }
+        app.screen = Screen::Situation;
+        look(&mut app, "workspace situation");
+        app.screen = Screen::People;
+        for (line, week) in [(0, 0), (3, 5), (2, 5), (8, 9), (9, 30)] {
+            (app.person, app.week) = (line, week);
+            look(&mut app, &format!("people {line} {week}"));
+        }
+        app.help = true;
+        look(&mut app, "people help");
         assert!(found.is_empty(), "{} crossings:\n{}", found.len(), found.join("\n"));
+    }
+
+    #[test]
+    fn in_a_workspace_people_are_chosen_with_their_free_time_and_checked_across_projects() {
+        let mut app = crewed();
+        let checks: Vec<String> = app.analysis.checks.iter().map(|check| pchart_core::text::check(&app.plan, check).0).collect();
+        assert!(checks.contains(&"Lena Vogel is planned at 130 %.".to_string()), "{checks:?}");
+        assert!(!app.analysis.checks.iter().any(|check| matches!(check, pchart_core::Check::Overlap { .. })));
+        assert!(app.analysis.next.iter().any(|next| matches!(next, pchart_core::Next::Check(index) if matches!(app.analysis.checks[*index], pchart_core::Check::Overload { .. }))));
+
+        app.screen = Screen::Roadmap;
+        app.selected = app.plan.item("frontend").unwrap();
+        app.start_who();
+        assert_eq!(app.who_rows(app.selected)[..2], [Some("Priya Nair".to_string()), Some("Arjun Rao".to_string())]);
+        app.form_change(-6);
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, "←→ share"));
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        for words in ["Who does Frontend?", "40 %", "FRONTEND · BANGALORE", "OTHER TEAMS", "away Mon 04 Jan – Fri 08 Jan", "40 % free then", "No one named"] {
+            assert!(svg.contains(words), "{words}");
+        }
+        app.form_move(1);
+        app.keep_form();
+        let frontend = &app.plan.items[app.selected];
+        assert_eq!((frontend.who.as_deref(), frontend.share), (Some("Priya Nair"), Some(40)));
+        assert!(app.analysis.checks.iter().any(|check| matches!(check, pchart_core::Check::Away { who, days: 5, .. } if who == "Priya Nair")));
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.clone()).collect();
+        assert!(svg.contains("Priya Nair · 40 % · Bangalore"));
+        app.undo();
+        assert_eq!(app.plan.items[app.selected].who, None);
+
+        app.screen = Screen::People;
+        (app.person, app.week) = (3, 5);
+        let (rows, placements) = screen(&app, 170, 50);
+        assert!(has(&rows, "5 People") && has(&rows, ":: CAPACITY · ACME") && has(&rows, ":: WORK · LENA VOGEL") && has(&rows, "←→ week"));
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("130 %") && svg.contains("DESIGN/UX · BERLIN") && svg.contains("Mia Klein") && svg.contains("130 % full · 130 % of 100 % planned, 30 % too much"), "{svg}");
+        app.person = 2;
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.clone()).collect();
+        assert!(svg.contains("72 % full · 130 % of 180 % planned, 50 % free"));
+        app.crew = None;
+        assert!(!has(&screen(&app, 170, 50).0, "5 People"));
     }
 
     #[test]

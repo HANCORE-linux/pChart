@@ -13,6 +13,11 @@ pub fn day(date: Date) -> String {
     date.strftime("%a %d %b").to_string()
 }
 
+/// "Mon 30 Nov – Thu 03 Dec", or one day.
+pub fn span(from: Date, to: Date) -> String {
+    if from == to { day(from) } else { format!("{} – {}", day(from), day(to)) }
+}
+
 pub fn working_days(count: i32) -> String {
     if count.abs() == 1 { format!("{count} working day") } else { format!("{count} working days") }
 }
@@ -84,6 +89,16 @@ pub fn check(plan: &Plan, check: &Check) -> (String, String) {
         }
         Check::Overdue { item, finish } => (format!("{} is overdue.", name(plan, *item)), format!("It was planned to end {} and is not marked done.", day(*finish))),
         Check::Overlap { who, first, second } => (format!("{who} is planned on two items at once."), format!("{} and {} overlap.", name(plan, *first), name(plan, *second))),
+        Check::Overload { who, from, to, load, capacity, with, .. } => {
+            let others = match with.as_slice() {
+                [] => String::new(),
+                [one] => format!(", with {one}"),
+                [one, rest @ ..] => format!(", with {one} and {} more", rest.len()),
+            };
+            let can = if *capacity == 100 { String::new() } else { format!(" of {capacity} %") };
+            (format!("{who} is planned at {load} %{can}."), format!("{}{others}.", span(*from, *to)))
+        }
+        Check::Away { who, item, from, to, days } => (format!("{who} is away during {}.", name(plan, *item)), format!("Away {}, {} of it.", span(*from, *to), working_days(*days))),
         Check::LongItem { item } => {
             let days = plan.items[*item].duration as i32;
             (format!("{} takes {}.", name(plan, *item), working_days(days)), "Split it into parts of six weeks or less, so progress shows.".into())
@@ -144,6 +159,14 @@ pub fn advice(plan: &Plan, calendars: &[Calendar], today: Date, check: &Check) -
         }
         Check::Overdue { item, finish } => say(format!("{} was planned to end {} and is not marked done.", name(plan, item), day(finish)), "Mark it done, or give it the days it still needs.".into()),
         Check::Overlap { ref who, first, second } => say(format!("{who} is planned on {} and {} at once.", name(plan, first), name(plan, second)), "Let one wait on the other.".into()),
+        Check::Overload { ref who, item, load, capacity, ref free, .. } => say(
+            format!("{who} has {load} % of work then and can do {capacity} %."),
+            match free {
+                Some(free) => format!("Give {} to {free}, who has the time then.", name(plan, item)),
+                None => format!("Make {} a smaller share, or let it wait.", name(plan, item)),
+            },
+        ),
+        Check::Away { ref who, item, days, .. } => say(format!("{who} is away {} of {}.", working_days(days), name(plan, item)), format!("Plan {} more for {}, or give it to someone else.", working_days(days), name(plan, item))),
         Check::LongItem { item } => say(format!("Over six weeks, it is hard to see whether {} is on track.", name(plan, item)), "Split it into parts of six weeks or less.".into()),
         Check::PhaseEndsWithoutMilestone { phase, item } => say(format!("Nothing marks when {} is done.", plan.phases[phase].name), format!("Add a milestone after {}.", name(plan, item))),
     }

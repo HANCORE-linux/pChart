@@ -114,6 +114,20 @@ fn context_of(path: PathBuf, args: &Args) -> Result<Context, Failure> {
     Ok(Context { path, plan, calendars, holidays, today, schedule })
 }
 
+/// The analysis of `plan` as the plan of `ctx`, with the checks of people across the projects of its
+/// workspace when it is in one (pictures 64).
+fn analysis_of(ctx: &Context, plan: &Plan, schedule: &Schedule, args: &Args) -> Result<pchart_core::Analysis, Failure> {
+    if pchart_store::workspace(ctx.path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."))).is_none() {
+        return Ok(analyse(plan, &ctx.calendars, schedule, ctx.today));
+    }
+    let text = holiday_text(args)?;
+    let lanes = |plan: &Plan| calendars(&holidays_for(&text, plan), plan);
+    Ok(match pchart_store::crew(&ctx.path, &ctx.plan, &ctx.schedule, ctx.today, &lanes) {
+        Some(mut crew) => crew.analyse(plan, &ctx.calendars, schedule, ctx.today),
+        None => analyse(plan, &ctx.calendars, schedule, ctx.today),
+    })
+}
+
 fn today(args: &Args) -> Result<Date, Failure> {
     match args.option("--today") {
         Some(text) => date(text, args),
@@ -171,7 +185,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         return Ok(0);
     }
     let known: &[&str] = match args.command {
-        "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who", "--note"],
+        "set" => &["--duration", "--on", "--no-earlier-than", "--no-later-than", "--name", "--lane", "--who", "--share", "--note"],
         "add" => &["--lane", "--name", "--duration", "--after", "--on", "--no-earlier-than", "--no-later-than", "--who"],
         "export" => &["--svg", "--png", "--pdf", "--size", "--level", "--view", "--style", "--md", "--dot", "--audience"],
         "bench" => &["--frames", "--out"],
@@ -201,7 +215,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
         let id = args.words.get(position).map(String::as_str).ok_or_else(|| Failure::usage("which item? Name it by its id.", args))?;
         ctx.plan.item(id).map(|_| id).ok_or_else(|| Failure::edit(format!("there is no item \"{id}\"")))
     };
-    let analysis = || analyse(&ctx.plan, &ctx.calendars, &ctx.schedule, ctx.today);
+    let analysis = || analysis_of(&ctx, &ctx.plan, &ctx.schedule, args);
     let dated = ctx.plan.without_length().is_empty();
     if !dated && matches!(args.command, "situation" | "next" | "check") {
         if json {
@@ -219,7 +233,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
 
     match args.command {
         "situation" => {
-            let analysis = analysis();
+            let analysis = analysis()?;
             if json {
                 print_json(&report::situation_json(&ctx.plan, &ctx.schedule, &analysis));
             } else {
@@ -259,7 +273,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
             Ok(0)
         }
         "waits" => {
-            let analysis = analysis();
+            let analysis = analysis()?;
             if json {
                 print_json(&json!({ "schema": 1, "waits": analysis.handoffs.iter().map(|h| report::handoff(&ctx.plan, h)).collect::<Vec<_>>() }));
             } else if analysis.handoffs.is_empty() {
@@ -272,7 +286,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
             Ok(0)
         }
         "next" => {
-            let analysis = analysis();
+            let analysis = analysis()?;
             if json {
                 print_json(&json!({ "schema": 1, "next": analysis.next.iter().map(|n| report::next(&ctx.plan, &analysis, n)).collect::<Vec<_>>() }));
             } else if analysis.next.is_empty() {
@@ -285,7 +299,7 @@ fn run(args: &Args) -> Result<u8, Failure> {
             Ok(0)
         }
         "check" => {
-            let analysis = analysis();
+            let analysis = analysis()?;
             if json {
                 print_json(&json!({ "schema": 1, "checks": analysis.checks.iter().map(|c| report::check(&ctx.plan, c)).collect::<Vec<_>>() }));
             } else {
@@ -322,7 +336,9 @@ fn run(args: &Args) -> Result<u8, Failure> {
 fn open(ctx: Context, args: &Args) -> Result<u8, Failure> {
     let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
     pchart_store::remember(&ctx.path);
-    pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme).map_err(|err| Failure::file(err.to_string()))?;
+    let text = holiday_text(args)?;
+    let lanes = |plan: &Plan| calendars(&holidays_for(&text, plan), plan);
+    pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme, &lanes).map_err(|err| Failure::file(err.to_string()))?;
     Ok(0)
 }
 
@@ -351,21 +367,39 @@ fn list(args: &Args) -> Result<u8, Failure> {
         let calendars = calendars(&holidays_for(&text, &plan), &plan);
         let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(|err| Failure::edit(err.to_string()))?;
         let verdict = analyse(&plan, &calendars, &schedule, today).verdict;
-        rows.push((path, plan, verdict));
+        rows.push((path, plan, verdict, calendars, schedule));
+    }
+    let people = pchart_store::people(&root);
+    let projects: Vec<pchart_core::people::Project> = rows.iter().map(|(_, plan, _, calendars, schedule)| pchart_core::people::Project { name: plan.name.clone(), plan: plan.clone(), schedule: schedule.clone(), calendars: calendars.clone() }).collect();
+    let mut found: Vec<(String, String, jiff::civil::Date, jiff::civil::Date, String)> = Vec::new();
+    for (here, (_, plan, _, calendars, _)) in rows.iter().enumerate() {
+        for check in pchart_core::people::checks(&people, &projects, here, calendars) {
+            match check {
+                pchart_core::Check::Overload { who, item, from, to, load, capacity, with, .. } => {
+                    if !found.iter().any(|seen| seen.0 == who && seen.1 == "overload" && seen.2 <= to && from <= seen.3) {
+                        let work: Vec<String> = std::iter::once(format!("{} in {}", plan.items[item].name, plan.name)).chain(with.into_iter().map(|other| other.replace(" here", &format!(" in {}", plan.name)))).collect();
+                        found.push((who, "overload".into(), from, to, format!("{load} % of {capacity} %: {}", work.join(", "))));
+                    }
+                }
+                pchart_core::Check::Away { who, item, from, to, days } => found.push((who, "away".into(), from, to, format!("{} of {} in {}", text::working_days(days), plan.items[item].name, plan.name))),
+                _ => {}
+            }
+        }
     }
     if args.flag("--json") {
         let projects: Vec<_> = rows
             .iter()
-            .map(|(path, plan, verdict)| {
+            .map(|(path, plan, verdict, _, _)| {
                 let state = verdict.as_ref().map(|verdict| pchart_draw::situation::state_words(verdict.state));
                 json!({ "file": path.strip_prefix(&root).unwrap_or(path).display().to_string(), "name": plan.name, "state": state, "target": verdict.as_ref().map(|verdict| plan.items[verdict.target].id.clone()), "date": verdict.as_ref().map(|verdict| report::iso(verdict.date)), "spare_wd": verdict.as_ref().map(|verdict| verdict.spare), "dates": plan.without_length().is_empty() })
             })
             .collect();
-        print_json(&json!({ "schema": 1, "workspace": name, "projects": projects }));
+        let people: Vec<_> = found.iter().map(|(who, kind, from, to, what)| json!({ "who": who, "kind": kind, "from": report::iso(*from), "to": report::iso(*to), "what": what })).collect();
+        print_json(&json!({ "schema": 1, "workspace": name, "projects": projects, "people": people }));
         return Ok(0);
     }
     say!("{name}: {}", if rows.len() == 1 { "1 project".to_string() } else { format!("{} projects", rows.len()) });
-    for (path, plan, verdict) in &rows {
+    for (path, plan, verdict, _, _) in &rows {
         let file = path.file_name().map_or_else(String::new, |file| file.to_string_lossy().into_owned());
         let stands = match verdict {
             Some(verdict) if verdict.spare < 0 => format!("{} on {} is {} late", plan.items[verdict.target].name, text::day(verdict.date), text::working_days(-verdict.spare)),
@@ -374,6 +408,13 @@ fn list(args: &Args) -> Result<u8, Failure> {
             None => "no fixed target date".into(),
         };
         say!("  {:<28} {stands}  ({file})", plan.name);
+    }
+    if !found.is_empty() {
+        say!("People to look at:");
+        for (who, kind, from, to, what) in &found {
+            let words = if kind == "away" { format!("away {}: {what}", text::span(*from, *to)) } else { format!("over capacity {}, {what}", text::span(*from, *to)) };
+            say!("  {who:<28} {words}");
+        }
     }
     Ok(0)
 }
@@ -561,6 +602,10 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
             if let Some(who) = args.option("--who") {
                 list.push(Edit::Who { item: item.clone(), who: (!who.is_empty()).then(|| who.into()) });
             }
+            if let Some(share) = args.option("--share") {
+                let share = share.trim().trim_end_matches('%').trim().parse::<u32>().map_err(|_| Failure::usage(format!("\"{share}\" is not a share like 30 or 30%"), args))?;
+                list.push(Edit::Share { item: item.clone(), share: Some(share) });
+            }
             if list.is_empty() {
                 return Err(Failure::usage("set needs at least one change", args));
             }
@@ -618,7 +663,7 @@ fn edits(args: &Args, ctx: &Context) -> Result<Vec<Edit>, Failure> {
 fn change(args: &Args, ctx: &Context, edits: &[Edit], json: bool) -> Result<u8, Failure> {
     let plan = pchart_core::apply_all(&ctx.plan, edits).map_err(|(index, err)| Failure::edit(if edits.len() > 1 { format!("edit {}: {err}", index + 1) } else { err.to_string() }))?;
     let schedule = pchart_core::schedule(&plan, &ctx.calendars, ctx.today).map_err(|err| Failure::edit(err.to_string()))?;
-    let analysis = analyse(&plan, &ctx.calendars, &schedule, ctx.today);
+    let analysis = analysis_of(ctx, &plan, &schedule, args)?;
     let dry = args.flag("--dry-run");
     if !dry {
         pchart_store::save(&ctx.path, &plan).map_err(|err| Failure::file(err.to_string()))?;

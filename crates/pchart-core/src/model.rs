@@ -77,6 +77,10 @@ pub struct Item {
     /// The person or team doing the item; two items of the same `who` must not overlap.
     #[serde(default)]
     pub who: Option<String>,
+    /// How much of the time of `who` the item takes, in percent; none is all of it (picture 64). It
+    /// counts for how busy they are and never changes the item's length.
+    #[serde(default)]
+    pub share: Option<u32>,
     #[serde(default)]
     pub note: Option<String>,
 }
@@ -183,10 +187,14 @@ impl Plan {
             if item.important {
                 out.push_str("important = true\n");
             }
-            for (key, value) in [("who", &item.who), ("note", &item.note)] {
-                if let Some(value) = value {
-                    let _ = writeln!(out, "{key} = {}", quote(value));
-                }
+            if let Some(who) = &item.who {
+                let _ = writeln!(out, "who = {}", quote(who));
+            }
+            if let Some(share) = item.share.filter(|&share| share != 100) {
+                let _ = writeln!(out, "share = {share}");
+            }
+            if let Some(note) = &item.note {
+                let _ = writeln!(out, "note = {}", quote(note));
             }
         }
         for note in &self.notes {
@@ -241,7 +249,7 @@ fn quote(text: &str) -> String {
 }
 
 /// A TOML date (`2027-03-01`) in plan files, or a string in JSON edits.
-fn date<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Date>, D::Error> {
+pub(crate) fn date<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Date>, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum Written {
@@ -320,6 +328,8 @@ mod tests {
         assert_eq!(plan.to_toml(), text);
         let mut changed = plan.clone();
         changed.items[0].who = Some("Anna \"A\" Berg".into());
+        changed.items[0].share = Some(30);
+        changed.items[2].share = Some(100);
         changed.items[0].done = true;
         changed.items[0].buffer = true;
         changed.items[1].no_later_than = Some(jiff::civil::date(2026, 12, 1));
@@ -328,6 +338,8 @@ mod tests {
         changed.items[3].important = true;
         changed.items[3].note = Some("Client signs the design in a workshop in New York.".into());
         changed.notes.push(Note { lane: "backend".into(), date: jiff::civil::date(2027, 1, 21), text: "Server move".into() });
+        assert!(changed.to_toml().contains("who = 'Anna \"A\" Berg'\nshare = 30\n") && !changed.to_toml().contains("share = 100"), "{}", changed.to_toml());
+        changed.items[2].share = None;
         assert_eq!(Plan::parse(&changed.to_toml()).unwrap(), changed);
     }
 

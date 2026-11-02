@@ -59,7 +59,7 @@ fn help(screen: Screen, dated: bool) -> Help {
         Screen::Roadmap => Help {
             title: "HELP · ROADMAP",
             lead: "When each piece of work happens, and which ones decide the date.",
-            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("y", "Why this date? The items that set it"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
+            keys: [("↑↓", "Choose an item"), ("←→", "Try it longer or shorter, on trial"), ("Enter", "Change when it starts"), ("y", "Why this date? The items that set it"), ("p", "Choose who does it"), ("a", "Add an item after it"), ("r", "Rename it"), ("w", "Choose what it waits on"), ("x", "Remove it"), ("Space", "Show or hide the details"), ("n", "Add notes; i marks a milestone important"), ("d", "Overview, Standard or Full")].into_iter().chain(everywhere).collect(),
             legend_title: "WHAT THE PICTURE SHOWS",
             legend: vec![
                 (Sign::Chain, "decides the date"),
@@ -103,6 +103,13 @@ fn help(screen: Screen, dated: bool) -> Help {
                 (Sign::Icon(Icon::Calendar, Tone::Dim), "the holidays the plan accounts for"),
                 (Sign::Icon(Icon::Play, Tone::Ink), "what you can do"),
             ],
+        },
+        Screen::People => Help {
+            title: "HELP · PEOPLE",
+            lead: "How full each team and each person is, week by week across the projects: the busiest day of the week, against what they can do.",
+            keys: [("↑↓", "Choose a team or a person"), ("←→", "Choose a week")].into_iter().chain(everywhere).collect(),
+            legend_title: "WHAT THE TABLE SHOWS",
+            legend: vec![(Sign::Spare, "planned, darker when fuller"), (Sign::Icon(Icon::Warn, Tone::Warn), "more than they can do, in yellow"), (Sign::Holiday, "away")],
         },
         Screen::Export => Help {
             title: "HELP · EXPORT",

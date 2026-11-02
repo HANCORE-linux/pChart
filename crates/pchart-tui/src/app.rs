@@ -12,6 +12,8 @@ pub enum Screen {
     Roadmap,
     Checks,
     Export,
+    /// In a workspace, everyone's work across its projects (picture 64).
+    People,
 }
 
 /// The part of the Export screen that `↑↓` moves between and `←→` changes.
@@ -108,7 +110,12 @@ pub enum Form {
     Remove { item: usize },
     /// How long `item` takes, as typed.
     Length { item: usize, typed: String },
+    /// Who does `item` (picture 64): the people `App::who_rows` offers, the one `↑↓` is on, and the
+    /// share of their time it takes, which `←→` changes.
+    Who { item: usize, at: usize, share: u32 },
 }
+
+pub use pchart_core::people::Crew;
 
 /// The plan as it was before a what-if, which Esc goes back to.
 pub struct Before {
@@ -155,19 +162,70 @@ pub struct App {
     pub side: bool,
     /// Why this date? (picture 56): the roadmap shows the chain that sets the selection's date.
     pub why: bool,
+    pub crew: Option<Crew>,
+    /// The line and the week chosen on the People screen.
+    pub person: usize,
+    pub week: usize,
 }
 
 impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false };
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, crew: None, person: 0, week: 0 };
         if !app.dated() {
             app.screen = Screen::Roadmap;
             app.export.view = View::Network;
             app.export.formats[3] = false;
         }
         app
+    }
+
+    /// Puts the plan into its workspace, so the checks of people look across its projects.
+    pub fn join(&mut self, crew: Crew) {
+        self.crew = Some(crew);
+        let (plan, schedule) = (self.plan.clone(), self.schedule.clone());
+        self.analysis = self.analysed(&plan, &schedule);
+    }
+
+    /// The analysis of `plan`, with the checks of people across the workspace's projects.
+    fn analysed(&mut self, plan: &Plan, schedule: &Schedule) -> Analysis {
+        match self.crew.as_mut() {
+            Some(crew) => crew.analyse(plan, &self.calendars, schedule, self.today),
+            None => analyse(plan, &self.calendars, schedule, self.today),
+        }
+    }
+
+    /// The people `p` offers for `item`: those of its lane's team first, then the others, then no one.
+    /// Outside a workspace, the names the plan uses.
+    pub fn who_rows(&self, item: usize) -> Vec<Option<String>> {
+        let lane = self.plan.lane(&self.plan.items[item].lane).map_or("", |lane| self.plan.lanes[lane].name.as_str());
+        let mut out: Vec<Option<String>> = match &self.crew {
+            Some(crew) => {
+                let (team, others): (Vec<_>, Vec<_>) = crew.workspace.people.iter().partition(|person| person.team.as_deref() == Some(lane));
+                team.into_iter().chain(others).map(|person| Some(person.name.clone())).collect()
+            }
+            None => {
+                let mut names: Vec<String> = self.plan.items.iter().filter_map(|other| other.who.clone()).collect();
+                names.sort();
+                names.dedup();
+                names.into_iter().map(Some).collect()
+            }
+        };
+        out.push(None);
+        out
+    }
+
+    /// `p` on the roadmap: who does the selected item, starting at who does it now.
+    pub fn start_who(&mut self) {
+        if self.plan.items[self.selected].milestone {
+            self.message = Some("A milestone is a point in time; work has someone doing it".into());
+            return;
+        }
+        let rows = self.who_rows(self.selected);
+        let now = self.plan.items[self.selected].who.clone();
+        let at = rows.iter().position(|row| *row == now).unwrap_or(0);
+        self.form = Some(Form::Who { item: self.selected, at, share: self.plan.items[self.selected].share.unwrap_or(100) });
     }
 
     /// Whether every piece of work has a length, so the plan has dates.
@@ -329,7 +387,7 @@ impl App {
     }
 
     fn take(&mut self, plan: Plan, schedule: Schedule) {
-        self.analysis = analyse(&plan, &self.calendars, &schedule, self.today);
+        self.analysis = self.analysed(&plan, &schedule);
         self.plan = plan;
         self.schedule = schedule;
         self.unsaved = true;
@@ -536,6 +594,19 @@ impl App {
                 let days = pchart_core::input::length(typed).filter(|&days| days > 0).ok_or("Type a length, such as 5 or 2w")?;
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
+            Form::Who { item, at, share } => {
+                let it = &self.plan.items[*item];
+                let who = self.who_rows(*item).get(*at).cloned().flatten();
+                let mut edits = Vec::new();
+                if who != it.who {
+                    edits.push(Edit::Who { item: it.id.clone(), who: who.clone() });
+                }
+                let share = (*share != 100 && who.is_some()).then_some(*share);
+                if share != it.share {
+                    edits.push(Edit::Share { item: it.id.clone(), share });
+                }
+                Ok((edits, format!("who does {}", it.name)))
+            }
         }
     }
 
@@ -544,15 +615,20 @@ impl App {
         let count = match &self.form {
             Some(Form::Add(_)) => 5,
             Some(Form::WaitsOn { item, .. }) => self.waits_order(*item).len(),
+            Some(Form::Who { item, .. }) => self.who_rows(*item).len(),
             _ => return,
         };
-        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. }) = self.form.as_mut() {
+        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. } | Form::Who { at, .. }) = self.form.as_mut() {
             *at = (*at as isize + step).rem_euclid(count.max(1) as isize) as usize;
         }
     }
 
     /// `←→` in the add dialog: work or a milestone, the lane, or where it goes.
     pub fn form_change(&mut self, step: isize) {
+        if let Some(Form::Who { share, .. }) = self.form.as_mut() {
+            *share = (*share as isize + step * 10).clamp(10, 100) as u32;
+            return;
+        }
         let lanes = self.plan.lanes.len() as isize;
         let places = match &self.form {
             Some(Form::Add(adding)) => self.places(adding.from).len() as isize,
@@ -683,7 +759,7 @@ impl App {
                 if self.before.is_none() {
                     self.before = Some(Before { plan: self.plan.clone(), schedule: self.schedule.clone(), analysis: self.analysis.clone() });
                 }
-                self.analysis = analyse(&plan, &self.calendars, &schedule, self.today);
+                self.analysis = self.analysed(&plan, &schedule);
                 self.plan = plan;
                 self.schedule = schedule;
                 self.message = None;

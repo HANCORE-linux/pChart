@@ -179,6 +179,35 @@ fn list_names_each_project_of_the_workspace_with_how_it_stands() {
 }
 
 #[test]
+fn people_of_a_workspace_are_checked_across_its_projects() {
+    let dir = copy("people").parent().unwrap().to_path_buf();
+    let workspace = dir.join("acme");
+    std::fs::create_dir_all(workspace.join("projects")).unwrap();
+    std::fs::write(workspace.join("workspace.toml"), "name = \"Acme\"\npeople = [{ name = \"Lena Vogel\", team = \"Design/UX\" }]\n").unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_pchart")).args(args).args(["--today", "2026-10-29"]).current_dir(&workspace).output().unwrap();
+    for file in ["portal.pchart", "copy.pchart"] {
+        std::fs::copy(dir.join("portal.pchart"), workspace.join("projects").join(file)).unwrap();
+        let plan = format!("projects/{file}");
+        let output = run(&["set", &plan, "ux-concept", "--who", "Lena Vogel", "--share", "60%"]);
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+    assert!(std::fs::read_to_string(workspace.join("projects/copy.pchart")).unwrap().contains("who = \"Lena Vogel\"\nshare = 60\n"));
+    assert!(String::from_utf8_lossy(&run(&["set", "projects/copy.pchart", "ux-concept", "--share", "0"]).stderr).contains("a share is between 1 and 100 percent"));
+    assert_eq!(run(&["set", "projects/copy.pchart", "ux-concept", "--share", "most"]).status.code(), Some(3));
+    let output = run(&["check", "projects/portal.pchart"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout(&output).contains("Lena Vogel is planned at 120 %.") && stdout(&output).contains("with UX concept in Customer portal v1"), "{}", stdout(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&run(&["situation", "projects/portal.pchart", "--json"]))).unwrap();
+    assert!(json.to_string().contains("Lena Vogel is planned at 120 %."), "{json}");
+    let output = run(&["list"]);
+    assert!(stdout(&output).contains("People to look at:\n  Lena Vogel") && stdout(&output).contains("120 % of 100 %"), "{}", stdout(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&run(&["list", "--json"]))).unwrap();
+    assert_eq!((json["people"][0]["who"].as_str(), json["people"][0]["kind"].as_str(), json["people"].as_array().map(Vec::len)), (Some("Lena Vogel"), Some("overload"), Some(1)));
+    let alone = dir.join("portal.pchart");
+    assert!(Command::new(env!("CARGO_BIN_EXE_pchart")).args(["check", alone.to_str().unwrap(), "--today", "2026-10-29"]).output().unwrap().status.code() == Some(1));
+}
+
+#[test]
 fn the_milestone_chart_is_a_page_without_detail_levels() {
     let path = copy("milestones");
     let svg = path.with_file_name("milestones.svg");

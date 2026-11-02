@@ -156,6 +156,79 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 }
             }
         }
+        Form::Who { item, at, share } => {
+            let it = &app.plan.items[*item];
+            head(app, s, x, y, width, height, u, &format!("WHO · {}", it.name.to_uppercase()), &format!("Who does {}?", it.name));
+            let rows = app.who_rows(*item);
+            let span = app.schedule.slots[*item].planned;
+            let lane = app.plan.lane(&it.lane).map(|lane| &app.plan.lanes[lane]);
+            let team = lane.map_or("", |lane| lane.name.as_str());
+            let step = 30.0 * u;
+            let label_w = 9.0 * 16.6 * u * ADVANCE;
+            bits::runs(s, left, top + 20.0 * u, 16.6 * u, &[("It takes", p.dim, false)]);
+            let end = bits::chip(s, left + label_w, top + 20.0 * u, &format!("{share} %"), true, false, u, &p);
+            let words = format!("of their time, {} – {}", day(span.start), day(span.finish));
+            bits::runs(s, end + 14.0 * u, top + 20.0 * u, 16.6 * u, &[(&fit(&words, 16.6 * u, x + width - 26.0 * u - end - 14.0 * u - 3.0 * 16.6 * u * ADVANCE), p.ink, false)]);
+            bits::runs(s, x + width - 26.0 * u - 2.0 * 16.6 * u * ADVANCE, top + 20.0 * u, 16.6 * u, &[("←→", p.dim, true)]);
+            top += step + 14.0 * u;
+            let name_w = rows.iter().flatten().map(|name| name.chars().count()).max().unwrap_or(6).clamp(6, 22) as f32 * 16.6 * u * ADVANCE;
+            let stand = |name: &str| -> (Option<(bits::Icon, Color)>, String) {
+                let Some(crew) = &app.crew else { return (None, String::new()) };
+                let skip = Some((crew.here, *item));
+                match pchart_core::people::stand(&crew.workspace, &crew.projects, name, span.start, span.finish, skip) {
+                    pchart_core::people::Stand::Away(away) => (Some((bits::Icon::Warn, p.warn)), format!("away {}", pchart_core::text::span(away.from, away.to))),
+                    pchart_core::people::Stand::Taken { most, capacity } if most + share > capacity => (Some((bits::Icon::Warn, p.warn)), format!("would be at {} % of {capacity} %", most + share)),
+                    pchart_core::people::Stand::Taken { most, capacity } => (Some((bits::Icon::Check, p.dim)), format!("{} % free then", capacity - most)),
+                }
+            };
+            let in_team = |name: &str| app.crew.as_ref().and_then(|crew| crew.workspace.person(name)).and_then(|person| person.team.as_deref()) == Some(team);
+            let mut heading: Option<bool> = None;
+            for (row, who) in rows.iter().enumerate() {
+                if app.crew.is_some() {
+                    let group = who.as_deref().map(in_team);
+                    if group.is_some() && group != heading {
+                        heading = group;
+                        let words = if group == Some(true) { [Some(team), lane.and_then(|lane| lane.city.as_deref())].into_iter().flatten().collect::<Vec<_>>().join(" · ").to_uppercase() } else { "OTHER TEAMS".into() };
+                        bits::runs(s, left, top + 20.0 * u, 14.0 * u, &[(&words, p.dim, false)]);
+                        top += step;
+                    }
+                }
+                let chosen = row == *at;
+                if chosen {
+                    band(s, x, top, width, step - 2.0 * u, u, &p);
+                }
+                let baseline = top + 20.0 * u;
+                let mark = it.who == *who;
+                if mark {
+                    s.add(Shape::Circle { x: left + 7.0 * u, y: baseline - 5.5 * u, r: 5.0 * u, fill: p.ink });
+                } else {
+                    s.add(Shape::Path { points: (0..=24).map(|k| { let a = k as f32 / 24.0 * std::f32::consts::TAU; (left + 7.0 * u + 6.0 * u * a.cos(), baseline - 5.5 * u + 6.0 * u * a.sin()) }).collect(), closed: true, fill: Fill::None, stroke: Some(Stroke { color: p.muted, width: 1.2 * u, dash: None }) });
+                }
+                match who {
+                    Some(name) => {
+                        bits::runs(s, left + 28.0 * u, baseline, 16.6 * u, &[(&fit(name, 16.6 * u, name_w + u), if chosen { p.bright } else { p.ink }, chosen)]);
+                        let (icon, words) = stand(name);
+                        let at_x = left + 28.0 * u + name_w + 24.0 * u;
+                        let mut text_x = at_x;
+                        if let Some((icon, tone)) = icon {
+                            bits::draw_icon(s, icon, at_x + 8.0 * u, baseline - 5.0 * u, 15.0 * u, tone, if chosen { p.raised } else { p.page });
+                            text_x += 24.0 * u;
+                        }
+                        let other = app.crew.as_ref().and_then(|crew| crew.workspace.person(name)).and_then(|person| person.team.clone()).filter(|other| other != team);
+                        let words = match other {
+                            Some(other) => format!("{words} · {other}"),
+                            None => words,
+                        };
+                        bits::runs(s, text_x, baseline, 16.6 * u, &[(&fit(&words, 16.6 * u, x + width - 26.0 * u - text_x), p.dim, false)]);
+                    }
+                    None => {
+                        bits::runs(s, left + 28.0 * u, baseline, 16.6 * u, &[("No one named", if chosen { p.bright } else { p.ink }, chosen)]);
+                    }
+                }
+                top += step;
+            }
+            return;
+        }
         Form::WaitsOn { item, on, at } => {
             let it = &app.plan.items[*item];
             head(app, s, x, y, width, height, u, &format!("WAITS ON · {}", it.name.to_uppercase()), &format!("What does {} wait on?", it.name));

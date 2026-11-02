@@ -6,6 +6,7 @@ mod finder;
 mod help;
 mod item;
 mod note;
+mod people;
 mod pictures;
 mod question;
 mod situation;
@@ -38,11 +39,15 @@ fn picker() -> io::Result<Picker> {
     Ok(picker)
 }
 
-pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut theme: Theme) -> io::Result<()> {
+pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut theme: Theme, lanes: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<()> {
     let picker = picker()?;
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
     let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
+    let crew = pchart_store::crew(path, &plan, &schedule, today, lanes);
     let mut app = App::new(plan, calendars, today, path.display().to_string(), schedule, pictures.cell());
+    if let Some(crew) = crew {
+        app.join(crew);
+    }
     (app.palette, app.ground) = (theme.palette, theme.ground);
     let (written, results) = mpsc::channel();
     let (save, saves) = mpsc::channel::<Plan>();
@@ -231,6 +236,11 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
                 (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
                 (_, KeyCode::Char('4')) => app.screen = Screen::Export,
+                (_, KeyCode::Char('5')) if app.crew.is_some() => app.screen = Screen::People,
+                (Screen::People, KeyCode::Up) => app.person = app.person.saturating_sub(1),
+                (Screen::People, KeyCode::Down) => app.person = (app.person + 1).min(app.crew.as_ref().map_or(0, |crew| people::lines(&people::rows(crew, None)).len().saturating_sub(1))),
+                (Screen::People, KeyCode::Left) => app.week = app.week.saturating_sub(1),
+                (Screen::People, KeyCode::Right) => app.week = (app.week + 1).min(app.crew.as_ref().map_or(0, |crew| people::all_weeks(&people::rows(crew, None), app.today).len().saturating_sub(1))),
                 (Screen::Roadmap, KeyCode::Up) if !app.dated() => app.move_in_network(0.0, -1.0),
                 (Screen::Roadmap, KeyCode::Down) if !app.dated() => app.move_in_network(0.0, 1.0),
                 (Screen::Roadmap, KeyCode::Left) if !app.dated() => app.move_in_network(-1.0, 0.0),
@@ -245,6 +255,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (Screen::Situation, KeyCode::Up) => app.choose(-1),
                 (Screen::Situation, KeyCode::Down) => app.choose(1),
                 (Screen::Situation, KeyCode::Enter) => app.show_in_roadmap(),
+                (Screen::Roadmap, KeyCode::Char('p')) => app.start_who(),
                 (Screen::Checks, KeyCode::Up) => app.choose_check(-1),
                 (Screen::Checks, KeyCode::Down) => app.choose_check(1),
                 (Screen::Checks, KeyCode::Enter) => app.show_check_in_roadmap(),
@@ -306,6 +317,10 @@ pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) ->
         None => (dir.to_path_buf(), pchart_store::recent()),
     };
     let mut start = start::Start::new(folder, plans, calendars, today, theme.palette, pictures.cell());
+    if let Some((root, _)) = &workspace {
+        start.people = pchart_store::people(root);
+        start.crew = start.recent.iter().filter_map(|(_, plan, lanes)| pchart_core::schedule(plan, lanes, today).ok().map(|schedule| pchart_core::people::Project { name: plan.name.clone(), plan: plan.clone(), schedule, calendars: lanes.clone() })).collect();
+    }
     start.workspace = workspace.map(|(_, name)| name);
     let mut terminal = ratatui::init();
     let result = loop {

@@ -55,6 +55,12 @@ pub enum Check {
     DayOff { item: usize, date: Date, holiday: Option<String> },
     Overdue { item: usize, finish: Date },
     Overlap { who: String, first: usize, second: usize },
+    /// `who` is planned at `load` percent of their time from `from` to `to`, during `item`, more than
+    /// their `capacity`; `with` is the other work then, and `free` someone of their team with the time for
+    /// `item` (picture 64).
+    Overload { who: String, item: usize, from: Date, to: Date, load: u32, capacity: u32, with: Vec<String>, free: Option<String> },
+    /// `who` is away from `from` to `to`, `days` working days of `item`.
+    Away { who: String, item: usize, from: Date, to: Date, days: i32 },
     LongItem { item: usize },
     PhaseEndsWithoutMilestone { phase: usize, item: usize },
 }
@@ -63,7 +69,7 @@ impl Check {
     pub fn severity(&self) -> Severity {
         match self {
             Check::TooLate { .. } | Check::MissedDeadline { .. } | Check::FixedTooEarly { .. } => Severity::Problem,
-            Check::NoBuffer { .. } | Check::DayOff { .. } | Check::Overdue { .. } | Check::Overlap { .. } => Severity::Warning,
+            Check::NoBuffer { .. } | Check::DayOff { .. } | Check::Overdue { .. } | Check::Overlap { .. } | Check::Overload { .. } | Check::Away { .. } => Severity::Warning,
             Check::LongItem { .. } | Check::PhaseEndsWithoutMilestone { .. } => Severity::Hint,
         }
     }
@@ -76,6 +82,8 @@ impl Check {
             | Check::DayOff { item, .. }
             | Check::Overdue { item, .. }
             | Check::LongItem { item }
+            | Check::Overload { item, .. }
+            | Check::Away { item, .. }
             | Check::PhaseEndsWithoutMilestone { item, .. } => vec![*item],
             Check::FixedTooEarly { item, waits_on, .. } => vec![*item, *waits_on],
             Check::NoBuffer { before, target } => vec![*before, *target],
@@ -92,6 +100,8 @@ impl Check {
             Check::DayOff { .. } => "fixed-date-on-day-off",
             Check::Overdue { .. } => "overdue",
             Check::Overlap { .. } => "overlap",
+            Check::Overload { .. } => "overload",
+            Check::Away { .. } => "away",
             Check::LongItem { .. } => "long-item",
             Check::PhaseEndsWithoutMilestone { .. } => "phase-without-milestone",
         }
@@ -232,6 +242,7 @@ fn checks(plan: &Plan, calendars: &[Calendar], schedule: &Schedule, today: Date,
                 && who == other
                 && !a.milestone
                 && !b.milestone
+                && a.share.unwrap_or(100) + b.share.unwrap_or(100) > 100
             {
                 let (x, y) = (schedule.slots[first].planned, schedule.slots[second].planned);
                 if x.start <= y.finish && y.start <= x.finish {
@@ -349,6 +360,12 @@ mod tests {
         }
         let analysis = run(&plan, &calendars, date(2026, 10, 29));
         assert!(analysis.checks.iter().any(|check| matches!(check, Check::Overlap { who, .. } if who == "Anna")));
+        for (id, share) in [("api", 40), ("sdk-integration", 60)] {
+            let index = plan.item(id).unwrap();
+            plan.items[index].share = Some(share);
+        }
+        let analysis = run(&plan, &calendars, date(2026, 10, 29));
+        assert!(!analysis.checks.iter().any(|check| matches!(check, Check::Overlap { .. })), "40 % and 60 % fit into one person's time");
     }
 
     #[test]
