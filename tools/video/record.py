@@ -4,7 +4,8 @@ on the desktop, the keys of the timeline typed by drive.py, and a picture of the
 often as grim manages. pChart reads its Omarchy theme from a folder of its own, written from the
 themes pChart ships, which switches from Labra to Harbor at THEME together with the colours of that
 kitty, as Omarchy does on a desktop. The terminal opens on a shell with a plain prompt in a home of its
-own: the copied sample plan is among the plans opened before. The recording changes only the copy.
+own, in a copy of the sample workspace Acme (samples/acme) with its projects, people and reports,
+as its lead Jonas Weber. The recording changes only the copies.
 usage: record.py OUT [WIDTHxHEIGHT] [FONT_SIZE]"""
 
 import json
@@ -49,19 +50,24 @@ state = out / "state"
 plan = state / "home/projects"
 state.mkdir()
 plan.mkdir(parents=True)
-shutil.copy(ROOT / "samples/customer-portal.pchart", plan / "customer-portal.pchart")
 home = state / "home"
+workspace = home / "acme"
+shutil.copytree(ROOT / "samples/acme", workspace)
+before = time.mktime((2026, 10, 28, 17, 10, 0, 0, 0, -1))
+for path in workspace.rglob("*"):
+    os.utime(path, (before, before))
 current = home / ".config/omarchy/current"
 (current / "theme").mkdir(parents=True)
 theme(current, "labra")
 (home / ".local/state/pchart").mkdir(parents=True)
-(home / ".local/state/pchart/recent").write_text(f"{plan / 'customer-portal.pchart'}\n")
+(home / ".local/state/pchart/recent").write_text(f"{workspace / 'projects/customer-portal.pchart'}\n")
 labra = THEMES["labra"]
 accent, ink = (labra[key].lstrip("#") for key in ("accent", "foreground"))
 rgb = lambda hex: ";".join(str(int(hex[at:at + 2], 16)) for at in (0, 2, 4))
 (state / "bashrc").write_text(f"""PS1='\\[\\e[38;2;{rgb(ink)}m\\]\\w \\[\\e[38;2;{rgb(accent)}m\\]❯\\[\\e[0m\\] '
 pchart() {{ command {PCHART} "$@" --today 2026-10-29; }}
-cd ~
+export PCHART_NAME="Jonas Weber"
+cd ~/acme
 """)
 inner = state / "inner.sh"
 inner.write_text(f"""#!/bin/bash

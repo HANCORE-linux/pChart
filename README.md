@@ -8,7 +8,7 @@ Pick a template, set the target date, and pChart schedules the rest backwards an
 
 **Status:** early. The plan is in [docs/PLAN.md](docs/PLAN.md), the approved design in [docs/design](docs/design/). What exists so far: the spike, which schedules a real plan file and draws it as a roadmap in the terminal and as files, and the core with a CLI for people and agents that says whether the date holds, who waits on whom and what is next, checks the plan and changes it (`pchart help`).
 
-![pChart in use: a terminal opens, pchart opens a plan, why a date is set, the buffer added from the checks, and the export](docs/pchart.gif)
+![pChart in use: pchart starts in a workspace, opens a project, why a date is set, the buffer added from the checks, the export, how busy each person is, and a report from the team taken into the plan](docs/pchart.gif)
 
 <p>
   <img src="docs/roadmap.png" width="49%" alt="The swimlane roadmap of the sample plan: phases, lanes per team, milestones and the chain that decides the date">

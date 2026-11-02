@@ -1,0 +1,20 @@
+name = "Acme"
+lead = "Jonas Weber"
+
+teams = [
+  { name = "Product", city = "Berlin" },
+  { name = "Design/UX", city = "Berlin" },
+  { name = "Backend/API", city = "Berlin" },
+  { name = "Frontend", city = "Bangalore" },
+  { name = "Payment SDK", city = "Shenzhen" },
+]
+
+people = [
+  { name = "Jonas Weber", team = "Product" },
+  { name = "Lena Vogel", team = "Design/UX" },
+  { name = "Mia Klein", team = "Design/UX", capacity = 80 },
+  { name = "Tom Becker", team = "Backend/API" },
+  { name = "Priya Nair", team = "Frontend", away = [{ from = 2027-01-04, to = 2027-01-08 }] },
+  { name = "Arjun Rao", team = "Frontend" },
+  { name = "Wei Chen", team = "Payment SDK" },
+]

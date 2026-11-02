@@ -1,0 +1,170 @@
+format = 1
+name = "Customer portal v1"
+
+[[phases]]
+name = "Requirements"
+until = "requirements"
+
+[[phases]]
+name = "Design"
+until = "design-sign-off"
+
+[[phases]]
+name = "Development"
+until = "feature-freeze"
+
+[[phases]]
+name = "Beta & acceptance"
+until = "acceptance"
+
+[[lanes]]
+id = "product"
+name = "Product"
+place = "DE-BE"
+city = "Berlin"
+
+[[lanes]]
+id = "design"
+name = "Design/UX"
+place = "DE-BE"
+city = "Berlin"
+
+[[lanes]]
+id = "backend"
+name = "Backend/API"
+place = "DE-BE"
+city = "Berlin"
+
+[[lanes]]
+id = "frontend"
+name = "Frontend"
+place = "IN-KA"
+city = "Bangalore"
+
+[[lanes]]
+id = "payment"
+name = "Payment SDK"
+place = "CN"
+city = "Shenzhen"
+
+[[lanes]]
+id = "qa"
+name = "Test/QA"
+place = "IN-KA"
+city = "Bangalore"
+
+[[lanes]]
+id = "client"
+name = "Client"
+place = "US-NY"
+city = "New York"
+
+[[items]]
+id = "requirements"
+lane = "product"
+name = "Requirements"
+duration = "10wd"
+who = "Jonas Weber"
+share = 30
+
+[[items]]
+id = "ux-concept"
+lane = "design"
+name = "UX concept"
+duration = "8wd"
+after = ["requirements"]
+who = "Lena Vogel"
+share = 80
+
+[[items]]
+id = "ui-design"
+lane = "design"
+name = "UI design"
+duration = "7wd"
+after = ["ux-concept"]
+who = "Lena Vogel"
+
+[[items]]
+id = "design-sign-off"
+lane = "client"
+name = "Design sign-off"
+milestone = true
+after = ["ui-design"]
+
+[[items]]
+id = "data-model"
+lane = "backend"
+name = "Data model"
+duration = "8wd"
+after = ["requirements"]
+who = "Tom Becker"
+share = 50
+
+[[items]]
+id = "api"
+lane = "backend"
+name = "API"
+duration = "22wd"
+after = ["data-model"]
+who = "Tom Becker"
+share = 60
+
+[[items]]
+id = "frontend"
+lane = "frontend"
+name = "Frontend"
+duration = "25wd"
+after = ["design-sign-off"]
+who = "Priya Nair"
+
+[[items]]
+id = "sdk-integration"
+lane = "payment"
+name = "SDK integration"
+duration = "15wd"
+after = ["data-model"]
+who = "Wei Chen"
+
+[[items]]
+id = "integration"
+lane = "frontend"
+name = "Integration"
+duration = "10wd"
+after = ["api", "frontend", "sdk-integration"]
+who = "Arjun Rao"
+
+[[items]]
+id = "feature-freeze"
+lane = "frontend"
+name = "Feature freeze"
+milestone = true
+after = ["integration"]
+
+[[items]]
+id = "beta-test"
+lane = "qa"
+name = "Beta test"
+duration = "12wd"
+after = ["feature-freeze"]
+
+[[items]]
+id = "security-review"
+lane = "backend"
+name = "Security review"
+duration = "5wd"
+after = ["feature-freeze"]
+
+[[items]]
+id = "acceptance"
+lane = "client"
+name = "Acceptance"
+milestone = true
+after = ["beta-test", "security-review"]
+
+[[items]]
+id = "launch"
+lane = "client"
+name = "Launch"
+milestone = true
+after = ["acceptance"]
+on = 2027-03-01
