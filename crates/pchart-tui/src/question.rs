@@ -99,7 +99,7 @@ pub fn follows(app: &App, s: &mut Scene, edits: &[pchart_core::Edit], left: f32,
         let count = (room / (size * ADVANCE)).floor().max(0.0) as usize;
         if text.chars().count() <= count { text.to_string() } else { text.chars().take(count.saturating_sub(1)).collect::<String>() + "…" }
     };
-    let tried = pchart_core::apply_all(&app.plan, edits).map_err(|(_, err)| err.to_string()).and_then(|plan| pchart_core::schedule(&plan, &app.calendars, app.today).map(|schedule| (plan, schedule)).map_err(|err| err.to_string()));
+    let tried = pchart_core::apply_all(&app.plan, edits).map_err(|(_, err)| err.to_string()).and_then(|plan| pchart_core::schedule(&plan, &app.calendars_for(&plan), app.today).map(|schedule| (plan, schedule)).map_err(|err| err.to_string()));
     let (plan, schedule) = match tried {
         Ok(tried) => tried,
         Err(err) => {
@@ -107,7 +107,7 @@ pub fn follows(app: &App, s: &mut Scene, edits: &[pchart_core::Edit], left: f32,
             return;
         }
     };
-    let analysis = pchart_core::analyse(&plan, &app.calendars, &schedule, app.today);
+    let analysis = pchart_core::analyse(&plan, &app.calendars_for(&plan), &schedule, app.today);
     if let Some(verdict) = &analysis.verdict {
         let (icon, tone) = match verdict.state {
             State::Holds => (Icon::Check, p.bright),

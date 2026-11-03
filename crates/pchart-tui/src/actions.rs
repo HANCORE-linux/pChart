@@ -28,7 +28,9 @@ pub enum Action {
     Checks,
     Holidays,
     Export(View),
+    Present,
     Help,
+    Start,
     Quit,
 }
 
@@ -44,7 +46,7 @@ impl Action {
         };
         all.push(Action::Export(app.export.view));
         all.extend(View::of(&app.plan).into_iter().filter(|&view| view != app.export.view).map(Action::Export));
-        all.extend([Action::Help, Action::Quit]);
+        all.extend([Action::Present, Action::Help, Action::Start, Action::Quit]);
         all
     }
 
@@ -91,7 +93,9 @@ impl Action {
                 View::Network => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "network", "netzplan", "dependencies", "graph", "pert"],
                 View::Matrix => &["export", "share", "page", "file", "pdf", "svg", "png", "markdown", "md", "print", "send", "matrix", "dsm", "dependencies", "structure"],
             },
+            Action::Present => &["present", "meeting", "slides", "show", "presentation", "screen", "beamer", "projector", "talk"],
             Action::Help => &["help", "explain", "keys", "legend", "symbols", "what"],
+            Action::Start => &["new", "plan", "open", "another", "other", "project", "template", "start", "switch", "create"],
             Action::Quit => &["quit", "exit", "close", "leave"],
         }
     }
@@ -124,7 +128,9 @@ impl Action {
             Action::Export(View::NowNextLater) => "Export Now / Next / Later".into(),
             Action::Export(View::Gantt) => "Export the Gantt chart".into(),
             Action::Export(view) => format!("Export the {}", view.name().to_lowercase()),
+            Action::Present => "Present in a meeting".into(),
             Action::Help => "Explain this screen".into(),
+            Action::Start => "New plan or another".into(),
             Action::Quit => "Quit".into(),
         }
     }
@@ -221,7 +227,9 @@ impl Action {
                 };
                 format!("for {audience} · {}", FORMATS.iter().zip(formats).filter(|(_, on)| *on).map(|(name, _)| *name).collect::<Vec<_>>().join(", "))
             }
+            (Action::Present, _) => "the situation one statement a screen, large".into(),
             (Action::Help, _) => "what this screen answers, its keys and symbols".into(),
+            (Action::Start, _) => "the templates and the plans opened last; this one is saved".into(),
             (Action::Quit, _) => "every change is saved already".into(),
             _ => String::new(),
         }
@@ -249,7 +257,9 @@ impl Action {
             Action::Roadmap => "2",
             Action::Checks | Action::Holidays => "3",
             Action::Export(_) => "4",
+            Action::Present => "F5",
             Action::Help => "?",
+            Action::Start => "o",
             Action::Quit => "q",
         }
     }
@@ -327,7 +337,12 @@ impl Action {
                 app.export.view = view;
                 app.screen = Screen::Export;
             }
+            Action::Present => app.present = Some(0),
             Action::Help => app.help = true,
+            Action::Start => {
+                app.to_start = true;
+                return true;
+            }
             Action::Quit => return true,
         }
         false
@@ -367,14 +382,14 @@ pub fn find(app: &App, typed: &str) -> Vec<Found> {
             Screen::Roadmap => vec![(Action::ChangeDate, selected), (Action::Why, selected), (Action::AddItem, selected), (Action::Rename, selected), (Action::WaitsOn, selected), (Action::TryLength, selected), (Action::AddNote, selected), (Action::Compare, None), (Action::Snapshot, None), (Action::Undo, None), (Action::Detail, None), (Action::Details, None)],
             Screen::Checks => vec![(Action::Holidays, None), (Action::Undo, None)],
             Screen::Export => vec![(Action::Export(app.export.view), None)],
-            Screen::Situation => vec![(Action::Compare, None), (Action::Snapshot, None), (Action::Undo, None)],
+            Screen::Situation => vec![(Action::Present, None), (Action::Compare, None), (Action::Snapshot, None), (Action::Undo, None)],
             Screen::People | Screen::Reports => vec![(Action::Undo, None)],
         };
         found.retain(|&(action, _)| action != Action::Undo || !app.history.is_empty());
         found.retain(|&(action, _)| action != Action::Compare || app.since().is_some());
         found.retain(|(action, _)| Action::all(app).contains(action));
         found.retain(|&(action, item)| item.is_none_or(|index| action.fits(app, index)));
-        found.extend([(Action::Situation, None), (Action::Roadmap, None), (Action::Checks, None), (Action::Export(app.export.view), None), (Action::Help, None), (Action::Quit, None)].into_iter().filter(|found_one| !(found_one.0 == Action::Situation && app.screen == Screen::Situation) && !(found_one.0 == Action::Roadmap && app.screen == Screen::Roadmap) && !(found_one.0 == Action::Checks && app.screen == Screen::Checks) && !(matches!(found_one.0, Action::Export(_)) && app.screen == Screen::Export)));
+        found.extend([(Action::Situation, None), (Action::Roadmap, None), (Action::Checks, None), (Action::Export(app.export.view), None), (Action::Help, None), (Action::Start, None), (Action::Quit, None)].into_iter().filter(|found_one| !(found_one.0 == Action::Situation && app.screen == Screen::Situation) && !(found_one.0 == Action::Roadmap && app.screen == Screen::Roadmap) && !(found_one.0 == Action::Checks && app.screen == Screen::Checks) && !(matches!(found_one.0, Action::Export(_)) && app.screen == Screen::Export)));
         return found;
     }
     let names: Vec<Vec<String>> = app.plan.items.iter().map(|item| words(&item.name)).collect();

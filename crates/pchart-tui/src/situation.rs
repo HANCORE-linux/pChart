@@ -33,7 +33,7 @@ fn team(app: &App, item: usize) -> String {
 }
 
 /// A statement of "Next" in the words and symbols of picture 32.
-fn statement(app: &App, next: &Next) -> Statement {
+pub(crate) fn statement(app: &App, next: &Next) -> Statement {
     let p = app.shown();
     let name = |item: usize| app.plan.items[item].name.clone();
     let when = |in_wd: i32| match in_wd {

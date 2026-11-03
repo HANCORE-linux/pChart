@@ -7,6 +7,7 @@ mod help;
 mod item;
 mod note;
 mod people;
+mod present;
 mod reports;
 mod pictures;
 mod question;
@@ -40,7 +41,8 @@ fn picker() -> io::Result<Picker> {
     Ok(picker)
 }
 
-pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut theme: Theme, lanes: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<()> {
+/// Opens `plan` until the user quits; true when they asked for the start, to begin or open another.
+pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut theme: Theme, lanes: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<bool> {
     let picker = picker()?;
     let schedule = pchart_core::schedule(&plan, &calendars, today).map_err(io::Error::other)?;
     let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
@@ -212,6 +214,19 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                     _ => {}
                 }
             }
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.present.is_some() => match key.code {
+                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Esc | KeyCode::F(5) => app.present = None,
+                KeyCode::Char(' ') => present::toggle_details(&mut app, terminal.size().map_or(0, |size| size.width)),
+                KeyCode::Up | KeyCode::Down => present::choose(&mut app, if key.code == KeyCode::Up { -1 } else { 1 }),
+                KeyCode::Right | KeyCode::PageDown => present::turn(&mut app, 1),
+                KeyCode::Left | KeyCode::PageUp | KeyCode::Backspace => present::turn(&mut app, -1),
+                KeyCode::Home => present::turn(&mut app, -(present::SLIDES.len() as isize)),
+                KeyCode::End => present::turn(&mut app, present::SLIDES.len() as isize),
+                _ => {}
+            },
+            Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.form.is_none() && app.question.is_none() && key.code == KeyCode::F(5) => app.present = Some(0),
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.why => match key.code {
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -242,11 +257,13 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Char('c')) if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
                 (_, KeyCode::Char('p')) if key.modifiers.contains(KeyModifiers::CONTROL) => app.finder = Some(app::Finder::default()),
                 (_, KeyCode::Char('?')) => app.help = true,
+                (_, KeyCode::Tab) => app.next_screen(1),
+                (_, KeyCode::BackTab) => app.next_screen(-1),
                 (_, KeyCode::Char('1')) => app.screen = Screen::Situation,
                 (_, KeyCode::Char('2')) => app.screen = Screen::Roadmap,
                 (_, KeyCode::Char('3')) => app.screen = Screen::Checks,
                 (_, KeyCode::Char('4')) => app.screen = Screen::Export,
-                (_, KeyCode::Char('5')) if app.crew.is_some() => app.screen = Screen::People,
+                (_, KeyCode::Char('5')) => app.screen = Screen::People,
                 (_, KeyCode::Char('6')) if app.crew.is_some() => app.screen = Screen::Reports,
                 (Screen::Reports, KeyCode::Up) => app.report = app.report.saturating_sub(1),
                 (Screen::Reports, KeyCode::Down) => app.report = (app.report + 1).min(app.open_reports().len().saturating_sub(1)),
@@ -257,10 +274,10 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (Screen::Situation | Screen::Roadmap, KeyCode::Char('c')) if app.dated() => app.toggle_compare(),
                 (Screen::Roadmap, KeyCode::Esc) if app.compare => app.compare = false,
                 (Screen::Roadmap, KeyCode::Char('s')) => app.start_report(),
-                (Screen::People, KeyCode::Up) => app.person = app.person.saturating_sub(1),
-                (Screen::People, KeyCode::Down) => app.person = (app.person + 1).min(app.crew.as_ref().map_or(0, |crew| people::lines(&people::rows(crew, None)).len().saturating_sub(1))),
+                (Screen::People, KeyCode::Up | KeyCode::Down) => app.person = people::step(&people::lines(&people::rows(&people::crew_of(&app), None)), app.person, if key.code == KeyCode::Up { -1 } else { 1 }),
                 (Screen::People, KeyCode::Left) => app.week = app.week.saturating_sub(1),
-                (Screen::People, KeyCode::Right) => app.week = (app.week + 1).min(app.crew.as_ref().map_or(0, |crew| people::all_weeks(&people::rows(crew, None), app.today).len().saturating_sub(1))),
+                (Screen::People, KeyCode::Right) => app.week = (app.week + 1).min(people::all_weeks(&people::rows(&people::crew_of(&app), None), app.today).len().saturating_sub(1)),
+                (Screen::People, KeyCode::Enter) if app.crew.is_none() => app.make_team(lanes),
                 (Screen::Roadmap, KeyCode::Up) if !app.dated() => app.move_in_network(0.0, -1.0),
                 (Screen::Roadmap, KeyCode::Down) if !app.dated() => app.move_in_network(0.0, 1.0),
                 (Screen::Roadmap, KeyCode::Left) if !app.dated() => app.move_in_network(-1.0, 0.0),
@@ -301,6 +318,10 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (_, KeyCode::Esc) => app.screen = Screen::Situation,
                 (_, KeyCode::Up) => app.select(-1),
                 (_, KeyCode::Down) => app.select(1),
+                (_, KeyCode::Char('o')) => {
+                    app.to_start = true;
+                    break Ok(());
+                }
                 (_, KeyCode::Char('d')) => app.detail(),
                 (_, KeyCode::Char('u')) => app.undo(),
                 (Screen::Roadmap, KeyCode::Enter) if app.level != pchart_draw::Level::Overview => app.ask(),
@@ -322,7 +343,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
     ratatui::restore();
     drop(save);
     let saved = saver.join().unwrap_or_else(|_| Err("the plan could not be saved".into()));
-    result.and(saved.map_err(|err| io::Error::other(format!("the last change was not saved: {err}"))))
+    result.and(saved.map_err(|err| io::Error::other(format!("the last change was not saved: {err}")))).map(|()| app.to_start)
 }
 
 /// The start (picture 54), for `pchart` without a plan: returns the plan to open, a new one written to

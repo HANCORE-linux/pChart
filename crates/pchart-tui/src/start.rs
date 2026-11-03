@@ -152,7 +152,7 @@ pub fn draw(start: &Start, frame: &mut Frame) -> Vec<Placement> {
     let p = start.palette;
     let inks = Inks::of(p);
     let mut placements = Vec::new();
-    let version: String = env!("CARGO_PKG_VERSION").split('.').take(2).collect::<Vec<_>>().join(".");
+    let version = env!("CARGO_PKG_VERSION");
     put(frame, 0, 0, area.width, vec![Span::styled("pchart", bold(inks.bright)), Span::styled(format!(" {version} · new plan"), inks.dim)]);
     let right = if start.template_at().is_some() { "choose a template" } else { "open a plan" };
     put(frame, area.width.saturating_sub(right.len() as u16 + 1), 0, right.len() as u16 + 1, vec![Span::styled(right, inks.dim)]);

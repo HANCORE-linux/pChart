@@ -450,12 +450,22 @@ fn run(args: &Args) -> Result<u8, Failure> {
 
 /// Opens the plan in the terminal and puts it first among the plans opened last.
 fn open(ctx: Context, args: &Args) -> Result<u8, Failure> {
-    let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
-    pchart_store::remember(&ctx.path);
     let text = holiday_text(args)?;
     let lanes = |plan: &Plan| calendars(&holidays_for(&text, plan), plan);
-    pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme, &lanes).map_err(|err| Failure::file(err.to_string()))?;
-    Ok(0)
+    let mut ctx = ctx;
+    loop {
+        let theme = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
+        pchart_store::remember(&ctx.path);
+        if !pchart_tui::run(ctx.plan, ctx.calendars, ctx.today, &ctx.path, theme, &lanes).map_err(|err| Failure::file(err.to_string()))? {
+            return Ok(0);
+        }
+        let dir = std::env::current_dir().map_err(|err| Failure::file(err.to_string()))?;
+        let theme_again = pchart_tui::Theme::pick(args.option("--theme")).map_err(|err| Failure::usage(err, args))?;
+        match pchart_tui::start(&dir, today(args)?, theme_again, &lanes).map_err(|err| Failure::file(err.to_string()))? {
+            Some(path) => ctx = context_of(path, args)?,
+            None => return Ok(0),
+        }
+    }
 }
 
 /// `pchart` without a plan, in a terminal: the start, which writes a new plan or picks one opened before,

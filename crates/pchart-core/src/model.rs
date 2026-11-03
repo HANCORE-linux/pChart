@@ -95,6 +95,12 @@ pub fn slug(text: &str) -> Option<String> {
 }
 
 impl Plan {
+    /// An id for a new lane called `name`, made as `new_id` makes one for an item.
+    pub fn new_lane_id(&self, name: &str) -> String {
+        let base = slug(name).unwrap_or_else(|| "lane".into());
+        (1..).map(|number| if number == 1 { base.clone() } else { format!("{base}-{number}") }).find(|id| self.lane(id).is_none()).unwrap_or(base)
+    }
+
     /// An id for a new item called `name`: its words in small letters joined by "-", numbered when the id
     /// is taken.
     pub fn new_id(&self, name: &str) -> String {

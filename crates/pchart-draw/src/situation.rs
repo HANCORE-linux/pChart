@@ -102,6 +102,12 @@ pub fn statement(statement: &Statement, chosen: bool, width: f32, height: f32, u
 /// The deciding chain as one line of steps: name above, bar or diamond, date below, and under them a
 /// bracket for each lane with its name and city.
 pub fn chain(plan: &Plan, schedule: &Schedule, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
+    chosen_chain(plan, schedule, None, width, height, unit, palette)
+}
+
+/// `chain` with the step at `chosen` on a raised ground with a pink line under it (pictures 76).
+#[allow(clippy::too_many_arguments)]
+pub fn chosen_chain(plan: &Plan, schedule: &Schedule, chosen: Option<usize>, width: f32, height: f32, unit: f32, palette: &Palette) -> Scene {
     let (p, u) = (palette, unit);
     let mut s = scene(width, height, p);
     let steps = &schedule.chain;
@@ -157,6 +163,11 @@ pub fn chain(plan: &Plan, schedule: &Schedule, width: f32, height: f32, unit: f3
             format!("{} – {}", slot.start.strftime("%d %b"), slot.finish.strftime("%d %b"))
         };
         s.add_for(index, 1.0, text(xs, cy + 30.0 * u, fit(&date, 13.5 * u, room(position)), 13.5 * u, if fixed { p.bright } else { p.ink }, false, Anchor::Middle));
+    }
+    if let Some(position) = chosen.filter(|&position| position < count) {
+        let half = if count > 1 { (step / 2.0 - 3.0 * u).min(room(position) / 2.0) } else { 60.0 * u };
+        s.marks.insert(0, Mark { shape: Shape::Rect { x: x(position) - half, y: cy - 14.0 * u, w: 2.0 * half, h: 30.0 * u, radius: 0.0, fill: Fill::Color(p.raised), stroke: None }, opacity: 1.0, item: None });
+        s.add(Shape::Rect { x: x(position) - half, y: cy + 38.0 * u, w: 2.0 * half, h: 3.0 * u, radius: 0.0, fill: Fill::Color(p.accent), stroke: None });
     }
     let mut groups: Vec<(usize, usize, usize)> = Vec::new();
     for (position, &index) in steps.iter().enumerate() {

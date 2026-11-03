@@ -172,15 +172,6 @@ pub fn work_under(rows: &[Row], start: Date, weeks: usize, today: Date, width: f
     draw(rows, start, end, today, None, g, width, height, palette)
 }
 
-/// The height of the work of `rows` under the capacity table.
-pub fn work_height(rows: &[Row], unit: f32, weeks: usize, width: f32, start: Date) -> f32 {
-    let end = (1..weeks.max(1) * 7).fold(start, |day, _| next(day));
-    let x0 = if width >= 1000.0 * unit { 240.0 * unit } else { 170.0 * unit };
-    let mut g = Geometry::between(x0, x0 + weeks as f32 * week_width(unit), unit, start, end);
-    g.numbers = false;
-    g.top + 52.0 * unit + rows.iter().map(|row| g.row_h(row)).sum::<f32>()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn draw(rows: &[Row], start: Date, end: Date, today: Date, chosen: Option<usize>, g: Geometry, width: f32, height: f32, palette: &Palette) -> Scene {
     let (p, u) = (*palette, g.u);

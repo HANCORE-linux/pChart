@@ -2,7 +2,7 @@ use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::Error;
-use crate::model::{Item, Note, Plan};
+use crate::model::{Item, Lane, Note, Plan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,6 +39,9 @@ pub enum Edit {
     NoteAt { lane: String, date: Date, note: Option<String> },
     /// The phase called `phase` ends with `until`.
     Phase { phase: String, until: String },
+    /// A new lane at the bottom, called `name`, without a place.
+    AddLane { lane: String, name: String },
+    RenameLane { lane: String, name: String },
 }
 
 impl Edit {
@@ -104,6 +107,22 @@ impl Edit {
                 next.items.remove(index);
             }
             Edit::Rename { item, name } => next.items[find(item)?].name = name.clone(),
+            Edit::AddLane { lane, name } => {
+                if plan.lane(lane).is_some() {
+                    return Err(Error::Plan(format!("there is a lane \"{lane}\" already")));
+                }
+                if name.trim().is_empty() {
+                    return Err(Error::Plan("a lane needs a name".into()));
+                }
+                next.lanes.push(Lane { id: lane.clone(), name: name.trim().to_string(), place: None, city: None });
+            }
+            Edit::RenameLane { lane, name } => {
+                let index = plan.lane(lane).ok_or_else(|| Error::Plan(format!("there is no lane \"{lane}\"")))?;
+                if name.trim().is_empty() {
+                    return Err(Error::Plan("a lane needs a name".into()));
+                }
+                next.lanes[index].name = name.trim().to_string();
+            }
             Edit::Lane { item, lane } => {
                 if plan.lane(lane).is_none() {
                     return Err(Error::Plan(format!("there is no lane \"{lane}\"")));
@@ -242,6 +261,21 @@ mod tests {
         let err = Edit::Important { item: "frontend".into(), important: true }.apply(&sample()).unwrap_err();
         assert_eq!(err.to_string(), "\"frontend\" is not a milestone; only milestones are marked important");
         assert!(Edit::NoteAt { lane: "nowhere".into(), date: jiff::civil::date(2027, 1, 4), note: Some("x".into()) }.apply(&sample()).is_err());
+    }
+
+    #[test]
+    fn lanes_are_added_at_the_bottom_and_renamed() {
+        let list = edits(r#"[{"op": "add_lane", "lane": "quality", "name": "  Quality  "}, {"op": "rename_lane", "lane": "backend", "name": "Backend and API"}, {"op": "add", "item": {"id": "tests", "lane": "quality", "name": "Tests", "duration": "5wd", "after": ["api"]}}]"#);
+        let plan = apply_all(&sample(), &list).unwrap();
+        let qa = plan.lanes.last().unwrap();
+        assert_eq!((qa.id.as_str(), qa.name.as_str(), qa.place.as_deref()), ("quality", "Quality", None));
+        assert_eq!(plan.lanes[plan.lane("backend").unwrap()].name, "Backend and API");
+        assert_eq!(plan.new_lane_id("Quality"), "quality-2");
+        assert_eq!(plan.new_lane_id("QA"), "qa-2");
+        assert_eq!(plan.new_lane_id("!!"), "lane");
+        for (edit, err) in [(r#"{"op": "add_lane", "lane": "backend", "name": "Again"}"#, "there is a lane \"backend\" already"), (r#"{"op": "add_lane", "lane": "x", "name": " "}"#, "a lane needs a name"), (r#"{"op": "rename_lane", "lane": "x", "name": "X"}"#, "there is no lane \"x\""), (r#"{"op": "rename_lane", "lane": "backend", "name": ""}"#, "a lane needs a name")] {
+            assert_eq!(edits(&format!("[{edit}]"))[0].apply(&sample()).unwrap_err().to_string(), err);
+        }
     }
 
     #[test]

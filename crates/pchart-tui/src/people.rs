@@ -70,40 +70,58 @@ pub(crate) fn all_weeks(rows: &[Row], today: Date) -> Vec<Date> {
 
 /// The line about the chosen cell: who, the week, how much of their time is planned of what they can
 /// do, and the work it is.
-fn line(rows: &[Row], line: &Line, monday: Date, p: &pchart_draw::Palette) -> Vec<bits::Part> {
+fn line(row: &Row, monday: Date, p: &pchart_draw::Palette) -> Vec<bits::Part> {
     let friday = (0..4).fold(monday, |day, _| day.tomorrow().expect("a date in range"));
     let week = (Some((Icon::Calendar, p.dim)), format!("W{:02} · {}", monday.iso_week_date().week(), span(monday, friday)), p.ink, false);
-    match line {
-        Line::Team(name, members) => {
-            let (planned, capacity) = people::team_week(rows, members, monday);
-            let tone = if planned > capacity { p.warn } else { p.dim };
-            let free = if planned > capacity { format!("{} % too much", planned - capacity) } else { format!("{} % free", capacity - planned) };
-            vec![(None, name.clone(), p.bright, true), week, (Some((Icon::Clock, tone)), format!("{} % full · {planned} % of {capacity} % planned, {free}", planned * 100 / capacity.max(1)), p.ink, false)]
-        }
-        Line::Person(at) => {
-            let row = &rows[*at];
-            let load = row.week(monday);
-            let tone = if load > row.capacity { p.warn } else { p.dim };
-            let free = if load > row.capacity { format!("{} % too much", load - row.capacity) } else { format!("{} % free", row.capacity - load) };
-            let mut parts = vec![(None, row.name.clone(), p.bright, true), week, (Some((Icon::Clock, tone)), format!("{} % full · {load} % of {} % planned, {free}", row.full(monday), row.capacity), p.ink, false)];
-            let work: Vec<String> = row.work.iter().filter(|work| work.start <= friday && monday <= work.finish).map(|work| format!("{} {} %", work.name, work.share)).collect();
-            if !work.is_empty() {
-                parts.push((Some((Icon::Bar, p.muted)), work.join(" · "), p.ink, false));
-            }
-            parts
+    let load = row.week(monday);
+    let tone = if load > row.capacity { p.warn } else { p.dim };
+    let free = if load > row.capacity { format!("{} % too much", load - row.capacity) } else { format!("{} % free", row.capacity - load) };
+    let mut parts = vec![(None, row.name.clone(), p.bright, true), week, (Some((Icon::Clock, tone)), format!("{} % full · {load} % of {} % planned, {free}", row.full(monday), row.capacity), p.ink, false)];
+    let work: Vec<String> = row.work.iter().filter(|work| work.start <= friday && monday <= work.finish).map(|work| format!("{} {} %", work.name, work.share)).collect();
+    if !work.is_empty() {
+        parts.push((Some((Icon::Bar, p.muted)), work.join(" · "), p.ink, false));
+    }
+    parts
+}
+
+/// The team the People screen shows (pictures 73): the workspace's, else the people this plan names,
+/// each in the team of their lane.
+pub(crate) fn crew_of(app: &App) -> std::borrow::Cow<'_, Crew> {
+    if let Some(crew) = &app.crew {
+        return std::borrow::Cow::Borrowed(crew);
+    }
+    let mut people: Vec<pchart_core::people::Person> = Vec::new();
+    for item in &app.plan.items {
+        if let Some(who) = &item.who
+            && !people.iter().any(|person| person.name == *who)
+        {
+            let team = app.plan.lane(&item.lane).map(|lane| app.plan.lanes[lane].name.clone());
+            people.push(pchart_core::people::Person { name: who.clone(), team, capacity: None, away: Vec::new() });
         }
     }
+    let here = pchart_core::people::Project { name: app.plan.name.clone(), plan: app.plan.clone(), schedule: app.schedule.clone(), calendars: app.calendars.clone() };
+    std::borrow::Cow::Owned(Crew { name: app.plan.name.clone(), workspace: pchart_core::people::Workspace { people, ..Default::default() }, projects: vec![here], here: 0 })
+}
+
+/// The person `step` people on from the one chosen; teams are headings and are not chosen.
+pub(crate) fn step(lines: &[Line], at: usize, step: isize) -> usize {
+    let people: Vec<usize> = (0..lines.len()).filter(|&at| matches!(lines[at], Line::Person(_))).collect();
+    if people.is_empty() {
+        return 0;
+    }
+    let now = people.iter().position(|&person| person >= at).unwrap_or(people.len().saturating_sub(1));
+    people.get((now as isize + step).clamp(0, people.len() as isize - 1) as usize).copied().unwrap_or(0)
 }
 
 pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &mut Vec<Placement>) {
-    let Some(crew) = &app.crew else { return };
+    let crew = crew_of(app);
     let p = app.shown();
-    let rows = rows(crew, None);
+    let rows = rows(&crew, None);
     let lines = lines(&rows);
     let weeks = all_weeks(&rows, app.today);
     let (cw, ch) = app.cell;
     let u = f32::from(ch) / 21.0;
-    let chosen = (app.person.min(lines.len().saturating_sub(1)), app.week.min(weeks.len().saturating_sub(1)));
+    let chosen = (step(&lines, app.person, 0), app.week.min(weeks.len().saturating_sub(1)));
     let body = Rect { x: 0, y: 1, width: area.width, height: area.height - 3 };
     let table_h = ((pchart_draw::people::grid_height(&lines, u) / f32::from(ch)).ceil() as u16 + 3).min(body.height.saturating_sub(8)).max(8);
     let table = Rect { height: table_h, ..body };
@@ -117,32 +135,28 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, placements: &
         (Some(a), Some(b)) => format!(" · {} – {}", a.strftime("%d %b"), b.strftime("%d %b %Y")),
         _ => String::new(),
     };
-    panel(frame, inks, table, &format!("CAPACITY · {}{span_words}", crew.name).to_uppercase(), true);
+    let title = if app.crew.is_some() { format!("CAPACITY · {}{span_words}", crew.name) } else { format!("CAPACITY · ONLY THIS PLAN{span_words}") };
+    panel(frame, inks, table, &title.to_uppercase(), true);
+    if rows.is_empty() {
+        frame.render_widget(ratatui::widgets::Paragraph::new(ratatui::text::Line::from(vec![ratatui::text::Span::styled("No one named yet", inks.ink), ratatui::text::Span::styled(" · p on a piece of work names someone", inks.dim)])), Rect { x: table.x + 3, y: table.y + 3, width: table.width.saturating_sub(6), height: 1 });
+        return;
+    }
     let scene = people::grid(&rows, &lines, shown, app.today, (chosen.0, chosen.1 - first), w, h, u, &p);
     placements.push(Placement { rect, svg: scene.svg(), paper: false });
 
     let below = Rect { y: table.y + table.height, height: body.height.saturating_sub(table.height), ..body };
-    let members: Vec<Row> = match lines.get(chosen.0) {
-        Some(Line::Team(_, members)) => members.iter().map(|&at| rows[at].clone()).collect(),
-        Some(Line::Person(at)) => vec![rows[*at].clone()],
-        None => Vec::new(),
-    };
-    if below.height >= 6 && !members.is_empty() && !shown.is_empty() {
-        let who = match lines.get(chosen.0) {
-            Some(Line::Team(name, _)) => name.clone(),
-            _ => members[0].name.clone(),
-        };
+    let Some(Line::Person(at)) = lines.get(chosen.0) else { return };
+    let row = &rows[*at];
+    if below.height >= 6 && !shown.is_empty() {
         let strip = Rect { x: below.x + 1, y: below.y + 2, width: below.width.saturating_sub(2), height: below.height.saturating_sub(3) };
         let (sw, sh) = (f32::from(strip.width) * f32::from(cw), f32::from(strip.height) * f32::from(ch));
-        let fits = (1..=members.len()).rev().find(|&count| people::work_height(&members[..count], u, shown.len(), sw, shown[0]) <= sh).unwrap_or(1);
-        let count = if fits < members.len() { format!(" · {} OF {}", fits, members.len()) } else { String::new() };
-        panel(frame, inks, below, &format!("WORK · {who}{count}").to_uppercase(), false);
-        let scene = people::work_under(&members[..fits], shown[0], shown.len(), app.today, sw, sh, u, &p);
+        panel(frame, inks, below, &format!("WORK · {}", row.name).to_uppercase(), false);
+        let scene = people::work_under(std::slice::from_ref(row), shown[0], shown.len(), app.today, sw, sh, u, &p);
         placements.push(Placement { rect: strip, svg: scene.svg(), paper: false });
     }
-    if let (Some(line_of), Some(&monday)) = (lines.get(chosen.0), weeks.get(chosen.1)) {
+    if let Some(&monday) = weeks.get(chosen.1) {
         let line_rect = Rect { x: 2, y: area.height - 2, width: area.width.saturating_sub(4), height: 1 };
-        let scene = bits::line(&line(&rows, line_of, monday, &p), f32::from(line_rect.width) * f32::from(cw), f32::from(ch), u, &p);
+        let scene = bits::line(&line(row, monday, &p), f32::from(line_rect.width) * f32::from(cw), f32::from(ch), u, &p);
         placements.push(Placement { rect: line_rect, svg: scene.svg(), paper: false });
     }
 }

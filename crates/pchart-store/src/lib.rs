@@ -33,6 +33,76 @@ pub fn people(root: &Path) -> pchart_core::people::Workspace {
     fs::read_to_string(root.join("workspace.toml")).ok().and_then(|text| pchart_core::people::Workspace::parse(&text).ok()).unwrap_or_default()
 }
 
+/// Adds `name` of `team` to the people of the workspace at `root` (pictures 72), keeping the rest of
+/// its `workspace.toml` as it is written.
+pub fn add_person(root: &Path, name: &str, team: Option<&str>) -> Result<(), Error> {
+    let path = root.join("workspace.toml");
+    let text = fs::read_to_string(&path).map_err(|err| failed(&path, err))?;
+    pchart_core::people::Workspace::parse(&text).map_err(|err| failed(&path, err))?;
+    let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+    let entry = format!("{{ name = {}{} }}", quoted(name), team.map(|team| format!(", team = {}", quoted(team))).unwrap_or_default());
+    let next = match people_end(&text) {
+        Some((last, end, open)) => format!("{}{}{}\n  {entry},{}", &text[..last], if open { "" } else { "," }, &text[last..end], &text[end..]),
+        None if text.lines().any(|line| line.trim_start().starts_with('[')) => format!("{}\n[[people]]\nname = {}{}\n", text.trim_end(), quoted(name), team.map(|team| format!("\nteam = {}", quoted(team))).unwrap_or_default()),
+        None => format!("{}\npeople = [\n  {entry},\n]\n", text.trim_end()),
+    };
+    if pchart_core::people::Workspace::parse(&next).ok().and_then(|workspace| workspace.person(name).cloned()).is_none() {
+        return Err(failed(&path, format!("could not add {name}")));
+    }
+    whole(&path, &next)
+}
+
+/// Where the last entry of `people = [ … ]` ends, the end of its line when only a comment follows it
+/// there, and whether the list is empty or ends with a comma.
+fn people_end(text: &str) -> Option<(usize, usize, bool)> {
+    let start = text.match_indices("people").find(|&(at, _)| text[..at].rsplit('\n').next().is_some_and(|before| before.trim().is_empty()) && text[at + 6..].trim_start().starts_with('='))?.0;
+    let open = start + text[start..].find('[')?;
+    let (mut depth, mut last, mut chars) = (0, open + 1, text[open..].char_indices().map(|(at, c)| (open + at, c)));
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '#' => while chars.next().is_some_and(|(_, c)| c != '\n') {},
+            '"' | '\'' => {
+                let mut escaped = false;
+                for (end, next) in chars.by_ref() {
+                    if next == c && !escaped {
+                        last = end + 1;
+                        break;
+                    }
+                    escaped = c == '"' && next == '\\' && !escaped;
+                }
+            }
+            '[' | '{' => {
+                depth += 1;
+                last = at + 1;
+            }
+            ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let line = text[last..].find('\n').map_or(text.len(), |end| last + end);
+                    let rest = text[last..line].trim_start();
+                    let end = if rest.is_empty() || rest.starts_with('#') { line } else { last };
+                    return Some((last, end, text[..last].ends_with('[') || text[..last].ends_with(',')));
+                }
+                last = at + 1;
+            }
+            c if !c.is_whitespace() => last = at + c.len_utf8(),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Makes `dir` a team folder (pictures 73): a `workspace.toml` with `people`, each with their team;
+/// never over a file that is there.
+pub fn make_team(dir: &Path, people: &[(String, Option<String>)]) -> Result<PathBuf, Error> {
+    let path = dir.join("workspace.toml");
+    let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+    let lines: String = people.iter().map(|(name, team)| format!("  {{ name = {}{} }},\n", quoted(name), team.as_deref().map(|team| format!(", team = {}", quoted(team))).unwrap_or_default())).collect();
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path).map_err(|err| if err.kind() == ErrorKind::AlreadyExists { failed(&path, "is there already") } else { failed(&path, err) })?;
+    file.write_all(format!("people = [\n{lines}]\n").as_bytes()).map_err(|err| failed(&path, err))?;
+    Ok(path)
+}
+
 /// The workspace the plan at `path` is in (pictures 64), with its people and its projects, `plan` among
 /// them as it is now; `lanes` gives the calendars of a plan's lanes. A project that cannot be read or
 /// scheduled is left out.
@@ -110,10 +180,10 @@ pub fn reopen(path: &Path) -> Result<(), Error> {
     whole(path, &report.to_toml())
 }
 
-/// The projects of a workspace: the plans in its `projects` folder, by file name.
+/// The projects of a workspace: the plans beside its `workspace.toml` and in its `projects` folder, by
+/// file name.
 pub fn projects(workspace: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(workspace.join("projects")) else { return Vec::new() };
-    let mut out: Vec<PathBuf> = entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.extension().is_some_and(|extension| extension == "pchart")).collect();
+    let mut out: Vec<PathBuf> = [workspace.to_path_buf(), workspace.join("projects")].iter().filter_map(|dir| fs::read_dir(dir).ok()).flatten().filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.extension().is_some_and(|extension| extension == "pchart")).collect();
     out.sort();
     out
 }
@@ -264,6 +334,44 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn someone_new_joins_the_people_and_the_rest_of_the_file_stays_as_written() {
+        let dir = folder("add-person");
+        let file = dir.join("workspace.toml");
+        let cases = [
+            ("name = \"Acme\"\n# who is who\npeople = [\n  { name = \"Priya Nair\", team = \"Frontend\" }, # back in January\n]\n", "name = \"Acme\"\n# who is who\npeople = [\n  { name = \"Priya Nair\", team = \"Frontend\" }, # back in January\n  { name = \"Nora \\\"N\\\" Berg\", team = \"Design/UX\" },\n]\n"),
+            ("people = [{ name = \"Lena\", team = \"T\" }]\n", "people = [{ name = \"Lena\", team = \"T\" },\n  { name = \"Nora \\\"N\\\" Berg\", team = \"Design/UX\" },]\n"),
+            ("people = []\nlead = \"Lena\"\n", "people = [\n  { name = \"Nora \\\"N\\\" Berg\", team = \"Design/UX\" },]\nlead = \"Lena\"\n"),
+            ("name = \"Acme\"\n", "name = \"Acme\"\npeople = [\n  { name = \"Nora \\\"N\\\" Berg\", team = \"Design/UX\" },\n]\n"),
+            ("[[people]]\nname = \"Lena\"\n", "[[people]]\nname = \"Lena\"\n[[people]]\nname = \"Nora \\\"N\\\" Berg\"\nteam = \"Design/UX\"\n"),
+        ];
+        for (before, after) in cases {
+            fs::write(&file, before).unwrap();
+            add_person(&dir, "Nora \"N\" Berg", Some("Design/UX")).unwrap();
+            assert_eq!(fs::read_to_string(&file).unwrap(), after);
+        }
+        fs::write(&file, "people = [").unwrap();
+        assert!(add_person(&dir, "Nora", None).is_err());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "people = [");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_becomes_a_team_and_its_plans_its_projects() {
+        let dir = folder("make-team");
+        fs::create_dir_all(dir.join("projects")).unwrap();
+        for file in ["b.pchart", "projects/a.pchart", "notes.txt"] {
+            fs::write(dir.join(file), "").unwrap();
+        }
+        let path = make_team(&dir, &[("Lena \"L\" Vogel".into(), Some("Design/UX".into())), ("Tom".into(), None)]).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "people = [\n  { name = \"Lena \\\"L\\\" Vogel\", team = \"Design/UX\" },\n  { name = \"Tom\" },\n]\n");
+        assert_eq!(people(&dir).people.len(), 2);
+        assert!(make_team(&dir, &[]).unwrap_err().to_string().ends_with("is there already"));
+        assert_eq!(people(&dir).people.len(), 2);
+        assert_eq!(projects(&dir), [dir.join("b.pchart"), dir.join("projects/a.pchart")]);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

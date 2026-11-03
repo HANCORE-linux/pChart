@@ -45,7 +45,6 @@ pub struct Axis {
     pub start: Date,
     pub end: Date,
     pub x0: f32,
-    pub x1: f32,
     pub px: f32,
 }
 
@@ -61,7 +60,7 @@ impl Axis {
         }
         let end = (0..after).fold(last, |day, _| next(day));
         let px = (x1 - x0) / (days(start, end) + 1) as f32;
-        Axis { start, end, x0, x1, px }
+        Axis { start, end, x0, px }
     }
 
     pub fn x(&self, day: Date) -> f32 {

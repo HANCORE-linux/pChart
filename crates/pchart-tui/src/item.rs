@@ -55,11 +55,11 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
     match form {
         Form::Add(adding) => {
             let from = &app.plan.items[adding.from].name;
-            head(app, s, x, y, width, height, u, &format!("ADD AFTER {}", from.to_uppercase()), "What needs doing?");
+            let before = app.places(adding.from).get(adding.place).is_some_and(|(place, _)| *place == crate::app::Place::Before);
+            head(app, s, x, y, width, height, u, &format!("ADD {} {}", if before { "BEFORE" } else { "AFTER" }, from.to_uppercase()), "What needs doing?");
             let label_w = 9.0 * 16.6 * u * ADVANCE;
             let step = ((height - 180.0 * u) / 5.0).clamp(30.0 * u, 40.0 * u);
-            let lane = &app.plan.lanes[adding.lane];
-            let lane_words = [Some(lane.name.as_str()), lane.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+            let lane_words = app.plan.lanes.get(adding.lane).map(|lane| [Some(lane.name.as_str()), lane.city.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" · ")).unwrap_or_default();
             let places = app.places(adding.from);
             for row in 0..5 {
                 let chosen = row == adding.at;
@@ -89,6 +89,13 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                             None => ("such as 5, 2w or 3 weeks".to_string(), p.muted, false),
                         };
                         bits::runs(s, value_x + box_w + 20.0 * u, baseline, 16.6 * u, &[(&echo.0, echo.1, echo.2)]);
+                    }
+                    3 if adding.lane == app.plan.lanes.len() => {
+                        let end = bits::chip(s, value_x, baseline, "New lane", true, false, u, &p) + 12.0 * u;
+                        field(s, end, top + 3.0 * u, x + width - 26.0 * u - 3.0 * 16.6 * u * ADVANCE - end, &adding.lane_name, chosen, u, p.ink, p.bright);
+                        if adding.lane_name.is_empty() {
+                            bits::runs(s, end + 14.0 * u, baseline, 16.6 * u, &[("its name, such as Design", p.muted, false)]);
+                        }
                     }
                     3 => {
                         bits::runs(s, value_x, baseline, 16.6 * u, &[(&fit(&lane_words, 16.6 * u, room - label_w - 40.0 * u), if chosen { p.bright } else { p.ink }, false)]);
@@ -140,11 +147,22 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
             bits::runs(s, left, top + 94.0 * u, 15.0 * u, &[(&fit(&kept, 15.0 * u, room), p.dim, false)]);
             return;
         }
-        Form::Rename { item, typed } => {
+        Form::Rename { item, typed, lane, at } => {
             let name = &app.plan.items[*item].name;
             head(app, s, x, y, width, height, u, &format!("RENAME · {}", name.to_uppercase()), &format!("What is {name} called?"));
-            field(s, left, top, room, typed, true, u, p.ink, p.bright);
-            bits::runs(s, left, top + 64.0 * u, 15.0 * u, &[(&fit("What waits on it, its dates and its notes stay as they are.", 15.0 * u, room), p.dim, false)]);
+            let label_w = 9.0 * 16.6 * u * ADVANCE;
+            let step = 40.0 * u;
+            for (row, (label, text)) in [("Name", typed), ("Lane", lane)].into_iter().enumerate() {
+                let chosen = row == *at;
+                if chosen {
+                    band(s, x, top, width, step - 6.0 * u, u, &p);
+                }
+                bits::runs(s, left, top + 22.0 * u, 16.6 * u, &[(label, if chosen { p.bright } else { p.dim }, chosen)]);
+                field(s, left + label_w, top + 3.0 * u, room - label_w, text, chosen, u, p.ink, p.bright);
+                top += step;
+            }
+            let words = if *at == 0 { "What waits on it, its dates and its notes stay as they are." } else { "The lane keeps its work; only its name changes." };
+            bits::runs(s, left, top + 24.0 * u, 15.0 * u, &[(&fit(words, 15.0 * u, room), p.dim, false)]);
             return;
         }
         Form::Remove { item } => {
@@ -240,7 +258,7 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
             }
             return;
         }
-        Form::Who { item, at, share } => {
+        Form::Who { item, at, share, typed } => {
             let it = &app.plan.items[*item];
             head(app, s, x, y, width, height, u, &format!("WHO · {}", it.name.to_uppercase()), &format!("Who does {}?", it.name));
             let rows = app.who_rows(*item);
@@ -310,6 +328,18 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                     }
                 }
                 top += step;
+            }
+            let chosen = rows.len() == *at;
+            if chosen {
+                band(s, x, top, width, step - 2.0 * u, u, &p);
+            }
+            let baseline = top + 20.0 * u;
+            bits::runs(s, left + 2.0 * u, baseline, 16.6 * u, &[("+", if chosen { p.bright } else { p.dim }, true)]);
+            let end = bits::runs(s, left + 28.0 * u, baseline, 16.6 * u, &[("Someone new", if chosen { p.bright } else { p.ink }, chosen)]);
+            let at_x = (left + 28.0 * u + name_w + 24.0 * u).max(end + 18.0 * u);
+            field(s, at_x, top + 0.5 * u, x + width - 26.0 * u - at_x, typed, chosen, u, if chosen { p.ink } else { p.muted }, p.bright);
+            if typed.is_empty() {
+                bits::runs(s, at_x + 14.0 * u, baseline, 16.6 * u, &[("type a name", p.muted, false)]);
             }
             return;
         }

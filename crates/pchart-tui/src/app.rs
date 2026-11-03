@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use jiff::civil::Date;
 use pchart_core::{Analysis, Calendar, Edit, Fix, Plan, Schedule, analyse};
@@ -82,13 +82,15 @@ pub struct Finder {
 }
 
 /// Adding an item (picture 51): its name, work or a milestone, its length as typed, its lane by its
-/// index, where it goes among the places `places` offers, and the question `↑↓` is on.
+/// index, one past the last for a new lane with the name typed for it (pictures 72), where it goes
+/// among the places `places` offers, and the question `↑↓` is on.
 pub struct Adding {
     pub from: usize,
     pub name: String,
     pub milestone: bool,
     pub length: String,
     pub lane: usize,
+    pub lane_name: String,
     pub place: usize,
     pub at: usize,
 }
@@ -106,7 +108,8 @@ pub enum Place {
 /// A change to the plan's items asked in a dialog over the roadmap (picture 51).
 pub enum Form {
     Add(Adding),
-    Rename { item: usize, typed: String },
+    /// The name of `item` and of its lane as typed (pictures 72), and the row `↑↓` is on.
+    Rename { item: usize, typed: String, lane: String, at: usize },
     /// What `item` waits on: one box for each item, and the one `↑↓` is on.
     WaitsOn { item: usize, on: Vec<bool>, at: usize },
     Remove { item: usize },
@@ -114,7 +117,8 @@ pub enum Form {
     Length { item: usize, typed: String },
     /// Who does `item` (picture 64): the people `App::who_rows` offers, the one `↑↓` is on, and the
     /// share of their time it takes, which `←→` changes.
-    Who { item: usize, at: usize, share: u32 },
+    /// One row past `App::who_rows` is someone new, with their name as typed (pictures 72).
+    Who { item: usize, at: usize, share: u32, typed: String },
     /// A report on `item` (pictures 65): how it stands by its place in `STATUSES`, the days more it needs
     /// as typed, the comment, who reports by their place in `App::reporters`, and the question `↑↓` is on.
     Report { item: usize, status: usize, days: String, comment: String, by: usize, at: usize, answering: Option<PathBuf> },
@@ -187,6 +191,10 @@ pub struct App {
     pub why: bool,
     /// The roadmap compared with the last snapshot (pictures 67).
     pub compare: bool,
+    /// `o`: leave for the start, to begin or open another plan.
+    pub to_start: bool,
+    /// The detail level the roadmap could show at the last draw, which a small window may lower.
+    pub shown: std::cell::Cell<Option<Level>>,
     pub crew: Option<Crew>,
     /// The line and the week chosen on the People screen.
     pub person: usize,
@@ -194,6 +202,11 @@ pub struct App {
     /// The workspace's folder, where reports go, and the reports about this plan, newest first
     /// (pictures 65); the one chosen on the Reports screen.
     pub root: Option<PathBuf>,
+    /// Present mode (pictures 74): the slide shown, by its place in `present::SLIDES`.
+    pub present: Option<usize>,
+    /// In present mode, the entry of the slide `↑↓` is on, and whether Space shows its details.
+    pub present_at: usize,
+    pub present_details: bool,
     pub reports: Vec<(PathBuf, pchart_core::report::Report)>,
     pub report: usize,
     /// Who uses pChart here (`pchart_store::me`).
@@ -207,8 +220,8 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, compare: false, crew: None, person: 0, week: 0, root: None, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
-        if !app.dated() {
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, compare: false, to_start: false, shown: std::cell::Cell::new(None), crew: None, person: 0, week: 0, root: None, present: None, present_at: 0, present_details: false, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
+        if !app.dated() || app.plan.items.iter().all(|item| item.milestone) {
             app.screen = Screen::Roadmap;
             app.export.view = View::Network;
             app.export.formats[3] = false;
@@ -260,7 +273,25 @@ impl App {
         let rows = self.who_rows(self.selected);
         let now = self.plan.items[self.selected].who.clone();
         let at = rows.iter().position(|row| *row == now).unwrap_or(0);
-        self.form = Some(Form::Who { item: self.selected, at, share: self.plan.items[self.selected].share.unwrap_or(100) });
+        self.form = Some(Form::Who { item: self.selected, at, share: self.plan.items[self.selected].share.unwrap_or(100), typed: String::new() });
+    }
+
+    /// Enter on the People screen outside a workspace (pictures 73): makes the plan's folder a team,
+    /// with the people the plan names, and shows them across its projects at once.
+    pub fn make_team(&mut self, lanes: &dyn Fn(&Plan) -> Vec<Calendar>) {
+        let path = PathBuf::from(&self.path);
+        let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+        let named: Vec<(String, Option<String>)> = crate::people::crew_of(self).workspace.people.iter().map(|person| (person.name.clone(), person.team.clone())).collect();
+        if let Err(err) = pchart_store::make_team(&dir, &named) {
+            self.message = Some(err.to_string());
+            return;
+        }
+        if let Some(crew) = pchart_store::crew(&path, &self.plan, &self.schedule, self.today, lanes) {
+            self.message = Some(format!("{} is a team now", crew.name));
+            self.join(crew);
+            self.root = pchart_store::workspace(&dir).map(|(root, _)| root);
+            self.refresh_reports();
+        }
     }
 
     /// The plan file's name, as reports name it.
@@ -605,6 +636,14 @@ impl App {
 
     /// `↑↓` on the Export screen.
     pub fn export_part(&mut self, step: isize) {
+        if self.export.part == Part::View {
+            let views = View::of(&self.plan);
+            let at = views.iter().position(|&view| view == self.export.view).unwrap_or(0) as isize + step;
+            if (0..views.len() as isize).contains(&at) {
+                self.export.view = views[at as usize];
+                return;
+            }
+        }
         let parts = [Part::View, Part::Audience, Part::Format];
         let at = parts.iter().position(|&part| part == self.export.part).unwrap_or(0) as isize;
         self.export.part = parts[(at + step).rem_euclid(parts.len() as isize) as usize];
@@ -639,18 +678,43 @@ impl App {
         self.analysis = self.analysed(&plan, &schedule);
         self.plan = plan;
         self.schedule = schedule;
+        self.selected = self.selected.min(self.plan.items.len().saturating_sub(1));
         self.unsaved = true;
     }
 
     /// Makes `edit`, keeps the plan before it for `u`, and marks the plan to be written.
     pub fn apply(&mut self, edit: &Edit, label: String) -> Result<(), String> {
         let plan = edit.apply(&self.plan).map_err(|err| err.to_string())?;
+        self.calendars = self.calendars_for(&plan);
         let schedule = pchart_core::schedule(&plan, &self.calendars, self.today).map_err(|err| err.to_string())?;
         let before = self.plan.clone();
         self.take(plan, schedule);
         self.history.push((before, label));
         self.message = None;
         Ok(())
+    }
+
+    /// The calendars of the lanes of `plan`: a lane added in pChart has no place, so no holidays.
+    pub fn calendars_for(&self, plan: &Plan) -> Vec<Calendar> {
+        let mut calendars = self.calendars.clone();
+        calendars.resize_with(plan.lanes.len().max(calendars.len()), Calendar::default);
+        calendars
+    }
+
+    /// Someone new named in `p` (pictures 72): in a workspace they join its people, in `team`.
+    fn welcome(&mut self, name: &str, team: Option<String>) {
+        let (Some(root), Some(crew)) = (self.root.clone(), self.crew.as_ref()) else { return };
+        if crew.workspace.person(name).is_some() {
+            return;
+        }
+        if let Err(err) = pchart_store::add_person(&root, name, team.as_deref()) {
+            self.message = Some(format!("{name} is in the plan but not in workspace.toml: {err}"));
+            return;
+        }
+        if let Some(mut crew) = self.crew.take() {
+            crew.workspace.people.push(pchart_core::people::Person { name: name.to_string(), team, capacity: None, away: Vec::new() });
+            self.join(crew);
+        }
     }
 
     /// Goes back to the plan before the last change.
@@ -677,6 +741,7 @@ impl App {
     /// Makes `edits` as one change, which `u` takes back at once.
     pub fn apply_all(&mut self, edits: &[Edit], label: String) -> Result<(), String> {
         let plan = pchart_core::apply_all(&self.plan, edits).map_err(|(_, err)| err.to_string())?;
+        self.calendars = self.calendars_for(&plan);
         let schedule = pchart_core::schedule(&plan, &self.calendars, self.today).map_err(|err| err.to_string())?;
         let before = self.plan.clone();
         self.take(plan, schedule);
@@ -685,11 +750,15 @@ impl App {
         Ok(())
     }
 
-    /// `a` on the roadmap: adds an item after the selected one, in its lane.
+    /// `a` on the roadmap: adds an item after the selected one, in its lane; before it when it is the
+    /// milestone the plan ends with.
     pub fn start_add(&mut self) {
         let lane = self.plan.lane(&self.plan.items[self.selected].lane).unwrap_or(0);
         let length = if self.dated() { "5" } else { "" };
-        self.form = Some(Form::Add(Adding { from: self.selected, name: String::new(), milestone: false, length: length.into(), lane, place: 0, at: 0 }));
+        let id = &self.plan.items[self.selected].id;
+        let end = self.plan.items[self.selected].milestone && !self.plan.items.iter().any(|other| other.after.contains(id));
+        let place = if end { self.places(self.selected).iter().position(|(place, _)| *place == Place::Before).unwrap_or(0) } else { 0 };
+        self.form = Some(Form::Add(Adding { from: self.selected, name: String::new(), milestone: false, length: length.into(), lane, lane_name: String::new(), place, at: 0 }));
     }
 
     /// Enter in the network diagram: how long the selected item takes.
@@ -700,6 +769,16 @@ impl App {
             return;
         }
         self.form = Some(Form::Length { item: self.selected, typed: String::new() });
+    }
+
+    /// `Tab` and `Shift+Tab`: the next screen of the title bar, or the one before.
+    pub fn next_screen(&mut self, step: isize) {
+        let mut screens = vec![Screen::Situation, Screen::Roadmap, Screen::Checks, Screen::Export, Screen::People];
+        if self.crew.is_some() {
+            screens.push(Screen::Reports);
+        }
+        let at = screens.iter().position(|&screen| screen == self.screen).unwrap_or(0) as isize;
+        self.screen = screens[(at + step).rem_euclid(screens.len() as isize) as usize];
     }
 
     /// `t`: keep how the plan stands today.
@@ -753,7 +832,8 @@ impl App {
 
     /// `r` on the roadmap: renames the selected item.
     pub fn start_rename(&mut self) {
-        self.form = Some(Form::Rename { item: self.selected, typed: self.plan.items[self.selected].name.clone() });
+        let lane = self.plan.lane(&self.plan.items[self.selected].lane).map_or_else(String::new, |lane| self.plan.lanes[lane].name.clone());
+        self.form = Some(Form::Rename { item: self.selected, typed: self.plan.items[self.selected].name.clone(), lane, at: 0 });
     }
 
     /// `w` on the roadmap: what the selected item waits on, starting at the first it waits on.
@@ -838,8 +918,21 @@ impl App {
                 let id = self.plan.new_id(name);
                 let place = self.places(adding.from).get(adding.place).map_or(Place::After, |(place, _)| *place);
                 let after = if place == Place::Before { from.after.clone() } else { vec![from.id.clone()] };
-                let item = pchart_core::model::Item { id: id.clone(), lane: self.plan.lanes[adding.lane].id.clone(), name: name.to_string(), duration, after, milestone: adding.milestone, ..Default::default() };
-                let mut edits = vec![Edit::Add { item }];
+                let mut edits = Vec::new();
+                let lane = match self.plan.lanes.get(adding.lane) {
+                    Some(lane) => lane.id.clone(),
+                    None => {
+                        let lane_name = adding.lane_name.trim();
+                        if lane_name.is_empty() {
+                            return Err("Name the new lane".into());
+                        }
+                        let lane = self.plan.new_lane_id(lane_name);
+                        edits.push(Edit::AddLane { lane: lane.clone(), name: lane_name.to_string() });
+                        lane
+                    }
+                };
+                let item = pchart_core::model::Item { id: id.clone(), lane, name: name.to_string(), duration, after, milestone: adding.milestone, ..Default::default() };
+                edits.push(Edit::Add { item });
                 match place {
                     Place::Between => {
                         for other in self.plan.items.iter().filter(|other| other.after.contains(&from.id)) {
@@ -857,13 +950,23 @@ impl App {
                 }
                 Ok((edits, format!("added {name}")))
             }
-            Form::Rename { item, typed } => {
-                let name = typed.trim();
+            Form::Rename { item, typed, lane, .. } => {
+                let (name, lane_name) = (typed.trim(), lane.trim());
                 if name.is_empty() {
                     return Err("Type a name".into());
                 }
+                if lane_name.is_empty() {
+                    return Err("Name the lane".into());
+                }
                 let old = &self.plan.items[*item];
-                Ok((if name == old.name { Vec::new() } else { vec![Edit::Rename { item: old.id.clone(), name: name.to_string() }] }, format!("{} renamed", old.name)))
+                let mut edits = Vec::new();
+                if name != old.name {
+                    edits.push(Edit::Rename { item: old.id.clone(), name: name.to_string() });
+                }
+                if let Some(at) = self.plan.lane(&old.lane).filter(|&at| self.plan.lanes[at].name != lane_name) {
+                    edits.push(Edit::RenameLane { lane: self.plan.lanes[at].id.clone(), name: lane_name.to_string() });
+                }
+                Ok((edits, format!("{} renamed", old.name)))
             }
             Form::WaitsOn { item, on, .. } => {
                 let it = &self.plan.items[*item];
@@ -884,9 +987,14 @@ impl App {
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
             Form::Report { .. } | Form::Snapshot { .. } => Ok((Vec::new(), String::new())),
-            Form::Who { item, at, share } => {
+            Form::Who { item, at, share, typed } => {
                 let it = &self.plan.items[*item];
-                let who = self.who_rows(*item).get(*at).cloned().flatten();
+                let rows = self.who_rows(*item);
+                let who = match rows.get(*at) {
+                    Some(row) => row.clone(),
+                    None if typed.trim().is_empty() => return Err("Type a name".into()),
+                    None => Some(typed.trim().to_string()),
+                };
                 let mut edits = Vec::new();
                 if who != it.who {
                     edits.push(Edit::Who { item: it.id.clone(), who: who.clone() });
@@ -904,12 +1012,13 @@ impl App {
     pub fn form_move(&mut self, step: isize) {
         let count = match &self.form {
             Some(Form::Add(_)) => 5,
+            Some(Form::Rename { .. }) => 2,
             Some(Form::WaitsOn { item, .. }) => self.waits_order(*item).len(),
-            Some(Form::Who { item, .. }) => self.who_rows(*item).len(),
+            Some(Form::Who { item, .. }) => self.who_rows(*item).len() + 1,
             Some(Form::Report { .. }) => 4,
             _ => return,
         };
-        if let Some(Form::Add(Adding { at, .. }) | Form::WaitsOn { at, .. } | Form::Who { at, .. } | Form::Report { at, .. }) = self.form.as_mut() {
+        if let Some(Form::Add(Adding { at, .. }) | Form::Rename { at, .. } | Form::WaitsOn { at, .. } | Form::Who { at, .. } | Form::Report { at, .. }) = self.form.as_mut() {
             *at = (*at as isize + step).rem_euclid(count.max(1) as isize) as usize;
         }
     }
@@ -937,7 +1046,7 @@ impl App {
         if let Some(Form::Add(adding)) = self.form.as_mut() {
             match adding.at {
                 1 => adding.milestone ^= true,
-                3 => adding.lane = (adding.lane as isize + step).rem_euclid(lanes) as usize,
+                3 => adding.lane = (adding.lane as isize + step).rem_euclid(lanes + 1) as usize,
                 4 => adding.place = (adding.place as isize + step).rem_euclid(places) as usize,
                 _ => {}
             }
@@ -951,9 +1060,19 @@ impl App {
             Some(Form::WaitsOn { item, .. }) => self.waits_order(*item),
             _ => Vec::new(),
         };
+        let (lanes, people) = (self.plan.lanes.len(), match &self.form {
+            Some(Form::Who { item, .. }) => self.who_rows(*item).len(),
+            _ => 0,
+        });
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => adding.name.push(c),
             Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
+            Some(Form::Add(adding)) if adding.at == 3 && adding.lane == lanes => adding.lane_name.push(c),
+            Some(Form::Rename { lane, at: 1, .. }) => lane.push(c),
+            Some(Form::Who { at, typed, .. }) => {
+                *at = people;
+                typed.push(c);
+            }
             Some(Form::Rename { typed, .. } | Form::Length { typed, .. } | Form::Snapshot { typed }) => typed.push(c),
             Some(Form::Report { days, at: 1, .. }) => days.push(c),
             Some(Form::Report { comment, at: 2, .. }) => comment.push(c),
@@ -971,6 +1090,9 @@ impl App {
         match self.form.as_mut() {
             Some(Form::Add(adding)) if adding.at == 0 => drop(adding.name.pop()),
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
+            Some(Form::Add(adding)) if adding.at == 3 => drop(adding.lane_name.pop()),
+            Some(Form::Rename { lane, at: 1, .. }) => drop(lane.pop()),
+            Some(Form::Who { typed, .. }) => drop(typed.pop()),
             Some(Form::Rename { typed, .. } | Form::Length { typed, .. } | Form::Snapshot { typed }) => drop(typed.pop()),
             Some(Form::Report { days, at: 1, .. }) => drop(days.pop()),
             Some(Form::Report { comment, at: 2, .. }) => drop(comment.pop()),
@@ -1027,8 +1149,15 @@ impl App {
                     _ => None,
                 };
                 let undated = !self.dated();
+                let newcomer = match &self.form {
+                    Some(Form::Who { item, at, typed, .. }) if *at >= self.who_rows(*item).len() => Some((typed.trim().to_string(), self.plan.lane(&self.plan.items[*item].lane).map(|lane| self.plan.lanes[lane].name.clone()))),
+                    _ => None,
+                };
                 match self.apply_all(&edits, label) {
                     Ok(()) => {
+                        if let Some((name, team)) = newcomer {
+                            self.welcome(&name, team);
+                        }
                         if undated && self.dated() {
                             self.message = Some("Every piece of work has a length now".into());
                         }
