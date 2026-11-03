@@ -498,7 +498,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
         Screen::Roadmap if !app.dated() && app.form.is_none() => vec![("↑↓←→", "item"), ("Enter", "length"), ("a", "add"), ("w", "waits on"), ("r", "rename"), ("x", "remove"), ("?", "help")],
         Screen::Roadmap if app.form.is_some() && matches!(app.form, Some(Form::Length { .. })) => vec![("Enter", "keep the length"), ("Esc", "keep as it is")],
         Screen::Situation | Screen::Checks if !app.dated() => vec![("2", "how it is built"), ("?", "help")],
-        Screen::Situation if app.since().is_some() => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("c", "what changed"), ("?", "help")],
+        Screen::Situation if app.since().is_some() => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("c", "what changed"), ("F5", "present"), ("?", "help")],
         Screen::Situation => vec![("↑↓", "choose"), ("Enter", "show in roadmap"), ("F5", "present"), ("?", "help")],
         Screen::Roadmap if app.question.is_some() => vec![("↑↓", "choose"), ("Enter", "apply"), ("Tab", "try as what-if"), ("Esc", "keep as it is")],
         Screen::Roadmap if app.form.is_some() => match &app.form {
@@ -2179,7 +2179,7 @@ mod tests {
     #[test]
     fn f5_presents_the_situation_one_statement_a_screen() {
         let mut app = app();
-        assert!(has(&screen(&app, 170, 50).0, "F5 present"));
+        assert!(has(&screen(&app, 170, 50).0, "F5 present") && has(&screen(&snapshotted(), 170, 50).0, "F5 present"));
         let found = crate::actions::find(&app, "present in a meeting");
         assert_eq!(found.first().map(|found| found.0), Some(crate::actions::Action::Present));
         crate::actions::Action::Present.run(&mut app, None, "");
