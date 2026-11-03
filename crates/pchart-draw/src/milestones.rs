@@ -15,8 +15,12 @@ pub fn milestones(plan: &Plan, schedule: &Schedule, today: Date, audience: Audie
     page.months(&axis, ty - 4.0, ty - 22.0, HEIGHT - 90.0, 15.0);
     page.line(X0, ty + 6.0, X1, ty + 6.0, MID, 1.5);
 
-    for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
-        chevron(&mut page, axis.x(from), axis.xe(to), ty + 34.0, 52.0, &name, phase.short.as_deref(), SHADES[index % SHADES.len()]);
+    let phases = schedule.phases(plan);
+    let rows = Schedule::phase_rows(&phases);
+    let count = rows.iter().max().map_or(1, |row| row + 1) as f32;
+    let h = (52.0 - 4.0 * (count - 1.0)) / count;
+    for (index, (((name, from, to), phase), row)) in phases.into_iter().zip(&plan.phases).zip(rows).enumerate() {
+        chevron(&mut page, axis.x(from), axis.xe(to), ty + 34.0 + (h + 4.0) * row as f32, h, &name, phase.short.as_deref(), SHADES[index % SHADES.len()]);
     }
 
     let my = ty + 214.0;

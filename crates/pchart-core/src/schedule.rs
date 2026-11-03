@@ -54,18 +54,58 @@ impl Schedule {
         self.room
     }
 
-    /// Each phase from its first item to the item that ends it.
+    /// Each phase from its first item to the item that ends it. A phase that would end before it starts,
+    /// because the item that ends it comes before the end of the phase before (pictures 79), starts with
+    /// the first of its own items: those the item that ends it waits on, and no earlier phase does.
     pub fn phases(&self, plan: &Plan) -> Vec<(String, Date, Date)> {
         let first_after = |day: Option<Date>| self.slots.iter().map(|slot| slot.planned.start).filter(|start| day.is_none_or(|day| *start > day)).min();
+        let before = |item: usize| {
+            let mut seen = vec![item];
+            let mut at = 0;
+            while at < seen.len() {
+                for id in &plan.items[seen[at]].after {
+                    if let Some(other) = plan.item(id).filter(|other| !seen.contains(other)) {
+                        seen.push(other);
+                    }
+                }
+                at += 1;
+            }
+            seen
+        };
         let mut from = first_after(None).unwrap_or(self.start);
+        let mut earlier: Vec<usize> = Vec::new();
         let mut out = Vec::new();
         for phase in &plan.phases {
             let Some(until) = plan.item(&phase.until) else { continue };
             let to = self.slots[until].planned.finish;
+            let own: Vec<usize> = before(until).into_iter().filter(|item| !earlier.contains(item)).collect();
+            if from > to {
+                from = own.iter().map(|&item| self.slots[item].planned.start).min().unwrap_or(to);
+            }
             out.push((phase.name.clone(), from, to));
+            earlier.extend(own);
             from = first_after(Some(to)).unwrap_or(next(to));
         }
         out
+    }
+
+    /// The row of each of `phases` when they are drawn: the first row where it does not overlap the phase
+    /// before it there, so that phases that overlap are all seen (pictures 79).
+    pub fn phase_rows(phases: &[(String, Date, Date)]) -> Vec<usize> {
+        let mut ends: Vec<Date> = Vec::new();
+        phases
+            .iter()
+            .map(|(_, from, to)| match ends.iter().position(|end| end < from) {
+                Some(row) => {
+                    ends[row] = *to;
+                    row
+                }
+                None => {
+                    ends.push(*to);
+                    ends.len() - 1
+                }
+            })
+            .collect()
     }
 }
 
@@ -362,6 +402,26 @@ milestone = true
 after = ["test", "docs"]
 on = 2026-11-16
 "#;
+
+    #[test]
+    fn phases_that_overlap_are_all_seen_in_rows_of_their_own() {
+        let mut p = crate::Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+        let calendars = vec![Calendar::default(); p.lanes.len()];
+        let s = schedule(&p, &calendars, date(2026, 10, 29)).unwrap();
+        let phases = s.phases(&p);
+        assert!(phases.windows(2).all(|pair| pair[0].2 < pair[1].1) && Schedule::phase_rows(&phases) == [0, 0, 0, 0]);
+        let ui = p.item("ui-design").unwrap();
+        (p.items[ui].on, p.items[ui].duration) = (Some(date(2026, 11, 2)), 2);
+        let s = schedule(&p, &calendars, date(2026, 10, 29)).unwrap();
+        let phases = s.phases(&p);
+        let design = &phases[1];
+        assert!(design.0 == "Design" && design.1 == date(2026, 11, 2) && design.2 < phases[0].2 && phases.iter().all(|(_, from, to)| from <= to), "{phases:?}");
+        let rows = Schedule::phase_rows(&phases);
+        assert_eq!(rows[..2], [0, 1]);
+        for (at, (_, from, _)) in phases.iter().enumerate() {
+            assert!(phases[..at].iter().zip(&rows).filter(|&(_, &row)| row == rows[at]).all(|((_, _, to), _)| to < from), "{phases:?} {rows:?}");
+        }
+    }
 
     #[test]
     fn a_calculated_milestone_takes_no_day() {

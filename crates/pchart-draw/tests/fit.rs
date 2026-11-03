@@ -2,7 +2,17 @@ use jiff::civil::date;
 use pchart_core::{Holidays, Plan, Schedule, analyse, schedule};
 use pchart_draw::{Audience, Level, Output, Palette, Settings, gantt, milestones, natural_height, now_next_later, phase_plan, roadmap, swimlanes};
 
-/// The sample, the crowded plan and the templates, each as it is, from a start date and to a target date.
+/// The sample with UI design fixed in the middle of the requirements, so that its phases overlap
+/// (pictures 79).
+fn overlapping() -> Plan {
+    let mut plan = Plan::parse(include_str!("../../../samples/customer-portal.pchart")).unwrap();
+    let ui = plan.item("ui-design").unwrap();
+    (plan.items[ui].on, plan.items[ui].duration) = (Some(date(2026, 11, 2)), 2);
+    plan
+}
+
+/// The sample, the crowded plan and the templates, each as it is, from a start date and to a target date;
+/// and the sample with overlapping phases.
 fn plans() -> Vec<(Plan, Vec<pchart_core::Calendar>)> {
     let holidays = Holidays::parse(include_str!("../../../samples/holidays.tsv"));
     [
@@ -19,6 +29,7 @@ fn plans() -> Vec<(Plan, Vec<pchart_core::Calendar>)> {
         let name = plan.name.clone();
         [plan.new_plan(&name, Some(date(2026, 11, 2)), true), plan.new_plan(&name, Some(date(2027, 3, 1)), false), plan]
     })
+    .chain([overlapping()])
     .map(|plan| {
         let calendars = plan.lanes.iter().map(|lane| holidays.calendar(lane.place.as_deref())).collect();
         (plan, calendars)

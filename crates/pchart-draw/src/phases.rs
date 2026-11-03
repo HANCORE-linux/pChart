@@ -24,13 +24,19 @@ pub fn phase_plan(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
     let target = schedule.target.filter(|&target| plan.items[target].milestone);
     let gate = |phase: &pchart_core::model::Phase| plan.item(&phase.until).filter(|&index| plan.items[index].milestone && Some(index) != target);
     let mut blocks: Vec<(f32, f32, String, String)> = Vec::new();
-    for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
+    let phases = schedule.phases(plan);
+    let rows = Schedule::phase_rows(&phases);
+    let count = rows.iter().max().map_or(1, |row| row + 1) as f32;
+    let row_h = (h - 4.0 * (count - 1.0)) / count;
+    let middle = |row: usize| top + (row_h + 4.0) * row as f32 + row_h / 2.0;
+    let gate_rows: Vec<(usize, usize)> = plan.phases.iter().zip(&rows).filter_map(|(phase, &row)| gate(phase).map(|index| (index, row))).collect();
+    for (index, (((name, from, to), phase), &row)) in phases.into_iter().zip(&plan.phases).zip(&rows).enumerate() {
         let (x0, x1) = (axis.x(from), axis.xe(to));
-        let tip = page.chevron(x0, x1, top, h, SHADES[index % SHADES.len()], 12.0);
+        let tip = page.chevron(x0, x1, top + (row_h + 4.0) * row as f32, row_h, SHADES[index % SHADES.len()], 12.0);
         let right = x1 - if gate(phase).is_some() { 14.0 } else { 0.0 };
         let length = weeks(from, to);
         if sans_width(&length, 16.0, false) <= right - x0 - tip - 8.0 {
-            page.text((x0 + tip + right) / 2.0, yc + 6.0, &length, 16.0, INK, false, Anchor::Middle, None);
+            page.text((x0 + tip + right) / 2.0, middle(row) + 6.0, &length, 16.0, INK, false, Anchor::Middle, None);
         }
         let dates = format!("{} – {}", from.strftime("%d %b"), to.strftime("%d %b"));
         blocks.push(((x0 + x1) / 2.0 + tip / 2.0, sans_width(&name, 18.0, true).max(sans_width(&dates, 14.5, false)), name, dates));
@@ -62,12 +68,12 @@ pub fn phase_plan(plan: &Plan, schedule: &Schedule, today: Date) -> Scene {
             INK
         }
     };
-    for &index in &gates {
+    for &(index, row) in &gate_rows {
         let (x, color) = (axis.milestone(plan, schedule, index), if schedule.slots[index].spare < 0 { LATE } else { FIXED });
         if plan.items[index].important {
-            page.star(x, yc, 13.0, color, Some((PAPER, 2.5)), Some(index));
+            page.star(x, middle(row), 13.0, color, Some((PAPER, 2.5)), Some(index));
         } else {
-            page.diamond(x, yc, 11.0, color, Some((PAPER, 2.5)), Some(index));
+            page.diamond(x, middle(row), 11.0, color, Some((PAPER, 2.5)), Some(index));
         }
     }
     let bounds = [X0, top + h, X1, HEIGHT - 70.0];

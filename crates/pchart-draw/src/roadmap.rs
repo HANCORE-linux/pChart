@@ -365,6 +365,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
     };
     let within = |index: usize| cut.is_none() || (schedule.slots[index].planned.start <= end && schedule.slots[index].planned.finish >= start);
     let top = 26.0 * u;
+    let phase_band = (19.0 * u + 2.0) * Schedule::phase_rows(&schedule.phases(plan)).into_iter().max().unwrap_or(0) as f32;
     let x0 = if settings.width >= 1000.0 * u { 220.0 * u } else { 140.0 * u };
     let x1 = settings.width - 8.0 * u;
     let px = (x1 - x0) / (days(start, end) + 1) as f32;
@@ -377,7 +378,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         rows: vec![0; plan.items.len()],
         chain: schedule.chain.iter().copied().collect(),
         why: false,
-        g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u, unit: LANE * u },
+        g: Grid { start, end, top, x0, x1, px, tops: vec![top + 64.0 * u + phase_band; plan.lanes.len() + 1], bar: 40.0 * u, pitch: LANE * ROW * u, unit: LANE * u },
         p: settings.palette,
         u,
         width: settings.width,
@@ -393,7 +394,7 @@ fn chart<'a>(plan: &'a Plan, schedule: &'a Schedule, settings: &Settings, height
         let rows = (0..plan.items.len()).filter(|&index| lane_of[index] == lane && within(index)).map(|index| c.rows[index] + 1).max().unwrap_or(1);
         1.0 + ROW * (rows - 1) as f32
     };
-    let rows_y = top + 64.0 * u;
+    let rows_y = top + 64.0 * u + phase_band;
     let mut unit = LANE * u;
     if let Some(height) = height {
         let available = height - rows_y - 22.0 * u;
@@ -503,8 +504,9 @@ fn frame(s: &mut Scene, c: &Chart, calendars: &[Calendar]) {
     }
     s.add(Shape::Line { x1: g.x0, y1: top + 40.0 * u, x2: g.x1, y2: top + 40.0 * u, stroke: c.rule(p.rule, 1.0 / u) });
 
-    for (name, from, to) in c.schedule.phases(c.plan).into_iter().filter(|(_, from, to)| *to >= g.start && *from <= end) {
-        chevron(s, &p, u, g.x(from.max(g.start)), g.x(to.min(end)) + g.px, top + 44.0 * u, 18.0 * u, &name);
+    let phases = c.schedule.phases(c.plan);
+    for ((name, from, to), row) in phases.iter().zip(Schedule::phase_rows(&phases)).filter(|((_, from, to), _)| *to >= g.start && *from <= end) {
+        chevron(s, &p, u, g.x((*from).max(g.start)), g.x((*to).min(end)) + g.px, top + 44.0 * u + (19.0 * u + 2.0) * row as f32, 18.0 * u, name);
     }
     s.add(text(12.0 * u, top + 58.0 * u, "Phases".into(), 14.0, p.muted));
 

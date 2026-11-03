@@ -39,7 +39,10 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     let extents: Vec<(usize, f32, f32, bool)> = (0..plan.items.len()).map(|index| (lanes[index], ends(index).0, ends(index).1, plan.items[index].milestone)).collect();
     let row = rows(&extents, 7.0);
     let lane_lines: Vec<Vec<String>> = plan.lanes.iter().map(|lane| wrap(&lane.name, 14.0, false, label_w)).collect();
-    let mut tops = vec![ROWS_Y];
+    let phases = schedule.phases(plan);
+    let phase_rows = Schedule::phase_rows(&phases);
+    let band = 22.0 * phase_rows.iter().max().copied().unwrap_or(0) as f32;
+    let mut tops = vec![ROWS_Y + band];
     for lane in 0..plan.lanes.len() {
         let count = (0..plan.items.len()).filter(|&index| lanes[index] == lane).map(|index| row[index] + 1).max().unwrap_or(1);
         tops.push(tops[lane] + (LANE * (1.0 + ROW * (count - 1) as f32)).max(LANE + 17.0 * (lane_lines[lane].len() - 1) as f32));
@@ -53,12 +56,13 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
     page.line(X0, 152.0, X1, 152.0, MID, 1.2);
 
     page.text(X0, PHASES_Y + 13.0, "Phases", 12.0, GRAY, false, Anchor::Start, None);
-    for (index, ((name, from, to), phase)) in schedule.phases(plan).into_iter().zip(&plan.phases).enumerate() {
+    for (index, (((name, from, to), phase), row)) in phases.into_iter().zip(&plan.phases).zip(phase_rows).enumerate() {
         let (x0, x1) = (axis.x(from), axis.xe(to));
-        let tip = page.chevron(x0, x1, PHASES_Y, 18.0, SHADES[index % SHADES.len()], 7.0);
+        let y = PHASES_Y + 22.0 * row as f32;
+        let tip = page.chevron(x0, x1, y, 18.0, SHADES[index % SHADES.len()], 7.0);
         let Some((lines, size, middle)) = arrow_label(&name, phase.short.as_deref(), x0, x1, 18.0, tip, 12.0, 10.0) else { continue };
         let pitch = size * 1.2;
-        let first = PHASES_Y + 9.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
+        let first = y + 9.0 + size * 0.36 - pitch * (lines.len() - 1) as f32 / 2.0;
         for (line, text) in lines.iter().enumerate() {
             page.text(middle, first + pitch * line as f32, text, size, INK, false, Anchor::Middle, None);
         }
@@ -72,7 +76,7 @@ pub fn swimlanes(plan: &Plan, schedule: &Schedule, today: Date, checks: &[Check]
         page.text(X0, tops[index] + 38.0 + 17.0 * (lines.len() - 1) as f32, &fit(&place(index), 12.0, false, label_w), 12.0, GRAY, false, Anchor::Start, None);
     }
     if let Some(target) = schedule.target {
-        page.vline(axis.milestone(plan, schedule, target), PHASES_Y + 22.0, bottom, FIXED, 1.0, Some((4.0, 4.0)), Some(target));
+        page.vline(axis.milestone(plan, schedule, target), PHASES_Y + 22.0 + band, bottom, FIXED, 1.0, Some((4.0, 4.0)), Some(target));
     }
     let xt = axis.x(today);
     page.vline(xt, 152.0, bottom, GRAY, 1.2, None, None);
