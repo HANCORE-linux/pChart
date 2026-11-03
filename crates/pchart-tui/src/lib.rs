@@ -95,6 +95,9 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
             app.unsaved = false;
             let _ = save.send(app.plan.clone());
         }
+        if app.quit {
+            break Ok(());
+        }
         if let Ok(err) = failures.try_recv() {
             app.message = Some(err);
         }
@@ -215,8 +218,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 }
             }
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.present.is_some() => match key.code {
-                KeyCode::Char('q') => break Ok(()),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
+                KeyCode::Char('q') if app.may_quit() => break Ok(()),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && app.may_quit() => break Ok(()),
                 KeyCode::Esc | KeyCode::F(5) => app.present = None,
                 KeyCode::Char(' ') => present::toggle_details(&mut app, terminal.size().map_or(0, |size| size.width)),
                 KeyCode::Up | KeyCode::Down => present::choose(&mut app, if key.code == KeyCode::Up { -1 } else { 1 }),
@@ -241,8 +244,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 _ => {}
             },
             Ok(Event::Key(key)) if key.kind != KeyEventKind::Release && app.before.is_some() => match key.code {
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break Ok(()),
-                KeyCode::Char('q') => break Ok(()),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) && app.may_quit() => break Ok(()),
+                KeyCode::Char('q') if app.may_quit() => break Ok(()),
                 KeyCode::Enter => app.keep(),
                 KeyCode::Esc => app.discard(),
                 KeyCode::Left if app.level != pchart_draw::Level::Overview => app.try_length(-1),

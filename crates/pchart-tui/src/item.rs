@@ -132,6 +132,14 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
             bits::runs(s, left, top + 64.0 * u, 15.0 * u, &[(&fit(&words, 15.0 * u, room), p.dim, false)]);
             return;
         }
+        Form::Leave => {
+            let changes = app.changes().join(", ");
+            head(app, s, x, y, width, height, u, "QUIT · WHAT-IF NOT KEPT", &fit(&format!("Keep {changes} before you quit?"), 25.0 * u, room));
+            let stand = app.analysis.verdict.as_ref().map(|verdict| pchart_core::text::stand(&app.plan, verdict)).unwrap_or_default();
+            bits::runs(s, left, top + 20.0 * u, 16.6 * u, &[(&fit(&format!("With it: {stand}"), 16.6 * u, room), p.ink, false)]);
+            bits::runs(s, left, top + 50.0 * u, 15.0 * u, &[(&fit("Discarding leaves the plan as it was saved.", 15.0 * u, room), p.dim, false)]);
+            return;
+        }
         Form::Snapshot { typed } => {
             head(app, s, x, y, width, height, u, &format!("SNAPSHOT · {}", pchart_core::text::day(app.today).to_uppercase()), "Keep how the plan stands today?");
             field(s, left, top, room, typed, true, u, p.ink, p.bright);

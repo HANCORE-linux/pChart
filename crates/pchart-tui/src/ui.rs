@@ -505,6 +505,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
             Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
             Some(Form::Rename { .. }) => vec![("↑↓", "name or lane"), ("Enter", "rename"), ("Esc", "keep as it is")],
             Some(Form::Snapshot { .. }) => vec![("Enter", "keep it"), ("Esc", "not now")],
+            Some(Form::Leave) => vec![("Enter", "keep and quit"), ("Esc", "discard and quit"), ("←→", "keep changing")],
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
             Some(Form::Who { .. }) => vec![("↑↓", "person"), ("←→", "share"), ("Enter", "choose"), ("Esc", "keep as it is")],
@@ -773,6 +774,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let h = l.chart.height.min(match app.form {
                 Some(Form::Rename { .. }) => 12,
                 Some(Form::Snapshot { .. }) => 11,
+                Some(Form::Leave) => 10,
                 Some(Form::Remove { item }) => match app.removal(item) {
                     Ok((_, words)) => (255.0 + 28.0 * words.len().max(1) as f32) / 21.0,
                     Err(_) => 8.0,
@@ -1125,6 +1127,11 @@ mod tests {
         kept.start_snapshot();
         "Steering committee".chars().for_each(|c| kept.form_type(c));
         look(&mut kept, "snapshot dialog");
+        kept.form = None;
+        kept.screen = Screen::Roadmap;
+        (0..12).for_each(|_| kept.try_length(1));
+        assert!(!kept.may_quit());
+        look(&mut kept, "quit with a what-if");
         for view in pchart_draw::View::ALL {
             let mut app = app();
             app.screen = Screen::Export;
@@ -2250,5 +2257,34 @@ mod tests {
             app.screen = shown;
             assert!(has(&screen(&app, 200, 50).0, "o projects"), "{shown:?}");
         }
+    }
+
+    #[test]
+    fn q_asks_before_a_what_if_that_is_not_kept_is_lost() {
+        let mut app = app();
+        assert!(app.may_quit(), "without a what-if q quits at once");
+        app.screen = Screen::Roadmap;
+        app.selected = app.plan.item("frontend").unwrap();
+        let length = app.plan.items[app.selected].duration;
+        (0..3).for_each(|_| app.try_length(1));
+        app.present = Some(2);
+        assert!(!app.may_quit() && app.present.is_none() && app.screen == Screen::Roadmap && matches!(app.form, Some(Form::Leave)));
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("QUIT · WHAT-IF NOT KEPT") && svg.contains("Keep Frontend +3 wd before you quit?") && has(&rows, "Enter keep and quit") && has(&rows, "Esc discard and quit"), "{rows:?}");
+
+        app.form_change(1);
+        assert!(app.form.is_none() && app.before.is_some() && !app.quit, "the arrows go back to the what-if");
+        assert!(!app.may_quit());
+        app.close_form();
+        assert!(app.quit && app.before.is_none() && app.plan.items[app.selected].duration == length, "Esc discards and quits");
+
+        let mut kept = self::app();
+        kept.screen = Screen::Roadmap;
+        kept.selected = kept.plan.item("frontend").unwrap();
+        (0..3).for_each(|_| kept.try_length(1));
+        assert!(!kept.may_quit());
+        kept.keep_form();
+        assert!(kept.quit && kept.before.is_none() && kept.unsaved && kept.plan.items[kept.selected].duration == length + 3, "Enter keeps and quits");
     }
 }

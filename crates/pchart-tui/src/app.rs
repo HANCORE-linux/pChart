@@ -124,6 +124,8 @@ pub enum Form {
     Report { item: usize, status: usize, days: String, comment: String, by: usize, at: usize, answering: Option<PathBuf> },
     /// Keeping how the plan stands today (pictures 67), with a name as typed, which may stay empty.
     Snapshot { typed: String },
+    /// `q` while a what-if is not kept (pictures 78): keep it and quit, or discard it and quit.
+    Leave,
 }
 
 pub use pchart_core::people::Crew;
@@ -204,6 +206,8 @@ pub struct App {
     pub root: Option<PathBuf>,
     /// Present mode (pictures 74): the slide shown, by its place in `present::SLIDES`.
     pub present: Option<usize>,
+    /// The answer to the question of `Form::Leave`: quit now.
+    pub quit: bool,
     /// In present mode, the entry of the slide `↑↓` is on, and whether Space shows its details.
     pub present_at: usize,
     pub present_details: bool,
@@ -220,7 +224,7 @@ impl App {
     pub fn new(plan: Plan, calendars: Vec<Calendar>, today: Date, path: String, schedule: Schedule, cell: (u16, u16)) -> App {
         let selected = plan.item("frontend").or_else(|| schedule.chain.iter().copied().find(|&index| !plan.items[index].milestone)).unwrap_or(0);
         let analysis = analyse(&plan, &calendars, &schedule, today);
-        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, compare: false, to_start: false, shown: std::cell::Cell::new(None), crew: None, person: 0, week: 0, root: None, present: None, present_at: 0, present_details: false, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
+        let mut app = App { plan, calendars, today, path, schedule, analysis, screen: Screen::Situation, statement: 0, check: 0, export: Export::default(), selected, level: Level::Standard, cell, message: None, palette: Palette::labra(), ground: false, history: Vec::new(), unsaved: false, question: None, notes: None, before: None, help: false, finder: None, form: None, side: false, why: false, compare: false, to_start: false, shown: std::cell::Cell::new(None), crew: None, person: 0, week: 0, root: None, present: None, quit: false, present_at: 0, present_details: false, reports: Vec::new(), report: 0, me: None, taken: Vec::new() };
         if !app.dated() || app.plan.items.iter().all(|item| item.milestone) {
             app.screen = Screen::Roadmap;
             app.export.view = View::Network;
@@ -440,6 +444,10 @@ impl App {
     pub fn close_form(&mut self) {
         if matches!(self.form, Some(Form::Report { answering: Some(_), .. })) {
             self.screen = Screen::Reports;
+        }
+        if matches!(self.form, Some(Form::Leave)) {
+            self.discard();
+            self.quit = true;
         }
         self.form = None;
     }
@@ -986,7 +994,7 @@ impl App {
                 let days = pchart_core::input::length(typed).filter(|&days| days > 0).ok_or("Type a length, such as 5 or 2w")?;
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
-            Form::Report { .. } | Form::Snapshot { .. } => Ok((Vec::new(), String::new())),
+            Form::Report { .. } | Form::Snapshot { .. } | Form::Leave => Ok((Vec::new(), String::new())),
             Form::Who { item, at, share, typed } => {
                 let it = &self.plan.items[*item];
                 let rows = self.who_rows(*item);
@@ -1025,6 +1033,10 @@ impl App {
 
     /// `←→` in the add dialog: work or a milestone, the lane, or where it goes.
     pub fn form_change(&mut self, step: isize) {
+        if matches!(self.form, Some(Form::Leave)) {
+            self.form = None;
+            return;
+        }
         if let Some(Form::Who { share, .. }) = self.form.as_mut() {
             *share = (*share as isize + step * 10).clamp(10, 100) as u32;
             return;
@@ -1111,6 +1123,12 @@ impl App {
 
     /// Enter in a dialog: makes its changes as one and closes it, or says what is missing.
     pub fn keep_form(&mut self) {
+        if matches!(self.form, Some(Form::Leave)) {
+            self.form = None;
+            self.keep();
+            self.quit = true;
+            return;
+        }
         if let Some(Form::Snapshot { typed }) = &self.form {
             let name = Some(typed.trim().to_string()).filter(|name| !name.is_empty());
             let snapshot = pchart_core::snapshot::Snapshot::take(&self.plan, &self.schedule, self.today, name);
@@ -1282,6 +1300,17 @@ impl App {
     }
 
     /// Esc in a what-if: back to the plan as it was.
+    /// `q` or Ctrl+C: true when pChart may quit now; a what-if that is not kept asks first.
+    pub fn may_quit(&mut self) -> bool {
+        if self.before.is_none() || self.changes().is_empty() {
+            return true;
+        }
+        self.present = None;
+        self.screen = Screen::Roadmap;
+        self.form = Some(Form::Leave);
+        false
+    }
+
     pub fn discard(&mut self) {
         if let Some(before) = self.before.take() {
             self.plan = before.plan;
