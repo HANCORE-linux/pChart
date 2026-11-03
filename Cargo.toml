@@ -1,0 +1,32 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.12"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+pchart-core = { path = "crates/pchart-core" }
+pchart-store = { path = "crates/pchart-store" }
+pchart-draw = { path = "crates/pchart-draw" }
+pchart-tui = { path = "crates/pchart-tui" }
+jiff = "0.2.38"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8"
+flate2 = "1.1.10"
+ttf-parser = "0.25.1"
+resvg = { version = "=0.47.0", default-features = false, features = ["text"] }
+krilla = "0.8.2"
+krilla-svg = "0.8.1"
+ratatui = "0.30.2"
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
+image = { version = "0.25.6", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+debug = false

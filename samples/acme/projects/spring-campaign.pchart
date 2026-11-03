@@ -1,0 +1,144 @@
+format = 1
+name = "Spring campaign"
+
+[[phases]]
+name = "Plan"
+until = "plan-approved"
+
+[[phases]]
+name = "Prepare"
+until = "ready"
+
+[[phases]]
+name = "Launch"
+until = "launch"
+
+[[lanes]]
+id = "product"
+name = "Product"
+
+[[lanes]]
+id = "marketing"
+name = "Marketing"
+
+[[lanes]]
+id = "sales"
+name = "Sales"
+
+[[lanes]]
+id = "support"
+name = "Support"
+
+[[lanes]]
+id = "legal"
+name = "Legal"
+
+[[items]]
+id = "positioning"
+lane = "product"
+name = "Positioning"
+duration = "5wd"
+who = "Jonas Weber"
+share = 30
+
+[[items]]
+id = "pricing"
+lane = "product"
+name = "Pricing"
+duration = "5wd"
+after = ["positioning"]
+who = "Jonas Weber"
+share = 30
+
+[[items]]
+id = "launch-plan"
+lane = "marketing"
+name = "Launch plan"
+duration = "5wd"
+after = ["positioning"]
+
+[[items]]
+id = "plan-approved"
+lane = "product"
+name = "Launch plan approved"
+milestone = true
+after = ["pricing", "launch-plan"]
+
+[[items]]
+id = "legal-review"
+lane = "legal"
+name = "Legal review"
+duration = "10wd"
+after = ["plan-approved"]
+
+[[items]]
+id = "product-page"
+lane = "marketing"
+name = "Product page"
+duration = "10wd"
+after = ["plan-approved"]
+
+[[items]]
+id = "campaign"
+lane = "marketing"
+name = "Campaign"
+duration = "15wd"
+after = ["plan-approved"]
+
+[[items]]
+id = "press-kit"
+lane = "marketing"
+name = "Press kit"
+duration = "5wd"
+after = ["product-page"]
+
+[[items]]
+id = "sales-material"
+lane = "sales"
+name = "Sales material"
+duration = "8wd"
+after = ["plan-approved"]
+
+[[items]]
+id = "sales-training"
+lane = "sales"
+name = "Sales training"
+duration = "5wd"
+after = ["sales-material"]
+
+[[items]]
+id = "help-articles"
+lane = "support"
+name = "Help articles"
+duration = "10wd"
+after = ["plan-approved"]
+
+[[items]]
+id = "support-training"
+lane = "support"
+name = "Support training"
+duration = "3wd"
+after = ["help-articles"]
+
+[[items]]
+id = "ready"
+lane = "product"
+name = "Ready to launch"
+milestone = true
+after = ["legal-review", "campaign", "press-kit", "sales-training", "support-training"]
+
+[[items]]
+id = "buffer"
+lane = "product"
+name = "Buffer"
+duration = "5wd"
+buffer = true
+after = ["ready"]
+
+[[items]]
+id = "launch"
+lane = "product"
+name = "Launch"
+milestone = true
+after = ["buffer"]
+on = 2026-12-16

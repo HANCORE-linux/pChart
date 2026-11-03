@@ -1,0 +1,12 @@
+format = 1
+name = "Empty plan"
+
+[[lanes]]
+id = "team"
+name = "Team"
+
+[[items]]
+id = "target"
+lane = "team"
+name = "Target"
+milestone = true

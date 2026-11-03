@@ -1,0 +1,172 @@
+format = 1
+name = "Website relaunch"
+
+[[phases]]
+name = "Discovery"
+until = "concept-approved"
+
+[[phases]]
+name = "Design"
+until = "design-approved"
+
+[[phases]]
+name = "Build"
+until = "content-freeze"
+
+[[phases]]
+name = "Launch"
+until = "acceptance"
+
+[[lanes]]
+id = "content"
+name = "Content"
+
+[[lanes]]
+id = "design"
+name = "Design"
+
+[[lanes]]
+id = "web"
+name = "Development"
+
+[[lanes]]
+id = "seo"
+name = "SEO & analytics"
+
+[[lanes]]
+id = "client"
+name = "Client"
+
+[[items]]
+id = "goals"
+lane = "client"
+name = "Goals workshop"
+duration = "3wd"
+
+[[items]]
+id = "audit"
+lane = "content"
+name = "Content audit"
+duration = "5wd"
+
+[[items]]
+id = "sitemap"
+lane = "content"
+name = "Sitemap"
+duration = "3wd"
+after = ["goals", "audit"]
+
+[[items]]
+id = "wireframes"
+lane = "design"
+name = "Wireframes"
+duration = "8wd"
+after = ["sitemap"]
+who = "Mia Klein"
+share = 80
+
+[[items]]
+id = "concept-approved"
+lane = "client"
+name = "Concept approved"
+milestone = true
+after = ["wireframes"]
+
+[[items]]
+id = "visual-design"
+lane = "design"
+name = "Visual design"
+duration = "10wd"
+after = ["concept-approved"]
+who = "Lena Vogel"
+share = 50
+
+[[items]]
+id = "design-approved"
+lane = "client"
+name = "Design approved"
+milestone = true
+after = ["visual-design"]
+
+[[items]]
+id = "cms-setup"
+lane = "web"
+name = "CMS setup"
+duration = "5wd"
+after = ["concept-approved"]
+who = "Tom Becker"
+share = 40
+
+[[items]]
+id = "copywriting"
+lane = "content"
+name = "Copywriting"
+duration = "15wd"
+after = ["concept-approved"]
+
+[[items]]
+id = "templates"
+lane = "web"
+name = "Page templates"
+duration = "15wd"
+after = ["design-approved", "cms-setup"]
+who = "Arjun Rao"
+share = 60
+
+[[items]]
+id = "migration"
+lane = "content"
+name = "Content migration"
+duration = "10wd"
+after = ["templates", "copywriting"]
+
+[[items]]
+id = "redirects"
+lane = "seo"
+name = "Redirects"
+duration = "4wd"
+after = ["templates"]
+
+[[items]]
+id = "analytics"
+lane = "seo"
+name = "Analytics and tracking"
+duration = "3wd"
+after = ["templates"]
+
+[[items]]
+id = "content-freeze"
+lane = "content"
+name = "Content freeze"
+milestone = true
+after = ["migration"]
+
+[[items]]
+id = "testing"
+lane = "web"
+name = "Testing"
+duration = "5wd"
+after = ["content-freeze", "redirects", "analytics"]
+
+[[items]]
+id = "acceptance"
+lane = "client"
+name = "Acceptance"
+milestone = true
+after = ["testing"]
+
+[[items]]
+id = "buffer"
+lane = "client"
+name = "Buffer"
+duration = "5wd"
+buffer = true
+after = ["acceptance"]
+
+[[items]]
+id = "go-live"
+lane = "client"
+name = "Go-live"
+milestone = true
+after = ["buffer"]
+on = 2027-01-15

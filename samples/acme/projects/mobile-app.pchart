@@ -1,0 +1,147 @@
+format = 1
+name = "Mobile app"
+
+[[phases]]
+name = "Requirements"
+until = "requirements-fixed"
+
+[[phases]]
+name = "Design"
+until = "design-sign-off"
+
+[[phases]]
+name = "Development"
+until = "feature-freeze"
+
+[[phases]]
+name = "Beta & acceptance"
+until = "acceptance"
+
+[[lanes]]
+id = "product"
+name = "Product"
+
+[[lanes]]
+id = "design"
+name = "Design/UX"
+
+[[lanes]]
+id = "backend"
+name = "Backend/API"
+
+[[lanes]]
+id = "frontend"
+name = "Frontend"
+
+[[lanes]]
+id = "payment"
+name = "Payment SDK"
+
+[[lanes]]
+id = "qa"
+name = "Test/QA"
+
+[[lanes]]
+id = "client"
+name = "Client"
+
+[[items]]
+id = "requirements"
+lane = "product"
+name = "Requirements"
+
+[[items]]
+id = "requirements-fixed"
+lane = "product"
+name = "Requirements fixed"
+milestone = true
+after = ["requirements"]
+
+[[items]]
+id = "ux-concept"
+lane = "design"
+name = "UX concept"
+after = ["requirements-fixed"]
+
+[[items]]
+id = "ui-design"
+lane = "design"
+name = "UI design"
+after = ["ux-concept"]
+
+[[items]]
+id = "design-sign-off"
+lane = "client"
+name = "Design sign-off"
+milestone = true
+after = ["ui-design"]
+
+[[items]]
+id = "data-model"
+lane = "backend"
+name = "Data model"
+after = ["requirements-fixed"]
+
+[[items]]
+id = "api"
+lane = "backend"
+name = "API"
+after = ["data-model"]
+
+[[items]]
+id = "frontend"
+lane = "frontend"
+name = "Frontend"
+after = ["design-sign-off"]
+
+[[items]]
+id = "sdk-integration"
+lane = "payment"
+name = "SDK integration"
+after = ["data-model"]
+
+[[items]]
+id = "integration"
+lane = "frontend"
+name = "Integration"
+after = ["api", "frontend", "sdk-integration"]
+
+[[items]]
+id = "feature-freeze"
+lane = "frontend"
+name = "Feature freeze"
+milestone = true
+after = ["integration"]
+
+[[items]]
+id = "beta-test"
+lane = "qa"
+name = "Beta test"
+after = ["feature-freeze"]
+
+[[items]]
+id = "security-review"
+lane = "backend"
+name = "Security review"
+after = ["feature-freeze"]
+
+[[items]]
+id = "acceptance"
+lane = "client"
+name = "Acceptance"
+milestone = true
+after = ["beta-test", "security-review"]
+
+[[items]]
+id = "buffer"
+lane = "client"
+name = "Buffer"
+buffer = true
+after = ["acceptance"]
+
+[[items]]
+id = "launch"
+lane = "client"
+name = "Launch"
+milestone = true
+after = ["buffer"]

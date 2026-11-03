@@ -1,0 +1,830 @@
+.TH PCHART 1 2026-11-03 pchart "User Commands"
+.SH NAME
+pchart \- project charts in the terminal that check themselves
+.SH SYNOPSIS
+.B pchart
+.RI [ PLAN ]
+.RB [ \-\-theme
+.IR NAME ]
+.br
+.B pchart
+.I COMMAND PLAN
+.RI [ ARGUMENTS ]
+.RB [ \-\-json ]
+.RB [ \-\-dry\-run ]
+.RB [ \-\-today
+.IR DATE ]
+.RB [ \-\-holidays
+.IR FILE ]
+.br
+.B pchart help
+.RB [ \-\-json ]
+.SH DESCRIPTION
+.B pchart
+plans projects as roadmaps, Gantt charts and milestone charts, in the terminal, and checks them while
+you change them.
+It answers three questions first: does the date hold, who waits on whom, and what is next.
+.PP
+A plan is one text file, the plan file, usually ending in
+.IR .pchart .
+It is the only source of truth: every picture, PDF, SVG and Markdown file pChart writes is output
+and can be made again from it.
+pChart saves every change at once and
+.B u
+takes it back.
+It never moves a fixed date on its own and never changes a plan behind your back; it warns instead.
+.PP
+pChart speaks plainly: the chain that
+.I decides the date
+instead of the critical path, what an item has
+.I to spare
+instead of float, and what it
+.I waits on
+instead of its dependencies.
+.PP
+Without
+.I PLAN
+pChart starts: it offers the templates for a new plan, the plans opened before and, in a workspace,
+the projects of the team.
+With a
+.I COMMAND
+it answers on the command line, for people and for agents; with
+.B \-\-json
+every answer is machine\-readable.
+.SH SCREENS
+The screens sit as tabs in the title bar.
+.TP
+.B Start
+The templates (New application, Website relaunch, Product launch, Empty plan), the plans opened
+before, and in a workspace its projects with how each stands, a preview of the chosen one and what
+to look at in it.
+.TP
+.B 1 Situation
+Where the plan stands: the verdict on the target date and how many working days it has to spare,
+what changed since the last snapshot, what is next, and the chain that decides the date.
+.TP
+.B 2 Roadmap
+The swimlane roadmap: a lane for each team, the phases above, milestones in the theme's accent,
+and the chain that decides the date.
+It has three levels, Overview, Standard and Full.
+Here the plan is changed.
+Before every piece of work has a length, this screen is the network of what waits on what instead.
+.TP
+.B 3 Checks
+Problems, warnings and hints, by weight, each with what it means and what to do.
+.TP
+.B 4 Export
+A view for others, its audience and its formats; the preview is exactly the file.
+.TP
+.B 5 People
+How full each team and each person is, week by week across the projects of the workspace.
+Outside a workspace it shows the people the plan names.
+.TP
+.B 6 Reports
+In a workspace: what the team reports about the plan, and what taking a report would do.
+.TP
+.B Present mode
+The situation for a meeting, one statement a screen and large: where we stand, the chain that
+decides the date, who waits on whom, what is next, and the roadmap at the Overview level.
+.SH KEYS
+.SS Everywhere
+.TP
+.B 1\(en6
+Situation, Roadmap, Checks, Export, People, Reports.
+.TP
+.B Tab
+The next screen;
+.B Shift+Tab
+the one before.
+.TP
+.B ?
+Explain this screen: what it answers, its keys and its symbols.
+.TP
+.B Ctrl+P
+Find any action by typing what you want, such as
+.I move launch
+or
+.IR pdf .
+.TP
+.B o
+The projects of the workspace, a new plan or another one.
+.TP
+.B F5
+Present the situation in a meeting.
+.TP
+.B u
+Undo the last change.
+.TP
+.B q
+Quit; every change is saved already.
+.PP
+When a window is too narrow for every key hint, the hints first use shorter words, and then
+.B ? all keys
+says that there are more.
+.SS Situation
+.TP
+.B \(ua\(da
+Choose a step of
+.IR Next .
+.TP
+.B Enter
+Show it in the roadmap.
+.TP
+.B c
+What changed since the last snapshot, on the roadmap.
+.TP
+.B t
+Keep a snapshot of how the plan stands today.
+.SS Roadmap
+.TP
+.B \(ua\(da
+Choose an item; at the Overview level a lane.
+.TP
+.B \(<-\(->
+Try the item longer or shorter, as a what\-if;
+.B Enter
+keeps it,
+.B Esc
+discards it.
+.B q
+while it is not kept asks first whether to keep it.
+.TP
+.B Enter
+Change when it starts: after what it waits on, on a fixed date, no earlier than or no later than a
+date.
+.TP
+.B y
+Why this date: the items that set it.
+.TP
+.B a
+Add work or a milestone after the item, or before the milestone the plan ends with.
+.TP
+.B r
+Rename the item and its lane.
+.TP
+.B w
+Choose what the item waits on.
+.TP
+.B x
+Remove the item.
+.TP
+.B p
+Choose who does it and the share of their time it takes; or type the name of someone new.
+.TP
+.B s
+Report how it is going, in a workspace.
+.TP
+.B Space
+Show or hide the details beside the roadmap; they need 150 columns.
+.TP
+.B n
+Add notes to items and to days of a lane;
+.B i
+marks a milestone important.
+.TP
+.B t
+Keep a snapshot.
+.TP
+.B c
+Show the roadmap with the dates of the last snapshot dashed.
+.TP
+.B d
+Overview, Standard or Full.
+.SS Network
+Before every piece of work has a length, the second screen shows how the plan is built.
+.TP
+.B \(ua\(da\(<-\(->
+Choose an item.
+.TP
+.B Enter
+Give it a length.
+.TP
+.B a
+Add an item after it.
+.TP
+.B r
+Rename it.
+.TP
+.B w
+Choose what it waits on.
+.TP
+.B x
+Remove it.
+.SS Checks
+.TP
+.B \(ua\(da
+Choose a check.
+.TP
+.B Enter
+Show it in the roadmap.
+.TP
+.B b
+Add the buffer a missing one asks for.
+.SS Export
+.TP
+.B \(ua\(da
+The view, the audience or the formats.
+.TP
+.B \(<-\(->
+Change it.
+.TP
+.B Space
+Switch a format on or off.
+.TP
+.B Enter
+Write the files to
+.I export/
+next to the plan.
+.TP
+.B Esc
+Back to the situation.
+.SS People
+.TP
+.B \(ua\(da
+Choose a person; teams are headings with their sum for each week.
+.TP
+.B \(<-\(->
+Choose a week.
+.TP
+.B Enter
+Outside a workspace: make the plan's folder a team, with the people the plan names.
+.SS Reports
+.TP
+.B \(ua\(da
+Choose a report.
+.TP
+.B Enter
+Take it into the plan, as one change that
+.B u
+takes back.
+.TP
+.B e
+Change it first, then take it.
+.TP
+.B x
+Decline it; the plan stays as it is.
+.SS Present mode
+.TP
+.B \(<-\(->
+The slide before or after; also
+.BR "Page Up" ,
+.BR "Page Down" ,
+.B Home
+and
+.BR End .
+.TP
+.B \(ua\(da
+Choose an entry of the slide: a step, a handoff or a piece of work.
+.TP
+.B Space
+Show or hide its details.
+.TP
+.B Esc
+Back to pChart;
+.B F5
+too.
+.SH COMMANDS
+Items and lanes are named by their ids in the plan file.
+Dates are
+.IR YYYY\-MM\-DD .
+.TP
+.BR "pchart " [ \fIPLAN\fR ] " " [ \-\-theme " \fINAME\fR]"
+Open the plan in the terminal, in the colours of the current Omarchy theme, which it follows while it
+changes, or in Labra without Omarchy.
+.B \-\-theme
+takes a theme by name instead, such as
+.I labra
+or
+.IR harbor .
+Without
+.I PLAN
+it starts: a new plan from a template, written to this folder, or a plan opened before.
+.TP
+.BI "pchart new " PLAN " \-\-template " ID " \fR[\fB\-\-name \fINAME\fR] [\fB\-\-target \fIDATE \fR| \fB\-\-start \fIDATE \fR| \fB\-\-no\-dates\fR]"
+Write a new plan from a template:
+.IR new\-application ,
+.IR website\-relaunch ,
+.I product\-launch
+or
+.IR empty .
+.B \-\-target
+puts the date on its last milestone and plans backwards from it,
+.B \-\-start
+plans forwards from it; without either it starts today.
+.B \-\-no\-dates
+keeps only how it is built: the work without lengths, so the plan has no dates until each has one.
+Never writes over a file.
+.TP
+.B pchart list
+The projects of the workspace pChart runs in, each with how it stands, and the people to look at:
+over their capacity, or away during their work.
+.TP
+.BI "pchart report " "PLAN ITEM " "\fR(\fB\-\-done \fR| \fB\-\-on\-track \fR| \fB\-\-risk \fR| \fB\-\-later \fIDAYS\fR) [\fB\-\-comment \fITEXT\fR] [\fB\-\-by \fINAME\fR]"
+Say how a piece of work stands, for the project lead: done, on track, at risk, or needing
+.I DAYS
+working days more.
+It goes to the workspace's
+.I reports/
+folder as a file of its own; the plan stays as it is until the project lead takes it.
+.B \-\-by
+names who reports, else
+.BR PCHART_NAME .
+.TP
+.BI "pchart reports " PLAN
+The reports about the plan, newest first: who says what, whether it is answered, and what taking it
+would do.
+.TP
+.BI "pchart snapshot " PLAN " \fR[\fB\-\-name \fINAME\fR]"
+Keep how the plan stands today at the end of the plan file: what the chain has to spare and the dates
+of every item.
+.TP
+.BI "pchart diff " PLAN " \fR[\fB\-\-since \fIDATE\fR]"
+What changed since the last snapshot, or the last one up to
+.IR DATE :
+what the chain has to spare, work that got longer or shorter, new and removed items, moved
+milestones.
+It counts what changed in the plan, not the days that passed.
+.TP
+.BI "pchart situation " PLAN
+Where the plan stands: does the date hold, who waits on whom, what is next.
+.TP
+.BI "pchart why " "PLAN ITEM"
+The chain of items that sets the date of
+.IR ITEM .
+.TP
+.BI "pchart waits " PLAN
+Every lane that waits on another lane, and for what.
+.TP
+.BI "pchart next " PLAN
+What is due next, most urgent first.
+.TP
+.BI "pchart check " PLAN
+Problems, warnings and hints.
+Exit status 1 on warnings, 2 when a fixed date cannot be held.
+.TP
+.BI "pchart schedule " PLAN
+Every calculated date, with what each item has to spare.
+.TP
+.BI "pchart holidays " "PLAN LANE"
+The days off of a lane while the plan runs.
+.TP
+.BI "pchart set " "PLAN ITEM " "\fR[\fIoptions\fR]"
+Change an item:
+.BI \-\-duration " DAYS" ,
+.BI \-\-on " DATE" ,
+.BI \-\-no\-earlier\-than " DATE" ,
+.BI \-\-no\-later\-than " DATE"
+or
+.BR \-\-calculated ,
+.B \-\-done
+or
+.BR \-\-not\-done ,
+.B \-\-buffer
+or
+.BR \-\-no\-buffer ,
+.B \-\-important
+or
+.BR \-\-not\-important ,
+.BI \-\-name " NAME" ,
+.BI \-\-lane " LANE" ,
+.BI \-\-who " WHO" ,
+.BI \-\-share " PERCENT"
+(1 to 100, else all of their time; it counts only for how busy they are, never for dates) and
+.BI \-\-note " TEXT" .
+.TP
+.BI "pchart add " "PLAN ID " "\-\-lane " "LANE " "\-\-name " NAME " \fR([\fB\-\-duration \fIDAYS\fR] [\fB\-\-buffer\fR] | \fB\-\-milestone\fR) [\fB\-\-after \fIID,ID\fR] [\fB\-\-on \fIDATE\fR] [\fB\-\-who \fIWHO\fR]"
+Add an item.
+Work without
+.B \-\-duration
+has no length yet; the plan has no dates until every piece of work has one.
+.TP
+.BI "pchart remove " "PLAN ITEM"
+Remove an item that nothing waits on.
+.TP
+.BI "pchart link " "PLAN FROM TO"
+Let
+.I TO
+wait on
+.IR FROM .
+.TP
+.BI "pchart unlink " "PLAN FROM TO"
+.I TO
+no longer waits on
+.IR FROM .
+.TP
+.BI "pchart apply " "PLAN EDITS.json"
+Apply a JSON list of edits, all of them or none.
+.B \-
+reads the list from standard input.
+See
+.BR EDITS .
+.TP
+.BI "pchart export " PLAN " \fR[\fIoptions\fR]"
+A view as pictures and PDF.
+.B \-\-view
+is
+.I roadmap
+(the default),
+.IR milestones ,
+.IR gantt ,
+.IR phases ,
+.IR now\-next\-later ,
+or, for how the plan is built without dates,
+.IR structure ,
+.I network
+and
+.IR matrix .
+The roadmap is dark like the terminal, at a
+.B \-\-level
+.RI ( overview ,
+.I standard
+or
+.IR full )
+and a
+.B \-\-size
+.IR WxH ,
+or a light 16:9 page with
+.BR "\-\-style light" ;
+the other views are light pages.
+.BI \-\-svg " FILE" ,
+.BI \-\-png " FILE"
+and
+.BI \-\-pdf " FILE"
+write the files.
+.BI \-\-md " FILE"
+writes the plan as Markdown with the milestone chart as SVG next to it;
+.BI \-\-dot " FILE"
+as a Graphviz file, lanes as clusters and the deciding chain in bold.
+.B \-\-audience
+leaves out what the audience does not see:
+.I management
+sees no warnings, the
+.I client
+no warnings and not what single items have to spare;
+.I agents
+get the item ids in Markdown.
+The default is
+.IR team ,
+which sees everything.
+.TP
+.BI "pchart bench " PLAN " \-\-frames " N " \-\-out " FILE
+Inside a terminal: change an item
+.I N
+times and time every step, from the change to the picture in the terminal.
+.TP
+.BR "pchart help " [ \-\-json ]
+Every command, option, exit code and edit; with
+.B \-\-json
+for programs.
+.SH OPTIONS
+.TP
+.B \-\-json
+Machine\-readable output, with
+.B """schema"": 1"
+in it.
+.TP
+.B \-\-dry\-run
+With a change: show what would happen and write nothing.
+.TP
+.BI \-\-today " DATE"
+Calculate from this day instead of today, so results repeat.
+.TP
+.BI \-\-holidays " FILE"
+Holiday data instead of the bundled data: lines of
+.IR REGION <TAB> YYYY\-MM\-DD <TAB> Name .
+.TP
+.BI \-\-theme " NAME"
+With the screen: a theme by name instead of the current Omarchy theme.
+.SH EDITS
+.B pchart apply
+takes a JSON list of edits and makes them as one change, all or none.
+Each edit is an object with an
+.B op
+and its fields:
+.TP
+.B duration
+{"op": "duration", "item": ID, "days": N}
+.TP
+.B fix
+{"op": "fix", "item": ID, "kind": "on" | "no_earlier_than" | "no_later_than", "date": "YYYY\-MM\-DD"}
+.TP
+.B unfix
+{"op": "unfix", "item": ID}
+.TP
+.B link
+{"op": "link", "from": ID, "to": ID}
+.TP
+.B unlink
+{"op": "unlink", "from": ID, "to": ID}
+.TP
+.B add
+{"op": "add", "item": {"id": ID, "lane": LANE, "name": NAME, "duration": "5wd" | "milestone": true, "after": [ID]}}
+.TP
+.B remove
+{"op": "remove", "item": ID}
+.TP
+.B rename
+{"op": "rename", "item": ID, "name": NAME}
+.TP
+.B lane
+{"op": "lane", "item": ID, "lane": LANE}
+.TP
+.B done
+{"op": "done", "item": ID, "done": true}
+.TP
+.B buffer
+{"op": "buffer", "item": ID, "buffer": true}
+.TP
+.B who
+{"op": "who", "item": ID, "who": NAME | null}
+.TP
+.B share
+{"op": "share", "item": ID, "share": PERCENT | null}
+.TP
+.B note
+{"op": "note", "item": ID, "note": TEXT | null}
+.TP
+.B important
+{"op": "important", "item": MILESTONE, "important": true}
+.TP
+.B note_at
+{"op": "note_at", "lane": LANE, "date": "YYYY\-MM\-DD", "note": TEXT | null}
+.TP
+.B phase
+{"op": "phase", "phase": NAME, "until": ID}
+.TP
+.B add_lane
+{"op": "add_lane", "lane": ID, "name": NAME}
+.TP
+.B rename_lane
+{"op": "rename_lane", "lane": LANE, "name": NAME}
+.SH THE PLAN FILE
+A plan file is TOML.
+It starts with
+.B format
+and
+.BR name ,
+and may name a
+.B start
+date.
+.TP
+.B [[lanes]]
+A row of the roadmap, usually a team:
+.BR id ,
+.BR name ,
+and optionally the
+.B place
+whose holidays it keeps (a country such as
+.I CN
+or a subdivision such as
+.IR DE\-BE )
+and the
+.B city
+shown beside it.
+.TP
+.B [[items]]
+A piece of work or a milestone:
+.BR id ,
+.BR lane ,
+.BR name ,
+.B duration
+in working days
+.RI ( 25wd )
+or weeks
+.RI ( 3w ),
+.B after
+(the ids it waits on),
+.BR milestone ,
+a fixed date
+.BR on ,
+.B no_earlier_than
+or
+.BR no_later_than ,
+.B buffer
+(time held back before a fixed date),
+.BR done ,
+.B important
+(a milestone drawn as a star),
+.B who
+does it, the
+.B share
+of their time it takes, and a
+.BR note .
+.TP
+.B [[phases]]
+A phase of the plan:
+.BR name ,
+the item it ends with,
+.BR until ,
+and a
+.B short
+name for when the whole one does not fit.
+.TP
+.B [[notes]]
+A note at a day of a lane:
+.BR lane ,
+.B date
+and
+.BR text .
+It stays on its day when the plan moves.
+.TP
+.B [[snapshots]]
+How the plan stood on a day, kept by
+.B t
+or
+.BR "pchart snapshot" .
+A plan with snapshots is format 2, so that an older pChart refuses it instead of dropping them.
+.PP
+A short plan:
+.PP
+.RS
+.nf
+format = 1
+name = "Customer portal v1"
+
+[[lanes]]
+id = "product"
+name = "Product"
+place = "DE\-BE"
+city = "Berlin"
+
+[[items]]
+id = "requirements"
+lane = "product"
+name = "Requirements"
+duration = "10wd"
+
+[[items]]
+id = "launch"
+lane = "product"
+name = "Launch"
+milestone = true
+after = ["requirements"]
+on = 2027\-03\-01
+.fi
+.RE
+.SH WORKSPACE
+A folder with a
+.I workspace.toml
+is a workspace, a team: its people are shared by all its projects, so the checks look at them across
+the projects.
+Its projects are the plans next to
+.I workspace.toml
+and in its
+.I projects/
+folder.
+Enter on the People screen of a plan outside a workspace makes the plan's folder one.
+.PP
+.I workspace.toml
+names
+.BR name ,
+.B lead
+(who answers reports; without one everyone may),
+.B teams
+as
+.BR "[{ name, city }]" ,
+and
+.B people
+as
+.BR "[{ name, team, capacity, away = [{ from, to }] }]" ,
+where
+.B capacity
+is how much of their time they can work on projects in percent, else all of it, and
+.B away
+the days they are not there.
+A person belongs to the team whose name their
+.B team
+matches, as a lane name does.
+.PP
+.RS
+.nf
+name = "Acme"
+lead = "Jonas Weber"
+teams = [{ name = "Frontend", city = "Bangalore" }]
+people = [
+  { name = "Priya Nair", team = "Frontend", capacity = 80, away = [{ from = 2027\-01\-04, to = 2027\-01\-08 }] },
+]
+.fi
+.RE
+.PP
+Reports are files of their own in
+.IR reports/ ,
+so no two people write the same file.
+The folder reaches the others however the team shares the workspace, such as Syncthing, Git or
+Nextcloud; pChart has no network code.
+.SH HOLIDAYS
+Each lane keeps the holidays of its
+.BR place .
+The holidays of every country and subdivision python\-holidays knows, 2006 to 2051, are built into
+pChart;
+.B \-\-holidays
+takes other data, and
+.B pchart holidays
+lists the days off of a lane.
+.SH THEMES
+pChart draws in the colours of the current Omarchy theme and follows it while it changes, at most
+once a second.
+Without Omarchy it draws in Labra.
+.B \-\-theme
+takes one of the themes it ships by name.
+.SH ENVIRONMENT
+.TP
+.B PCHART_NAME
+Who uses pChart on this computer, as the people of a workspace name them: who reports, and whether
+they may answer reports.
+.TP
+.B PCHART_TRACE
+A file the screen writes every wake\-up to: picture requests, finished pictures, events.
+.TP
+.B XDG_STATE_HOME
+Where pChart keeps the plans opened before, else
+.IR ~/.local/state .
+.TP
+.B XDG_CONFIG_HOME
+Where pChart looks for
+.IR pchart/name ,
+else
+.IR ~/.config .
+.SH FILES
+.TP
+.I ~/.local/state/pchart/recent
+The plans opened before.
+.TP
+.I ~/.config/pchart/name
+Its first line names who uses pChart here, when
+.B PCHART_NAME
+does not.
+.TP
+.I export/
+Next to a plan: the files written from the Export screen.
+.TP
+.IR workspace.toml ", " reports/
+The workspace and its reports.
+.SH EXIT STATUS
+.TP
+.B 0
+Fine.
+.TP
+.B 1
+.B check
+found warnings.
+.TP
+.B 2
+.B check
+found that a fixed date cannot be held.
+.TP
+.B 3
+A usage error, or an edit that cannot be made.
+.TP
+.B 4
+A file error.
+.SH TERMINALS
+pChart draws pictures in the terminal: kitty, Ghostty and foot.
+It needs kitty graphics or sixel; other terminals are not supported.
+.SH EXAMPLES
+A new plan whose launch is fixed on 1 March, opened at once:
+.PP
+.RS
+.nf
+pchart new portal.pchart \-\-template new\-application \-\-target 2027\-03\-01
+pchart portal.pchart
+.fi
+.RE
+.PP
+Where it stands, and why the launch is where it is:
+.PP
+.RS
+.nf
+pchart situation portal.pchart
+pchart why portal.pchart launch
+.fi
+.RE
+.PP
+What a longer frontend would do, without writing it, then for real:
+.PP
+.RS
+.nf
+pchart set portal.pchart frontend \-\-duration 30 \-\-dry\-run
+pchart set portal.pchart frontend \-\-duration 30
+.fi
+.RE
+.PP
+The milestone chart for management, as PDF:
+.PP
+.RS
+.nf
+pchart export portal.pchart \-\-view milestones \-\-audience management \-\-pdf milestones.pdf
+.fi
+.RE
+.PP
+In a workspace, a report for the project lead:
+.PP
+.RS
+.nf
+pchart report projects/portal.pchart frontend \-\-later 3 \-\-comment "The API changed" \-\-by "Priya Nair"
+.fi
+.RE
+.SH SEE ALSO
+The README of pChart, and its plan,
+.IR docs/PLAN.md ,
+which records every decision about how pChart works and looks.

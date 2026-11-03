@@ -1,0 +1,44 @@
+# Maintainer: HANCORE
+
+pkgname=pchart
+pkgver=0.1.12
+pkgrel=2
+pkgdesc='Project charts in the terminal that check themselves'
+arch=('x86_64' 'aarch64')
+license=('MIT' 'OFL-1.1')
+depends=('glibc' 'libgcc')
+makedepends=('cargo')
+optdepends=(
+  'foot: pictures in the terminal (sixel)'
+  'ghostty: pictures in the terminal (kitty graphics)'
+  'kitty: pictures in the terminal (kitty graphics)'
+)
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  make install DESTDIR="$pkgdir" PREFIX=/usr
+}

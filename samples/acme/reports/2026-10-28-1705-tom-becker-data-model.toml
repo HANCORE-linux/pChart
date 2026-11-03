@@ -1,0 +1,6 @@
+project = "customer-portal.pchart"
+item = "data-model"
+by = "Tom Becker"
+at = 2026-10-28T17:05:00
+status = "risk"
+comment = "The schema review with the client moved to next week"
