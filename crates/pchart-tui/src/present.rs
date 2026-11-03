@@ -98,10 +98,37 @@ pub fn draw(app: &App, frame: &mut Frame, inks: &Inks, area: Rect, slide: usize,
     match slide {
         0 => match &app.analysis.verdict {
             Some(verdict) => {
-                let k = big(8);
-                let rect = middle((8.0 * k).round() as u16);
-                let (w, h) = pixels(app, rect);
-                placements.push(Placement { rect, svg: situation::verdict(&app.plan, verdict, w, h, u * k, &p).svg(), paper: false });
+                let since = app.since();
+                let said: Vec<String> = since.as_ref().map(|(_, changes)| changes.iter().map(|change| pchart_core::snapshot::words(&app.plan, change)).collect()).unwrap_or_default();
+                let lines = match &since {
+                    Some(_) => said.len().clamp(1, 3) + 1 + usize::from(said.len() > 3),
+                    None => 0,
+                };
+                let k = scale(inner, 8 + (lines as f32 * 1.6).ceil() as u16);
+                let line_h = (1.6 * k).round().max(1.0) as u16;
+                let rect = middle((8.0 * k).round() as u16 + line_h * lines as u16);
+                let verdict_rect = Rect { height: (8.0 * k).round() as u16, ..rect };
+                let (w, h) = pixels(app, verdict_rect);
+                placements.push(Placement { rect: verdict_rect, svg: situation::verdict(&app.plan, verdict, w, h, u * k, &p).svg(), paper: false });
+                if let Some((snapshot, _)) = &since {
+                    let indent = ((74.0 * u * k) / f32::from(app.cell.0)).round() as u16;
+                    let longest = said.iter().take(3).map(|line| line.chars().count()).max().unwrap_or(0).max(30) as f32;
+                    let room = f32::from(inner.width.saturating_sub(indent + 1)) * f32::from(app.cell.0);
+                    let k = k.min(room / (u * (16.6 * pchart_draw::style::ADVANCE * longest + 4.0))).max(1.0);
+                    let mut rows: Vec<(String, pchart_draw::scene::Color, bool)> = vec![(format!("Since {}", snapshot.title()), p.dim, false)];
+                    if said.is_empty() {
+                        rows.push(("nothing has moved".into(), p.ink, false));
+                    }
+                    rows.extend(said.iter().take(3).enumerate().map(|(at, line)| (line.clone(), if at == 0 { p.bright } else { p.ink }, at == 0)));
+                    if said.len() > 3 {
+                        rows.push((format!("and {} more · c shows them on the roadmap", said.len() - 3), p.dim, false));
+                    }
+                    for (at, (text, color, strong)) in rows.into_iter().enumerate() {
+                        let line_rect = Rect { x: inner.x + indent, y: verdict_rect.y + verdict_rect.height + line_h * at as u16, width: inner.width.saturating_sub(indent), height: line_h };
+                        let (w, h) = pixels(app, line_rect);
+                        placements.push(Placement { rect: line_rect, svg: pchart_draw::bits::line(&[(None, text, color, strong)], w, h, u * k, &p).svg(), paper: false });
+                    }
+                }
             }
             None => {
                 let end = app.schedule.slots.iter().map(|slot| slot.planned.finish).max().unwrap_or(app.today);

@@ -1114,6 +1114,11 @@ mod tests {
             look(&mut app, &format!("since {shown:?}"));
         }
         let mut kept = snapshotted();
+        kept.present = Some(0);
+        look(&mut kept, "present since");
+        kept.present_details = true;
+        look(&mut kept, "present since with details");
+        let mut kept = snapshotted();
         kept.toggle_compare();
         kept.selected = kept.plan.item("frontend").unwrap();
         look(&mut kept, "compared");
@@ -2218,6 +2223,12 @@ mod tests {
         assert_eq!((app.present, app.present_at), (Some(4), 0));
         crate::present::choose(&mut app, 2);
         assert!(has(&screen(&app, 170, 50).0, &format!(":: DETAILS · {}", app.plan.items[2].name.to_uppercase())));
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(!svg.contains("Since "));
+        let mut kept = snapshotted();
+        kept.present = Some(0);
+        let svg: String = screen(&kept, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("Since Kick-off · Thu 22 Oct") && svg.contains("Frontend +3 wd (22 → 25)"), "{svg}");
         app.present = Some(0);
         app.present_at = 0;
         let target = app.analysis.verdict.as_ref().unwrap().target;
