@@ -47,7 +47,7 @@ struct Help {
 }
 
 fn help(screen: Screen, dated: bool) -> Help {
-    let everywhere = [("u", "Undo the last change"), ("Ctrl+P", "Find any action by typing"), ("1–4", "Situation, Roadmap, Checks, Export"), ("Tab", "The next screen; Shift+Tab the one before"), ("o", "Start a new plan or open another"), ("q", "Quit; every change is saved already")];
+    let everywhere = [("u", "Undo the last change"), ("Ctrl+P", "Find any action by typing"), ("1–6", "The screens in the title bar"), ("Tab", "The next screen; Shift+Tab the one before"), ("o", "Start a new plan or open another"), ("q", "Quit; every change is saved already")];
     match screen {
         Screen::Roadmap if !dated => Help {
             title: "HELP · NETWORK",
@@ -241,4 +241,21 @@ pub fn draw(app: &App, frame: &mut Frame, area: Rect, placements: &mut Vec<Place
     }
     frame.render_widget(Clear, rect);
     placements.push(Placement { rect, svg: s.svg(), paper: false });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_man_page_names_every_key_the_help_names() {
+        let man = include_str!("../../../man/pchart.1").replace("\\(ua", "↑").replace("\\(da", "↓").replace("\\(<-", "←").replace("\\(->", "→").replace("\\(en", "–").replace("\\-", "-");
+        for screen in [Screen::Situation, Screen::Roadmap, Screen::Checks, Screen::Export, Screen::People, Screen::Reports] {
+            for dated in [true, false] {
+                for (key, _) in help(screen, dated).keys {
+                    assert!(man.contains(&format!(".B {key}\n")), "{screen:?} {key}");
+                }
+            }
+        }
+    }
 }

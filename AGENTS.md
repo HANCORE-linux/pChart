@@ -52,6 +52,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 - Match the surrounding code: naming, density and idiom. Do not add explanatory comments; keep the existing doc comments.
 - Read new plan file fields with `#[serde(default)]` so older files still load. A change to `format` needs a migration and a test with an old file.
 - Keep heavy work such as painting and encoding pictures off the UI thread, and measure with `pchart bench` when it changes.
+- `man/pchart.1` describes every screen, key, command, option and edit; a new one goes in there too, and the tests check that the man page names everything `pchart help` and the help screens name.
 - No text may run over the edge of its shape. `Output::crossings` checks pictures in the tests (`crates/pchart-draw/tests/fit.rs`, and the screens in `pchart-tui`); a new picture or dialog goes into those tests.
 
 ## Tools

@@ -40,6 +40,8 @@ sudo make install
 
 `make package` builds the Arch package and a pacman repository from it in `dist/repo`.
 
+`man pchart` describes every screen, key, command, edit and the plan file; before installing, `man ./man/pchart.1`.
+
 ## Terminals
 
 kitty, Ghostty and foot. Terminals without kitty graphics or sixel pictures are not supported.

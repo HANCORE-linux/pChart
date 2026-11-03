@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "pchart"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "flate2",
  "jiff",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "pchart-core"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "jiff",
  "serde",
@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "pchart-draw"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "jiff",
  "krilla",
@@ -1263,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "pchart-store"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "jiff",
  "pchart-core",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "pchart-tui"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "image",
  "jiff",

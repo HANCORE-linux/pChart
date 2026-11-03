@@ -151,6 +151,41 @@ pub fn help_json() -> serde_json::Value {
 mod tests {
     use super::*;
 
+    /// The man page as `man` shows its words: without font changes, with plain dashes.
+    fn manual() -> String {
+        include_str!("../../../man/pchart.1").replace("\\fB", "").replace("\\fI", "").replace("\\fR", "").replace("\\-", "-")
+    }
+
+    #[test]
+    fn the_man_page_names_every_command_option_edit_and_exit_code() {
+        let man = manual();
+        for command in COMMANDS.iter().filter(|command| command.name != "open") {
+            assert!(man.contains(&format!("pchart {}", command.name)), "{}", command.name);
+            for word in command.usage.split(|c: char| c.is_whitespace() || "[]()|".contains(c)).filter(|word| word.starts_with("--")) {
+                assert!(man.contains(word), "{} {word}", command.name);
+            }
+        }
+        let options = man.split(".SH OPTIONS").nth(1).unwrap().split(".SH ").next().unwrap();
+        for (option, _) in OPTIONS {
+            let flag = option.split(' ').next().unwrap();
+            assert!(options.contains(&format!(".B {flag}\n")) || options.contains(&format!(".BI {flag} ")), "{option}");
+        }
+        for flag in FLAGS {
+            assert!(man.contains(flag), "{flag}");
+        }
+        for (op, shape) in EDITS {
+            assert!(man.contains(&format!(".B {op}\n{shape}")), "{op}");
+        }
+        for (code, _) in EXIT_CODES {
+            assert!(man.contains(&format!(".TP\n.B {code}\n")), "{code}");
+        }
+        let examples: Vec<&str> = man.split(".nf\n").skip(1).map(|block| block.split("\n.fi").next().unwrap()).collect();
+        let plan = examples.iter().find(|block| block.starts_with("format = 1")).unwrap();
+        assert_eq!(pchart_core::Plan::parse(plan).unwrap().items.len(), 2);
+        let workspace = examples.iter().find(|block| block.starts_with("name = \"Acme\"")).unwrap();
+        assert_eq!(pchart_core::people::Workspace::parse(workspace).unwrap().people[0].away.len(), 1);
+    }
+
     fn parse(line: &str) -> Args {
         Args::parse(line.split_whitespace().map(str::to_string).collect()).unwrap()
     }
