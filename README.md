@@ -1,6 +1,4 @@
-<img src="assets/icon.svg" width="64" height="64" alt="">
-
-# pChart
+<h1><img src="assets/icon.svg" width="40" height="40" align="absmiddle" alt=""> pChart</h1>
 
 Project charts in the terminal that check themselves.
 
@@ -17,10 +15,12 @@ Pick a template, set the target date, and pChart schedules the rest backwards an
 
 ## Install
 
-On Arch Linux and Omarchy, from this folder:
+On Arch Linux and Omarchy:
 
 ```sh
-sudo pacman -S --needed rust make
+sudo pacman -S --needed git rust make
+git clone https://github.com/HANCORE-linux/pChart.git
+cd pChart
 make
 sudo make install
 ```
