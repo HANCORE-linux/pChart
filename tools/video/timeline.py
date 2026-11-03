@@ -18,7 +18,7 @@ KEYS = [
     (11.0, "2"), (12.6, "y"), (14.4, "down"), (15.8, "down"), (17.4, "esc"),
     (19.0, "3"), (21.4, "b"),
     (24.0, "4"), (25.4, "left"), *[(27.4 + index * 0.3, "right") for index in range(6)], (30.6, "right"),
-    (33.0, "5"), (35.0, "down"), (35.6, "down"), (36.2, "down"), *[(37.4 + index * 0.35, "right") for index in range(5)],
+    (33.0, "5"), (35.0, "down"), *[(37.4 + index * 0.35, "right") for index in range(5)],
     (42.4, "6"), (45.0, "enter"),
     (48.6, "q"),
 ]

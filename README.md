@@ -29,7 +29,7 @@ cargo build --release
 
 `pchart` alone starts a new plan: ↑↓ picks a template, the date typed is the target (or with ←→ the start), and Enter writes the plan to the current folder and opens it.
 
-1–4 switch between the situation, the roadmap, the checks and the export; ↑↓ chooses a statement, an item or a check, Enter shows it in the roadmap, d changes the detail level, Esc goes back to the situation, q quits. On the export screen ←→ changes the view or the audience, Space switches a format on or off and Enter writes the files to `export/` next to the plan.
+1–6 or Tab switch between the situation, the roadmap, the checks, the export, the people and, in a team, the reports; ↑↓ chooses a statement, an item, a check or a person, Enter shows it in the roadmap, Space shows the details of an item, d switches between overview and full, F5 presents the situation in a meeting, o goes to the projects or another plan, q quits. On the export screen ↑↓ chooses the view, the audience or the formats, ←→ changes them, Space switches a format on or off and Enter writes the files to `export/` next to the plan. Enter on the People screen makes the plan's folder a team.
 
 ## Install
 
