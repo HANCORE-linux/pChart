@@ -20,6 +20,7 @@ pub enum Action {
     Show,
     Undo,
     Snapshot,
+    Phases,
     Compare,
     Detail,
     Details,
@@ -40,7 +41,7 @@ pub type Found = (Action, Option<usize>);
 impl Action {
     fn all(app: &App) -> Vec<Action> {
         let mut all = if app.dated() {
-            vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Snapshot, Action::Compare, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
+            vec![Action::ChangeDate, Action::Why, Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::TryLength, Action::AddNote, Action::Important, Action::Undo, Action::Snapshot, Action::Phases, Action::Compare, Action::Detail, Action::Details, Action::Situation, Action::Roadmap, Action::Checks, Action::Holidays]
         } else {
             vec![Action::AddItem, Action::Rename, Action::WaitsOn, Action::Remove, Action::Undo, Action::Situation, Action::Roadmap, Action::Checks]
         };
@@ -69,6 +70,7 @@ impl Action {
             Action::AddItem => &["add", "new", "item", "task", "create", "insert", "work", "milestone"],
             Action::Rename => &["rename", "name", "call", "title"],
             Action::Snapshot => &["snapshot", "keep", "baseline", "save", "freeze", "record", "status", "today"],
+            Action::Phases => &["phase", "phases", "stage", "stages", "rename", "edit", "milestone", "gate"],
             Action::Compare => &["changed", "change", "since", "compare", "diff", "difference", "snapshot", "baseline", "before", "last"],
             Action::WaitsOn => &["waits", "wait", "depends", "dependency", "dependencies", "link", "after", "before", "predecessor"],
             Action::Remove => &["remove", "delete", "drop", "cancel"],
@@ -116,6 +118,7 @@ impl Action {
             Action::Show => item.map_or_else(String::new, |index| app.plan.items[index].name.clone()),
             Action::Undo => "Undo".into(),
             Action::Snapshot => "Keep a snapshot".into(),
+            Action::Phases => "Edit the phases".into(),
             Action::Compare if app.compare => "Stop comparing".into(),
             Action::Compare => "What changed".into(),
             Action::Details if app.side => "Hide the details".into(),
@@ -175,6 +178,7 @@ impl Action {
                 }
             }
             (Action::Snapshot, _) => format!("how the plan stands today, {}", day(app.today)),
+            (Action::Phases, _) => format!("rename them, end them elsewhere, add or remove one · {} now", app.plan.phases.len()),
             (Action::Compare, _) => app.since().map_or_else(|| "no snapshot yet; t keeps one".to_string(), |(snapshot, changes)| format!("since {} · {}", snapshot.title(), match changes.len() {
                 0 => "nothing has moved".to_string(),
                 1 => "1 change".to_string(),
@@ -250,6 +254,7 @@ impl Action {
             Action::Show => "",
             Action::Undo => "u",
             Action::Snapshot => "t",
+            Action::Phases => "e",
             Action::Compare => "c",
             Action::Details => "Space",
             Action::Detail => "d",
@@ -316,6 +321,10 @@ impl Action {
             Action::Show => roadmap(app),
             Action::Undo => app.undo(),
             Action::Snapshot => app.start_snapshot(),
+            Action::Phases => {
+                app.screen = Screen::Roadmap;
+                app.start_phases();
+            }
             Action::Compare => app.toggle_compare(),
             Action::Details => {
                 app.screen = Screen::Roadmap;

@@ -124,6 +124,9 @@ pub enum Form {
     Report { item: usize, status: usize, days: String, comment: String, by: usize, at: usize, answering: Option<PathBuf> },
     /// Keeping how the plan stands today (pictures 67), with a name as typed, which may stay empty.
     Snapshot { typed: String },
+    /// The phases (pictures 81): each with its name, the item it ends with and its short name; a new one
+    /// as typed; and the row `↑↓` is on.
+    Phases { rows: Vec<(String, usize, Option<String>)>, typed: String, at: usize },
     /// `q` while a what-if is not kept (pictures 78): keep it and quit, or discard it and quit.
     Leave,
 }
@@ -838,6 +841,42 @@ impl App {
         }
     }
 
+    /// `e` on the roadmap: the phases of the plan, to rename, end elsewhere, remove or add.
+    pub fn start_phases(&mut self) {
+        let rows = self.plan.phases.iter().filter_map(|phase| self.plan.item(&phase.until).map(|until| (phase.name.clone(), until, phase.short.clone()))).collect();
+        self.form = Some(Form::Phases { rows, typed: String::new(), at: 0 });
+    }
+
+    /// The items a phase can end with, in the order they finish.
+    pub fn phase_ends(&self) -> Vec<usize> {
+        let mut ends: Vec<usize> = (0..self.plan.items.len()).collect();
+        ends.sort_by_key(|&index| (self.schedule.slots[index].planned.finish, !self.plan.items[index].milestone));
+        ends
+    }
+
+    /// The phases the dialog would leave, in the order they end; the new one ends with the last item.
+    pub fn form_phases(&self) -> Option<Vec<pchart_core::model::Phase>> {
+        let Some(Form::Phases { rows, typed, .. }) = &self.form else { return None };
+        let ends = self.phase_ends();
+        let mut out: Vec<(usize, pchart_core::model::Phase)> = rows.iter().map(|(name, until, short)| (*until, pchart_core::model::Phase { name: name.trim().to_string(), until: self.plan.items[*until].id.clone(), short: short.clone() })).collect();
+        if !typed.trim().is_empty() {
+            let last = *ends.last()?;
+            out.push((last, pchart_core::model::Phase { name: typed.trim().to_string(), until: self.plan.items[last].id.clone(), short: None }));
+        }
+        out.sort_by_key(|(until, _)| ends.iter().position(|end| end == until));
+        Some(out.into_iter().map(|(_, phase)| phase).collect())
+    }
+
+    /// Delete in a dialog: removes the chosen phase.
+    pub fn form_delete(&mut self) {
+        if let Some(Form::Phases { rows, at, .. }) = self.form.as_mut()
+            && *at < rows.len()
+        {
+            rows.remove(*at);
+            *at = (*at).min(rows.len());
+        }
+    }
+
     /// `r` on the roadmap: renames the selected item.
     pub fn start_rename(&mut self) {
         let lane = self.plan.lane(&self.plan.items[self.selected].lane).map_or_else(String::new, |lane| self.plan.lanes[lane].name.clone());
@@ -995,6 +1034,13 @@ impl App {
                 Ok((if days == it.duration { Vec::new() } else { vec![Edit::Duration { item: it.id.clone(), days }] }, format!("{} length", it.name)))
             }
             Form::Report { .. } | Form::Snapshot { .. } | Form::Leave => Ok((Vec::new(), String::new())),
+            Form::Phases { rows, .. } => {
+                if rows.iter().any(|(name, ..)| name.trim().is_empty()) {
+                    return Err("Name every phase".into());
+                }
+                let phases = self.form_phases().unwrap_or_default();
+                Ok((if phases == self.plan.phases { Vec::new() } else { vec![Edit::Phases { phases }] }, "phases".into()))
+            }
             Form::Who { item, at, share, typed } => {
                 let it = &self.plan.items[*item];
                 let rows = self.who_rows(*item);
@@ -1021,18 +1067,27 @@ impl App {
         let count = match &self.form {
             Some(Form::Add(_)) => 5,
             Some(Form::Rename { .. }) => 2,
+            Some(Form::Phases { rows, .. }) => rows.len() + 1,
             Some(Form::WaitsOn { item, .. }) => self.waits_order(*item).len(),
             Some(Form::Who { item, .. }) => self.who_rows(*item).len() + 1,
             Some(Form::Report { .. }) => 4,
             _ => return,
         };
-        if let Some(Form::Add(Adding { at, .. }) | Form::Rename { at, .. } | Form::WaitsOn { at, .. } | Form::Who { at, .. } | Form::Report { at, .. }) = self.form.as_mut() {
+        if let Some(Form::Add(Adding { at, .. }) | Form::Rename { at, .. } | Form::Phases { at, .. } | Form::WaitsOn { at, .. } | Form::Who { at, .. } | Form::Report { at, .. }) = self.form.as_mut() {
             *at = (*at as isize + step).rem_euclid(count.max(1) as isize) as usize;
         }
     }
 
     /// `←→` in the add dialog: work or a milestone, the lane, or where it goes.
     pub fn form_change(&mut self, step: isize) {
+        let ends = self.phase_ends();
+        if let Some(Form::Phases { rows, at, .. }) = self.form.as_mut() {
+            if let Some((_, until, _)) = rows.get_mut(*at) {
+                let now = ends.iter().position(|end| end == until).unwrap_or(0) as isize;
+                *until = ends[(now + step).clamp(0, ends.len() as isize - 1) as usize];
+            }
+            return;
+        }
         if matches!(self.form, Some(Form::Leave)) {
             self.form = None;
             return;
@@ -1081,6 +1136,13 @@ impl App {
             Some(Form::Add(adding)) if adding.at == 2 => adding.length.push(c),
             Some(Form::Add(adding)) if adding.at == 3 && adding.lane == lanes => adding.lane_name.push(c),
             Some(Form::Rename { lane, at: 1, .. }) => lane.push(c),
+            Some(Form::Phases { rows, typed, at }) => match rows.get_mut(*at) {
+                Some((name, _, short)) => {
+                    name.push(c);
+                    *short = None;
+                }
+                None => typed.push(c),
+            },
             Some(Form::Who { at, typed, .. }) => {
                 *at = people;
                 typed.push(c);
@@ -1104,6 +1166,13 @@ impl App {
             Some(Form::Add(adding)) if adding.at == 2 => drop(adding.length.pop()),
             Some(Form::Add(adding)) if adding.at == 3 => drop(adding.lane_name.pop()),
             Some(Form::Rename { lane, at: 1, .. }) => drop(lane.pop()),
+            Some(Form::Phases { rows, typed, at }) => match rows.get_mut(*at) {
+                Some((name, _, short)) => {
+                    name.pop();
+                    *short = None;
+                }
+                None => drop(typed.pop()),
+            },
             Some(Form::Who { typed, .. }) => drop(typed.pop()),
             Some(Form::Rename { typed, .. } | Form::Length { typed, .. } | Form::Snapshot { typed }) => drop(typed.pop()),
             Some(Form::Report { days, at: 1, .. }) => drop(days.pop()),

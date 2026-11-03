@@ -505,6 +505,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
             Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
             Some(Form::Rename { .. }) => vec![("↑↓", "name or lane"), ("Enter", "rename"), ("Esc", "keep as it is")],
             Some(Form::Snapshot { .. }) => vec![("Enter", "keep it"), ("Esc", "not now")],
+            Some(Form::Phases { .. }) => vec![("↑↓", "phase"), ("←→", "where it ends"), ("Del", "remove"), ("Enter", "keep"), ("Esc", "keep as it is")],
             Some(Form::Leave) => vec![("Enter", "keep and quit"), ("Esc", "discard and quit"), ("←→", "keep changing")],
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
@@ -774,6 +775,7 @@ fn roadmap(app: &App, palette: &Palette, frame: &mut Frame, inks: &Inks, body: R
             let h = l.chart.height.min(match app.form {
                 Some(Form::Rename { .. }) => 12,
                 Some(Form::Snapshot { .. }) => 11,
+                Some(Form::Phases { ref rows, .. }) => ((190.0 + 40.0 * (rows.len() + 1) as f32) / 21.0).ceil() as u16,
                 Some(Form::Leave) => 10,
                 Some(Form::Remove { item }) => match app.removal(item) {
                     Ok((_, words)) => (255.0 + 28.0 * words.len().max(1) as f32) / 21.0,
@@ -1129,6 +1131,12 @@ mod tests {
         look(&mut kept, "snapshot dialog");
         kept.form = None;
         kept.screen = Screen::Roadmap;
+        kept.start_phases();
+        look(&mut kept, "phases dialog");
+        kept.form_move(-1);
+        "A phase with a rather long name for the end".chars().for_each(|c| kept.form_type(c));
+        look(&mut kept, "phases dialog, a new one");
+        kept.form = None;
         (0..12).for_each(|_| kept.try_length(1));
         assert!(!kept.may_quit());
         look(&mut kept, "quit with a what-if");
@@ -2286,5 +2294,43 @@ mod tests {
         assert!(!kept.may_quit());
         kept.keep_form();
         assert!(kept.quit && kept.before.is_none() && kept.unsaved && kept.plan.items[kept.selected].duration == length + 3, "Enter keeps and quits");
+    }
+
+    #[test]
+    fn e_edits_the_phases_as_one_change() {
+        let mut app = app();
+        app.screen = Screen::Roadmap;
+        let before = app.plan.phases.clone();
+        let found = crate::actions::find(&app, "edit the phases");
+        assert_eq!(found.first().map(|found| found.0), Some(crate::actions::Action::Phases));
+        app.start_phases();
+        let (rows, placements) = screen(&app, 170, 50);
+        let svg: String = placements.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("PHASES · CUSTOMER PORTAL V1") && svg.contains("‹ Requirements · Fri 27 Nov ›") && svg.contains("New phase") && has(&rows, "←→ where it ends") && has(&rows, "Del remove"), "{rows:?}");
+
+        app.form_move(1);
+        app.form_change(1);
+        let Some(Form::Phases { rows, .. }) = &app.form else { panic!() };
+        let moved = app.plan.items[rows[1].1].id.clone();
+        assert_ne!(moved, "design-sign-off");
+        " work".chars().for_each(|c| app.form_type(c));
+        app.form_move(1);
+        app.form_delete();
+        while !matches!(&app.form, Some(Form::Phases { rows, at, .. }) if *at == rows.len()) {
+            app.form_move(1);
+        }
+        "Launch".chars().for_each(|c| app.form_type(c));
+        app.keep_form();
+        let names: Vec<&str> = app.plan.phases.iter().map(|phase| phase.name.as_str()).collect();
+        assert_eq!(names, ["Requirements", "Design work", "Beta & acceptance", "Launch"]);
+        assert_eq!(app.plan.phases[1].until, moved);
+        assert_eq!(app.plan.phases[3].until, "launch");
+        app.undo();
+        assert_eq!(app.plan.phases, before);
+
+        app.start_phases();
+        (0.."Requirements".len()).for_each(|_| app.form_back());
+        app.keep_form();
+        assert_eq!(app.message.as_deref(), Some("Name every phase"));
     }
 }

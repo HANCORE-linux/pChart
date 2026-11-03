@@ -190,6 +190,15 @@ Show the roadmap with the dates of the last snapshot dashed.
 .TP
 .B d
 Overview, Standard or Full.
+.TP
+.B e
+Edit the phases: \(ua\(da chooses one, typing renames it, \(<-\(-> moves the item it ends with,
+.B Del
+removes it, and
+.I + New phase
+adds one after the last;
+.B Enter
+keeps all of it as one change.
 .SS Network
 Before every piece of work has a length, the second screen shows how the plan is built.
 .TP
@@ -558,6 +567,9 @@ and its fields:
 .TP
 .B rename_lane
 {"op": "rename_lane", "lane": LANE, "name": NAME}
+.TP
+.B phases
+{"op": "phases", "phases": [{"name": NAME, "until": ID, "short": NAME | null}]}
 .SH THE PLAN FILE
 A plan file is TOML.
 It starts with
