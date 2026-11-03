@@ -158,7 +158,13 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 }
                 field(s, left, top + 3.0 * u, name_w, name, chosen, u, p.ink, p.bright);
                 let item = &app.plan.items[*until];
-                let end = format!("{} · {}", item.name, pchart_core::text::day(app.schedule.slots[*until].planned.finish));
+                let fixed = match (item.on, item.no_earlier_than, item.no_later_than) {
+                    (Some(_), _, _) => " · fixed",
+                    (_, _, Some(_)) => " · at the latest",
+                    (_, Some(_), _) => " · not before",
+                    _ => "",
+                };
+                let end = format!("{} · {}{fixed}", item.name, pchart_core::text::day(app.schedule.slots[*until].planned.finish));
                 let end = if chosen { format!("‹ {end} ›") } else { end };
                 let after = bits::runs(s, end_x, top + 22.0 * u, 16.6 * u, &[(&fit(&end, 16.6 * u, room - name_w - 120.0 * u), if chosen { p.bright } else { p.ink }, chosen)]);
                 if let Some((_, from, to)) = spans.iter().find(|(span, ..)| span == name.trim()) {
@@ -180,7 +186,7 @@ pub fn dialog(app: &App, s: &mut Scene, x: f32, y: f32, width: f32, height: f32,
                 bits::runs(s, new_x + 14.0 * u, top + 22.0 * u, 16.6 * u, &[("New phase", p.muted, false)]);
             }
             top += step;
-            let words = if chosen { "Type a name for a phase after the last one; ←→ then moves where it ends." } else { "Type to rename it, ←→ moves where it ends, Del removes it. The work stays as it is." };
+            let words = if chosen { "Type a name for a phase after the last one; ←→ then moves where it ends." } else { "Type to rename it, ←→ moves where it ends, Ctrl+D sets when it ends, Del removes it." };
             bits::runs(s, left, top + 20.0 * u, 15.0 * u, &[(&fit(words, 15.0 * u, room), p.dim, false)]);
             return;
         }

@@ -176,6 +176,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 KeyCode::Right => app.form_change(1),
                 KeyCode::Backspace => app.form_back(),
                 KeyCode::Delete => app.form_delete(),
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => app.phase_date(),
                 KeyCode::Char(c) => app.form_type(c),
                 _ => {}
             },

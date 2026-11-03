@@ -505,7 +505,7 @@ fn keys(app: &App, frame: &mut Frame, inks: &Inks, area: Rect) {
             Some(Form::Add(_)) => vec![("↑↓", "question"), ("←→", "change"), ("Enter", "add"), ("Esc", "keep as it is")],
             Some(Form::Rename { .. }) => vec![("↑↓", "name or lane"), ("Enter", "rename"), ("Esc", "keep as it is")],
             Some(Form::Snapshot { .. }) => vec![("Enter", "keep it"), ("Esc", "not now")],
-            Some(Form::Phases { .. }) => vec![("↑↓", "phase"), ("←→", "where it ends"), ("Del", "remove"), ("Enter", "keep"), ("Esc", "keep as it is")],
+            Some(Form::Phases { .. }) => vec![("↑↓", "phase"), ("←→", "where it ends"), ("Ctrl+D", "its date"), ("Del", "remove"), ("Enter", "keep"), ("Esc", "keep as it is")],
             Some(Form::Leave) => vec![("Enter", "keep and quit"), ("Esc", "discard and quit"), ("←→", "keep changing")],
             Some(Form::Remove { item }) if app.removal(*item).is_err() => vec![("Esc", "back")],
             Some(Form::Remove { .. }) => vec![("Enter", "remove"), ("Esc", "keep as it is")],
@@ -2332,5 +2332,25 @@ mod tests {
         (0.."Requirements".len()).for_each(|_| app.form_back());
         app.keep_form();
         assert_eq!(app.message.as_deref(), Some("Name every phase"));
+
+        app.form = None;
+        app.start_phases();
+        app.form_move(1);
+        assert!(has(&screen(&app, 200, 50).0, "Ctrl+D its date"));
+        " and UX".chars().for_each(|c| app.form_type(c));
+        app.phase_date();
+        let sign_off = app.plan.item("design-sign-off").unwrap();
+        assert!(app.form.is_none() && app.plan.phases[1].name == "Design and UX" && app.selected == sign_off && app.question.as_ref().is_some_and(|question| question.item == sign_off));
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("When is Design sign-off?"));
+        app.question = None;
+        let mut plan = app.plan.clone();
+        plan.items[sign_off].on = Some(jiff::civil::date(2027, 1, 8));
+        let schedule = pchart_core::schedule(&plan, &app.calendars, app.today).unwrap();
+        app.plan = plan;
+        app.schedule = schedule;
+        app.start_phases();
+        let svg: String = screen(&app, 170, 50).1.iter().map(|placement| placement.svg.as_str()).collect();
+        assert!(svg.contains("Design sign-off · Fri 08 Jan · fixed"), "{svg}");
     }
 }

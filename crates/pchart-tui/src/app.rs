@@ -867,6 +867,22 @@ impl App {
         Some(out.into_iter().map(|(_, phase)| phase).collect())
     }
 
+    /// Ctrl+D in the phases (pictures 82): keeps them as they are in the dialog, then asks when the chosen
+    /// phase ends, as Enter asks for the item it ends with on the roadmap.
+    pub fn phase_date(&mut self) {
+        let Some(Form::Phases { rows, at, .. }) = &self.form else { return };
+        let Some(&(_, until, _)) = rows.get(*at) else { return };
+        let until_id = self.plan.items[until].id.clone();
+        self.keep_form();
+        if self.form.is_some() {
+            return;
+        }
+        if let Some(index) = self.plan.item(&until_id) {
+            self.selected = index;
+            self.ask();
+        }
+    }
+
     /// Delete in a dialog: removes the chosen phase.
     pub fn form_delete(&mut self) {
         if let Some(Form::Phases { rows, at, .. }) = self.form.as_mut()
