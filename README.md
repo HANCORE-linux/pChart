@@ -4,7 +4,7 @@ Project charts in the terminal that check themselves.
 
 Pick a template, set the target date, and pChart schedules the rest backwards and forwards with holidays per team and place. It shows in plain language whether the date holds, who is waiting on whom and what is due next, and exports the same picture as PDF, SVG, PNG and Markdown. Real graphics in kitty, Ghostty and foot, never ASCII.
 
-**Status:** before the first release, for Arch Linux and Omarchy. The plan is in [docs/PLAN.md](docs/PLAN.md), the approved design in [docs/design](docs/design/).
+**Status:** first release, 0.2.0, for Arch Linux and Omarchy. The plan is in [docs/PLAN.md](docs/PLAN.md), the approved design in [docs/design](docs/design/).
 
 ![pChart in use: pchart starts in a workspace, opens a project, why a date is set, the buffer added from the checks, the export, how busy each person is, and a report from the team taken into the plan](docs/pchart.gif)
 

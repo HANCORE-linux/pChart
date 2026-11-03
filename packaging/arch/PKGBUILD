@@ -1,8 +1,8 @@
 # Maintainer: HANCORE
 
 pkgname=pchart
-pkgver=0.1.12
-pkgrel=2
+pkgver=0.2.0
+pkgrel=1
 pkgdesc='Project charts in the terminal that check themselves'
 arch=('x86_64' 'aarch64')
 license=('MIT' 'OFL-1.1')
