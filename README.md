@@ -25,6 +25,8 @@ make
 sudo make install
 ```
 
+To remove it, run `sudo make uninstall` in the same folder. Your plans and `~/.local/state/pchart` stay.
+
 ## Start
 
 ```sh
