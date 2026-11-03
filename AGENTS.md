@@ -58,6 +58,7 @@ The look of pChart is the maintainer's. **Design changes are not allowed, only p
 
 | Command | Use |
 |---|---|
+| `make`, `make install`, `make package` | build; install to `PREFIX` (`/usr/local`); the Arch package and a pacman repository of its own in `dist/repo/ARCH` from the last commit, signed when `PCHART_SIGN_KEY` names a GPG key; it uploads nothing |
 | `pchart help --json` | every command, option, exit code and edit |
 | `pchart new PLAN --template ID --target DATE` | a new plan from a template (`new-application`, `website-relaunch`, `product-launch`, `empty`); never writes over a file; `--no-dates` keeps only how it is built, without lengths |
 | `pchart add PLAN ID --lane L --name N` | work without `--duration` has no length yet; the plan has no dates until every piece of work has one, and `situation` names what is missing |

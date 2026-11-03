@@ -31,6 +31,15 @@ cargo build --release
 
 1–4 switch between the situation, the roadmap, the checks and the export; ↑↓ chooses a statement, an item or a check, Enter shows it in the roadmap, d changes the detail level, Esc goes back to the situation, q quits. On the export screen ←→ changes the view or the audience, Space switches a format on or off and Enter writes the files to `export/` next to the plan.
 
+## Install
+
+```sh
+make
+sudo make install
+```
+
+`make package` builds the Arch package and a pacman repository from it in `dist/repo`.
+
 ## Terminals
 
 kitty, Ghostty and foot. Terminals without kitty graphics or sixel pictures are not supported.
