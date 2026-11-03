@@ -175,6 +175,8 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 KeyCode::Left => app.form_change(-1),
                 KeyCode::Right => app.form_change(1),
                 KeyCode::Backspace => app.form_back(),
+                KeyCode::Delete => app.form_delete(),
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => app.phase_date(),
                 KeyCode::Char(c) => app.form_type(c),
                 _ => {}
             },
@@ -335,6 +337,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
                 (Screen::Roadmap, KeyCode::Char('r')) if app.level != pchart_draw::Level::Overview => app.start_rename(),
                 (Screen::Roadmap, KeyCode::Char('w')) if app.level != pchart_draw::Level::Overview => app.start_waits(),
                 (Screen::Roadmap, KeyCode::Char('x') | KeyCode::Delete) if app.level != pchart_draw::Level::Overview => app.start_remove(),
+                (Screen::Roadmap, KeyCode::Char('e')) if app.dated() => app.start_phases(),
                 (Screen::Roadmap, KeyCode::Left) if app.level != pchart_draw::Level::Overview => app.try_length(-1),
                 (Screen::Roadmap, KeyCode::Right) if app.level != pchart_draw::Level::Overview => app.try_length(1),
                 _ => {}

@@ -2,7 +2,7 @@ use jiff::civil::Date;
 use serde::Deserialize;
 
 use crate::Error;
-use crate::model::{Item, Lane, Note, Plan};
+use crate::model::{Item, Lane, Note, Phase, Plan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,6 +39,8 @@ pub enum Edit {
     NoteAt { lane: String, date: Date, note: Option<String> },
     /// The phase called `phase` ends with `until`.
     Phase { phase: String, until: String },
+    /// The phases of the plan, in their order, instead of those it has (pictures 81).
+    Phases { phases: Vec<Phase> },
     /// A new lane at the bottom, called `name`, without a place.
     AddLane { lane: String, name: String },
     RenameLane { lane: String, name: String },
@@ -156,6 +158,15 @@ impl Edit {
                     next.notes.sort_by(|a, b| (a.date, &a.lane).cmp(&(b.date, &b.lane)));
                 }
             }
+            Edit::Phases { phases } => {
+                for phase in phases {
+                    if phase.name.trim().is_empty() {
+                        return Err(Error::Plan("a phase needs a name".into()));
+                    }
+                    find(&phase.until)?;
+                }
+                next.phases = phases.clone();
+            }
             Edit::Phase { phase, until } => {
                 find(until)?;
                 let target = next.phases.iter_mut().find(|other| &other.name == phase).ok_or_else(|| Error::Plan(format!("there is no phase \"{phase}\"")))?;
@@ -261,6 +272,16 @@ mod tests {
         let err = Edit::Important { item: "frontend".into(), important: true }.apply(&sample()).unwrap_err();
         assert_eq!(err.to_string(), "\"frontend\" is not a milestone; only milestones are marked important");
         assert!(Edit::NoteAt { lane: "nowhere".into(), date: jiff::civil::date(2027, 1, 4), note: Some("x".into()) }.apply(&sample()).is_err());
+    }
+
+    #[test]
+    fn the_phases_are_set_all_at_once() {
+        let list = edits(r#"[{"op": "phases", "phases": [{"name": "Discovery", "until": "requirements"}, {"name": "Build", "until": "feature-freeze", "short": "B"}]}]"#);
+        let plan = apply_all(&sample(), &list).unwrap();
+        assert_eq!(plan.phases.iter().map(|phase| (phase.name.as_str(), phase.until.as_str(), phase.short.as_deref())).collect::<Vec<_>>(), [("Discovery", "requirements", None), ("Build", "feature-freeze", Some("B"))]);
+        assert_eq!(edits(r#"[{"op": "phases", "phases": [{"name": " ", "until": "api"}]}]"#)[0].apply(&sample()).unwrap_err().to_string(), "a phase needs a name");
+        assert!(edits(r#"[{"op": "phases", "phases": [{"name": "X", "until": "nothing"}]}]"#)[0].apply(&sample()).is_err());
+        assert!(apply_all(&sample(), &edits(r#"[{"op": "phases", "phases": []}]"#)).unwrap().phases.is_empty());
     }
 
     #[test]

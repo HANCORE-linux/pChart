@@ -67,6 +67,7 @@ pub const EDITS: &[(&str, &str)] = &[
     ("phase", r#"{"op": "phase", "phase": NAME, "until": ID}"#),
     ("add_lane", r#"{"op": "add_lane", "lane": ID, "name": NAME}"#),
     ("rename_lane", r#"{"op": "rename_lane", "lane": LANE, "name": NAME}"#),
+    ("phases", r#"{"op": "phases", "phases": [{"name": NAME, "until": ID, "short": NAME | null}]}"#),
 ];
 
 const FLAGS: &[&str] = &["--json", "--dry-run", "--on-track", "--risk", "--done", "--not-done", "--milestone", "--calculated", "--buffer", "--no-buffer", "--important", "--not-important", "--no-dates"];
