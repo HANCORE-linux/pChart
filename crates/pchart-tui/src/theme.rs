@@ -39,6 +39,7 @@ impl Theme {
     }
 
     /// Reads the Omarchy theme again when it changed, at most once a second; true when the palette did.
+    /// A theme it cannot read is Labra, as at the start.
     pub fn refresh(&mut self, now: Instant) -> bool {
         let Some(live) = &mut self.live else { return false };
         if now.saturating_duration_since(live.checked) < Duration::from_secs(1) {
@@ -50,13 +51,12 @@ impl Theme {
             return false;
         }
         live.stamp = stamp;
-        match read_live(live) {
-            Some(palette) if palette != self.palette => {
-                self.palette = palette;
-                true
-            }
-            _ => false,
+        let palette = read_live(live).unwrap_or(Palette::labra());
+        if palette == self.palette {
+            return false;
         }
+        self.palette = palette;
+        true
     }
 }
 
@@ -161,6 +161,26 @@ fn resolve(mut c: HashMap<String, String>, light_file: bool) -> HashMap<String, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_theme_that_changes_is_followed_and_one_that_cannot_be_read_is_labra() {
+        let dir = std::env::temp_dir().join(format!("pchart-theme-live-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("theme")).unwrap();
+        let colors = dir.join("theme/colors.toml");
+        std::fs::write(&colors, "background = \"#282828\"\nforeground = \"#d4be98\"\nred = \"#ea6962\"\nyellow = \"#d8a657\"\naccent = \"#7daea3\"\n").unwrap();
+        std::fs::write(dir.join("theme.name"), "gruvbox").unwrap();
+        let mut live = Live { colors: colors.clone(), name: dir.join("theme.name"), stamp: None, checked: Instant::now() };
+        live.stamp = stamp(&live);
+        let mut theme = Theme { palette: read_live(&live).unwrap(), ground: false, live: Some(live) };
+        assert_eq!(theme.palette.page, Color(0x28, 0x28, 0x28));
+        let later = Instant::now() + Duration::from_secs(2);
+        assert!(!theme.refresh(later), "nothing changed");
+        std::fs::write(&colors, "background = \"nope\"\n").unwrap();
+        std::fs::write(dir.join("theme.name"), "broken").unwrap();
+        assert!(theme.refresh(later + Duration::from_secs(2)) && theme.palette == Palette::labra());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn a_theme_by_name_paints_its_page_and_an_unknown_name_lists_the_themes() {

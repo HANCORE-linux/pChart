@@ -349,7 +349,7 @@ pub fn run(plan: Plan, calendars: Vec<Calendar>, today: Date, path: &Path, mut t
 /// The start (picture 54), for `pchart` without a plan: returns the plan to open, a new one written to
 /// `dir` or one opened before, or None when the user leaves.
 /// `calendars` gives the calendars of a plan's lanes, for the plans opened before.
-pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<Option<std::path::PathBuf>> {
+pub fn start(dir: &Path, today: Date, mut theme: Theme, calendars: &dyn Fn(&Plan) -> Vec<Calendar>) -> io::Result<Option<std::path::PathBuf>> {
     let picker = picker()?;
     let mut pictures = Pictures::start(Painter::new(picker, &theme.palette));
     let workspace = pchart_store::workspace(dir);
@@ -366,6 +366,10 @@ pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) ->
     start.workspace = workspace.map(|(_, name)| name);
     let mut terminal = ratatui::init();
     let result = loop {
+        if theme.refresh(Instant::now()) {
+            start.palette = theme.palette;
+            pictures.set_palette(theme.palette);
+        }
         pictures.receive();
         let mut waiting = false;
         if let Err(err) = terminal.draw(|frame| {
@@ -374,7 +378,8 @@ pub fn start(dir: &Path, today: Date, theme: Theme, calendars: &dyn Fn(&Plan) ->
         }) {
             break Err(err);
         }
-        match event::poll(if waiting { Duration::from_millis(8) } else { Duration::from_secs(60) }) {
+        let idle = if theme.live() { Duration::from_secs(1) } else { Duration::from_secs(60) };
+        match event::poll(if waiting { Duration::from_millis(8) } else { idle }) {
             Ok(false) => continue,
             Ok(true) => {}
             Err(err) => break Err(err),
