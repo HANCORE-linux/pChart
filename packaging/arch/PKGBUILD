@@ -2,12 +2,12 @@
 
 pkgname=pchart
 pkgver=0.1.12
-pkgrel=1
+pkgrel=2
 pkgdesc='Project charts in the terminal that check themselves'
 arch=('x86_64' 'aarch64')
 license=('MIT' 'OFL-1.1')
-depends=('gcc-libs' 'glibc')
-makedepends=('cargo' 'git')
+depends=('glibc' 'libgcc')
+makedepends=('cargo')
 optdepends=(
   'foot: pictures in the terminal (sixel)'
   'ghostty: pictures in the terminal (kitty graphics)'

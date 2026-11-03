@@ -20,7 +20,7 @@ Pick a template, set the target date, and pChart schedules the rest backwards an
 On Arch Linux and Omarchy, from this folder:
 
 ```sh
-sudo pacman -S --needed rust
+sudo pacman -S --needed rust make
 make
 sudo make install
 ```
